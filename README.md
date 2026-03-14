@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # MyLife — Personal Dashboard
 
 Your personal life management hub. Finance, lifestyle, everything in one place.
@@ -150,3 +151,6 @@ The three finance modules (Expenses, Budget, Portfolio) share the `finance_ledge
 - **Portfolio as % of net worth**
 
 All calculated in real time as you add data to any module.
+=======
+# MyLife
+>>>>>>> c2e6e9281fe9445940d81a14becd53f66e6131c8
