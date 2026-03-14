@@ -48,7 +48,10 @@ export default function ComingSoon({ icon, title, description, color, features, 
         </div>
       </div>
 
-      <Link href="/dashboard" className="text-sm transition-colors text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+      <Link href="/dashboard" className="text-sm transition-colors"
+        style={{ color: "var(--text-muted)" }}
+        onMouseOver={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+        onMouseOut={(e) => (e.currentTarget.style.color = "var(--text-muted)")}>
         ← Back to overview
       </Link>
     </div>

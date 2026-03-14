@@ -904,9 +904,6 @@ video {
 .h-2 {
   height: 0.5rem;
 }
-.h-4 {
-  height: 1rem;
-}
 .h-6 {
   height: 1.5rem;
 }
@@ -940,9 +937,6 @@ video {
 .w-2 {
   width: 0.5rem;
 }
-.w-4 {
-  width: 1rem;
-}
 .w-48 {
   width: 12rem;
 }
@@ -975,15 +969,6 @@ video {
 }
 .flex-shrink-0 {
   flex-shrink: 0;
-}
-@keyframes spin {
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-.animate-spin {
-  animation: spin 1s linear infinite;
 }
 .cursor-default {
   cursor: default;
@@ -1102,10 +1087,6 @@ video {
   --tw-bg-opacity: 1;
   background-color: rgb(26 29 36 / var(--tw-bg-opacity, 1));
 }
-.bg-white {
-  --tw-bg-opacity: 1;
-  background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1));
-}
 .bg-gradient-to-l {
   background-image: linear-gradient(to left, var(--tw-gradient-stops));
 }
@@ -1158,6 +1139,10 @@ video {
 .py-2\.5 {
   padding-top: 0.625rem;
   padding-bottom: 0.625rem;
+}
+.py-3 {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
 }
 .py-3\.5 {
   padding-top: 0.875rem;
@@ -1258,13 +1243,9 @@ video {
   --tw-text-opacity: 1;
   color: rgb(245 166 35 / var(--tw-text-opacity, 1));
 }
-.text-gray-500 {
+.text-red-400 {
   --tw-text-opacity: 1;
-  color: rgb(107 114 128 / var(--tw-text-opacity, 1));
-}
-.text-gray-800 {
-  --tw-text-opacity: 1;
-  color: rgb(31 41 55 / var(--tw-text-opacity, 1));
+  color: rgb(248 113 113 / var(--tw-text-opacity, 1));
 }
 .text-sidebar-text {
   --tw-text-opacity: 1;
@@ -1278,8 +1259,13 @@ video {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-.opacity-25 {
-  opacity: 0.25;
+.placeholder-sidebar-text::-moz-placeholder {
+  --tw-placeholder-opacity: 1;
+  color: rgb(139 143 168 / var(--tw-placeholder-opacity, 1));
+}
+.placeholder-sidebar-text::placeholder {
+  --tw-placeholder-opacity: 1;
+  color: rgb(139 143 168 / var(--tw-placeholder-opacity, 1));
 }
 .opacity-5 {
   opacity: 0.05;
@@ -1287,8 +1273,9 @@ video {
 .opacity-60 {
   opacity: 0.6;
 }
-.opacity-75 {
-  opacity: 0.75;
+.outline-none {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
 }
 .filter {
   filter: var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow);
@@ -1404,23 +1391,30 @@ body {
 .hover\:border-accent\/40:hover {
   border-color: rgb(245 166 35 / 0.4);
 }
-.hover\:bg-gray-50:hover {
+.hover\:bg-amber-500:hover {
   --tw-bg-opacity: 1;
-  background-color: rgb(249 250 251 / var(--tw-bg-opacity, 1));
+  background-color: rgb(245 158 11 / var(--tw-bg-opacity, 1));
 }
 .hover\:bg-sidebar-hover:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(26 29 36 / var(--tw-bg-opacity, 1));
 }
+.hover\:text-\[var\(--text-secondary\)\]:hover {
+  color: var(--text-secondary);
+}
 .hover\:text-white:hover {
   --tw-text-opacity: 1;
   color: rgb(255 255 255 / var(--tw-text-opacity, 1));
 }
+.focus\:border-accent:focus {
+  --tw-border-opacity: 1;
+  border-color: rgb(245 166 35 / var(--tw-border-opacity, 1));
+}
 .disabled\:cursor-not-allowed:disabled {
   cursor: not-allowed;
 }
-.disabled\:opacity-60:disabled {
-  opacity: 0.6;
+.disabled\:opacity-50:disabled {
+  opacity: 0.5;
 }
 .group:hover .group-hover\:border-accent\/40 {
   border-color: rgb(245 166 35 / 0.4);
