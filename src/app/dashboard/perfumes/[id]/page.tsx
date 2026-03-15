@@ -356,15 +356,34 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         <div style={sectionStyle}>
           <span style={labelStyle}>Details</span>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:16 }}>
-            {([["Longevity","longevity"],["Projection","projection"],["Clone / similar","cloneSimilar"]] as const).map(([label, key]) => (
-              <div key={key}>
-                <span style={labelStyle}>{label}</span>
-                {!isEdit
-                  ? <div style={{ ...valueStyle, color: item[key] ? V.text : V.faint }}>{item[key] || "—"}</div>
-                  : <input style={inputStyle} value={item[key] ?? ""} onChange={e => update({ [key]: e.target.value })} />
-                }
-              </div>
-            ))}
+            {/* Longevity */}
+            <div>
+              <span style={labelStyle}>Longevity</span>
+              {!isEdit
+                ? <div style={{ ...valueStyle, color: item.longevity ? V.text : V.faint }}>{item.longevity || "—"}</div>
+                : <select style={{ ...inputStyle, cursor:"pointer" }} value={item.longevity} onChange={e => update({ longevity: e.target.value })}>
+                    {["Unknown","Poor (< 2hr)","Weak (2-4hr)","Moderate (4-6hr)","Long (6-8hr)","Very Long (> 8hr)","Beast Mode (> 12hr)"].map(o => <option key={o}>{o}</option>)}
+                  </select>
+              }
+            </div>
+            {/* Projection (sillage) */}
+            <div>
+              <span style={labelStyle}>Projection</span>
+              {!isEdit
+                ? <div style={{ ...valueStyle, color: item.sillage ? V.text : V.faint }}>{item.sillage || "—"}</div>
+                : <select style={{ ...inputStyle, cursor:"pointer" }} value={item.sillage} onChange={e => update({ sillage: e.target.value })}>
+                    {["Unknown","Intimate","Soft","Moderate","Strong","Enormous"].map(o => <option key={o}>{o}</option>)}
+                  </select>
+              }
+            </div>
+            {/* Clone / similar */}
+            <div>
+              <span style={labelStyle}>Clone / similar</span>
+              {!isEdit
+                ? <div style={{ ...valueStyle, color: item.cloneSimilar ? V.text : V.faint }}>{item.cloneSimilar || "—"}</div>
+                : <input style={inputStyle} value={item.cloneSimilar ?? ""} onChange={e => update({ cloneSimilar: e.target.value })} />
+              }
+            </div>
             <div>
               <span style={labelStyle}>Value</span>
               {!isEdit
