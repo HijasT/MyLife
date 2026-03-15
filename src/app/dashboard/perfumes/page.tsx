@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { saveToCache, loadFromCache, markSynced } from "@/hooks/useSyncStatus";
 
@@ -101,6 +102,7 @@ function ValueBadge({ v }: { v: Perfume["value"] }) {
 // ── Main page ──────────────────────────────────────────────────────────────
 export default function PerfumesPage() {
   const supabase = createClient();
+  const router = useRouter();
   const [userId, setUserId] = useState<string|null>(null);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Perfume[]>([]);
@@ -108,20 +110,9 @@ export default function PerfumesPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("wardrobe");
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("brand_asc");
-  const [selectedId, setSelectedId] = useState<string|null>(null);
-  const [isEditMode, setIsEditMode] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [addMode, setAddMode] = useState<"perfume"|"bottle">("perfume");
   const [addContextId, setAddContextId] = useState<string|null>(null);
-  const [noteManagerOpen, setNoteManagerOpen] = useState(false);
-  const [weatherManagerOpen, setWeatherManagerOpen] = useState(false);
-  const [globalNotes, setGlobalNotes] = useState<string[]>([]);
-  const [noteInput, setNoteInput] = useState("");
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const [archiveChoice, setArchiveChoice] = useState<"Sold"|"Emptied"|"Gifted">("Emptied");
-  const [removeOpen, setRemoveOpen] = useState(false);
-  const [photoOpen, setPhotoOpen] = useState(false);
-  const [photoInput, setPhotoInput] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -196,41 +187,7 @@ export default function PerfumesPage() {
   }
 
   function openDetail(id: string) {
-    setSelectedId(id); setIsEditMode(false); setNoteManagerOpen(false); setWeatherManagerOpen(false);
-    document.body.style.overflow = "hidden";
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-  function closeDetail() {
-    setSelectedId(null); setIsEditMode(false); setArchiveOpen(false); setRemoveOpen(false);
-    setPhotoOpen(false); setNoteManagerOpen(false); setWeatherManagerOpen(false);
-    document.body.style.overflow = "";
-  }
-
-  async function updateItem(partial: Partial<Perfume>) {
-    if (!selected) return;
-    setItems(p=>p.map(x=>x.id===selected.id?{...x,...partial}:x));
-    const db: Record<string,unknown> = {};
-    if (partial.ratingStars!==undefined) db.rating_stars=partial.ratingStars;
-    if (partial.notesTags!==undefined) db.notes_tags=partial.notesTags;
-    if (partial.weatherTags!==undefined) db.weather_tags=partial.weatherTags;
-    if (partial.genderScale!==undefined) db.gender_scale=partial.genderScale;
-    if (partial.longevity!==undefined) db.longevity=partial.longevity;
-    if (partial.sillage!==undefined) db.sillage=partial.sillage;
-    if (partial.value!==undefined) db.value_rating=partial.value;
-    if (partial.cloneSimilar!==undefined) db.clone_similar=partial.cloneSimilar;
-    if (partial.notesText!==undefined) db.notes_text=partial.notesText;
-    if (partial.imageUrl!==undefined) db.image_url=partial.imageUrl;
-    if (Object.keys(db).length) await supabase.from("perfumes").update(db).eq("id",selected.id);
-  }
-
-  async function updateBottle(perfumeId: string, bottleId: string, partial: Partial<Bottle>) {
-    setItems(p=>p.map(x=>x.id!==perfumeId?x:{...x,bottles:x.bottles.map(b=>b.id!==bottleId?b:{...b,...partial})}));
-    const db: Record<string,unknown> = {};
-    if (partial.bottleType!==undefined) db.bottle_type=partial.bottleType;
-    if (partial.bottleSizeMl!==undefined) db.bottle_size_ml=partial.bottleSizeMl;
-    if (partial.status!==undefined) db.status=partial.status;
-    if (partial.usage!==undefined) db.usage=partial.usage;
-    if (Object.keys(db).length) await supabase.from("perfume_bottles").update(db).eq("id",bottleId);
+    router.push(`/dashboard/perfumes/${id}`);
   }
 
   async function doAdd() {
@@ -247,64 +204,22 @@ export default function PerfumesPage() {
           newItem.bottles.push({ id:bd.id, bottleSizeMl:bd.bottle_size_ml, bottleType:bd.bottle_type, status:bd.status, usage:bd.usage });
           const price = safeNum(af.price,0);
           if (price>0 || af.shop.trim()) {
-            const { data:pur } = await supabase.from("perfume_purchases").insert({ perfume_id:pd.id, bottle_id:bd.id, user_id:userId, date:af.date||nowIso(), ml:size, price, currency:af.currency, shop_name:af.shop, shop_link:af.shopLink||null }).select("*").single();
-            if (pur) setPurchases(p=>[dbToPurchase(pur),...p]);
+            await supabase.from("perfume_purchases").insert({ perfume_id:pd.id, bottle_id:bd.id, user_id:userId, date:af.date||nowIso(), ml:size, price, currency:af.currency, shop_name:af.shop, shop_link:af.shopLink||null });
           }
         }
       }
       setItems(p=>[newItem,...p]);
-      setShowAdd(false); toast("Added successfully");
+      setShowAdd(false);
+      router.push(`/dashboard/perfumes/${pd.id}`);
     } else {
       const perfumeId = addContextId;
       if (!perfumeId) return;
       const size = safeNum(af.sizeMl,30);
       const { data:bd, error } = await supabase.from("perfume_bottles").insert({ perfume_id:perfumeId, user_id:userId, bottle_size_ml:size, bottle_type:af.bottleType, status:"In collection", usage:af.usage }).select("*").single();
       if (error||!bd) { toast("Failed","error"); return; }
-      const price = safeNum(af.price,0);
-      const { data:pur } = await supabase.from("perfume_purchases").insert({ perfume_id:perfumeId, bottle_id:bd.id, user_id:userId, date:af.date||nowIso(), ml:size, price, currency:af.currency, shop_name:af.shop, shop_link:af.shopLink||null }).select("*").single();
-      setItems(p=>p.map(x=>x.id!==perfumeId?x:{...x,bottles:[...x.bottles,{id:bd.id,bottleSizeMl:bd.bottle_size_ml,bottleType:bd.bottle_type,status:bd.status,usage:bd.usage}]}));
-      if (pur) setPurchases(p=>[dbToPurchase(pur),...p]);
+      await supabase.from("perfume_purchases").insert({ perfume_id:perfumeId, bottle_id:bd.id, user_id:userId, date:af.date||nowIso(), ml:size, price:safeNum(af.price,0), currency:af.currency, shop_name:af.shop, shop_link:af.shopLink||null });
       setShowAdd(false); toast("Bottle added");
     }
-  }
-
-  async function doRemove() {
-    if (!selected) return;
-    await supabase.from("perfumes").delete().eq("id",selected.id);
-    setItems(p=>p.filter(x=>x.id!==selected.id));
-    setPurchases(p=>p.filter(x=>x.perfumeId!==selected.id));
-    toast("Removed"); closeDetail();
-  }
-
-  async function doArchive() {
-    if (!selected||selected.status==="wishlist") { setArchiveOpen(false); return; }
-    await supabase.from("perfumes").update({status:"archive",archive_reason:archiveChoice}).eq("id",selected.id);
-    setItems(p=>p.map(x=>x.id===selected.id?{...x,status:"archive",archiveReason:archiveChoice}:x));
-    setArchiveOpen(false); toast(`Archived as ${archiveChoice}`);
-  }
-
-  async function doAddToWishlist() {
-    if (!selected||!userId) return;
-    if (selected.status==="wishlist") { toast("Already in wishlist","info"); return; }
-    const { data } = await supabase.from("perfumes").insert({ user_id:userId, brand:selected.brand, model:selected.model, status:"wishlist", image_url:selected.imageUrl, rating_stars:selected.ratingStars, notes_tags:selected.notesTags, weather_tags:selected.weatherTags, gender_scale:selected.genderScale, longevity:selected.longevity, sillage:selected.sillage, value_rating:selected.value, clone_similar:selected.cloneSimilar, notes_text:selected.notesText }).select("*").single();
-    if (data) { setItems(p=>[...p,{...selected,id:data.id,status:"wishlist",bottles:[],archiveReason:undefined}]); toast("Added to wishlist"); }
-  }
-
-  async function uploadPhoto(file: File): Promise<string | null> {
-    if (!userId || !selected) return null;
-    const ext = file.name.split(".").pop() ?? "jpg";
-    const path = `${userId}/${selected.id}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from("aromatica").upload(path, file, { upsert: true });
-    if (error) { toast("Upload failed: " + error.message, "error"); return null; }
-    const { data } = supabase.storage.from("aromatica").getPublicUrl(path);
-    return data.publicUrl;
-  }
-
-  async function shareItem() {
-    if (!selected) return;
-    const text = `${selected.brand} — ${selected.model}\n⭐ ${selected.ratingStars?.toFixed(1)??"n/a"}/5\n🌿 ${selected.notesTags.join(", ")||"—"}\n🌦 ${selected.weatherTags.join(", ")||"—"}\n👤 ${genderLabel(selected.genderScale)}\n⏱ ${selected.longevity}\n💨 ${selected.sillage}\n💰 ${selected.value}\n🔗 ${selected.cloneSimilar||"—"}`;
-    try { await navigator.clipboard.writeText(text); toast("Copied to clipboard"); }
-    catch { toast("Clipboard blocked","error"); }
   }
 
   function downloadCsv() {
@@ -501,7 +416,7 @@ export default function PerfumesPage() {
         ) : (
           <div className="aro-grid">
             {tabItems.map(item => (
-              <button key={item.id} className="aro-card" onClick={()=>openDetail(item.id)}>
+              <button key={item.id} className="aro-card" onClick={()=>router.push(`/dashboard/perfumes/${item.id}`)}>
                 {item.imageUrl ? <img className="aro-card-img" src={item.imageUrl} alt="" /> : <div className="aro-card-img-placeholder">🌸</div>}
                 <div className="aro-card-body">
                   <div className="aro-card-brand">{item.brand}</div>
