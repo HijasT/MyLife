@@ -121,6 +121,27 @@ export default function PerfumesPage() {
     archive: items.filter(x => x.status === "archive").length,
   }), [items]);
 
+  // Stats per tab: total items + total cost
+  const tabStats = useMemo(() => {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const cutoff = thirtyDaysAgo.toISOString().slice(0, 10);
+
+    const calc = (status: PerfumeStatus) => {
+      const list = items.filter(x => x.status === status);
+      const ids = new Set(list.map(x => x.id));
+      const paid = purchases.filter(p => ids.has(p.perfumeId) && p.price > 0);
+      const total = paid.reduce((s, p) => s + safeNum(p.price), 0);
+      const currency = paid[0]?.currency ?? "AED";
+      return { count: list.length, total, currency };
+    };
+
+    // "New" perfume ids — purchased within last 30 days
+    const newIds = new Set(purchases.filter(p => p.date >= cutoff && p.price > 0).map(p => p.perfumeId));
+
+    return { wardrobe: calc("wardrobe"), wishlist: calc("wishlist"), archive: calc("archive"), newIds };
+  }, [items, purchases]);
+
   const tabItems = useMemo(() => {
     const statusMap: Record<TabKey, PerfumeStatus | null> = { wardrobe: "wardrobe", wishlist: "wishlist", archive: "archive", purchases: null };
     const s = statusMap[activeTab];
@@ -234,6 +255,18 @@ export default function PerfumesPage() {
         ))}
       </div>
 
+      {/* Tab stats bar */}
+      {activeTab !== "purchases" && (() => {
+        const s = tabStats[activeTab as "wardrobe"|"wishlist"|"archive"];
+        return s && s.count > 0 ? (
+          <div style={{ margin:"10px 24px 0", padding:"10px 16px", background:V.card, border:`1px solid ${V.border}`, borderRadius:12, display:"flex", gap:20, flexWrap:"wrap", fontSize:13 }}>
+            <span style={{ color:V.muted }}><strong style={{ color:V.text, fontWeight:700 }}>{s.count}</strong> perfumes</span>
+            {s.total > 0 && <span style={{ color:V.muted }}>Total spent: <strong style={{ color:V.accent, fontWeight:700 }}>{s.currency} {s.total.toFixed(2)}</strong></span>}
+            {tabStats.newIds.size > 0 && activeTab === "wardrobe" && <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {[...tabStats.newIds].filter(id => items.find(x=>x.id===id&&x.status==="wardrobe")).length} added this month</span>}
+          </div>
+        ) : null;
+      })()}
+
       {/* Search + sort */}
       {activeTab !== "purchases" && (
         <div style={{ padding:"14px 24px", display:"flex", gap:10, flexWrap:"wrap" }}>
@@ -270,13 +303,16 @@ export default function PerfumesPage() {
                     <div style={{ padding:"12px 14px 14px" }}>
                       <div style={{ fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:V.faint, marginBottom:2 }}>{item.brand}</div>
                       <div style={{ fontSize:14, fontWeight:700, marginBottom:8, lineHeight:1.3 }}>{item.model}</div>
-                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, flexWrap:"wrap" }}>
                         <Stars value={item.ratingStars} size={12} />
-                        <span style={{ fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:999, textTransform:"uppercase",
-                          background: item.status==="wardrobe"?"rgba(245,166,35,0.12)":item.status==="wishlist"?"rgba(99,102,241,0.1)":"rgba(107,114,128,0.1)",
-                          color: item.status==="wardrobe"?"#d97706":item.status==="wishlist"?"#6366f1":"#6b7280" }}>
-                          {item.status}
-                        </span>
+                        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+                          {tabStats.newIds.has(item.id) && <span style={{ fontSize:9, fontWeight:800, padding:"2px 7px", borderRadius:999, background:"rgba(22,163,74,0.12)", color:"#16a34a", textTransform:"uppercase", letterSpacing:"0.06em" }}>New</span>}
+                          <span style={{ fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:999, textTransform:"uppercase",
+                            background: item.status==="wardrobe"?"rgba(245,166,35,0.12)":item.status==="wishlist"?"rgba(99,102,241,0.1)":"rgba(107,114,128,0.1)",
+                            color: item.status==="wardrobe"?"#d97706":item.status==="wishlist"?"#6366f1":"#6b7280" }}>
+                            {item.status}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </button>

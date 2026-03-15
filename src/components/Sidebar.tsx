@@ -75,7 +75,8 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
     <aside className={clsx("fixed left-0 top-0 h-full w-[240px] bg-sidebar flex flex-col border-r border-sidebar-border z-50 transition-transform duration-300 ease-in-out lg:translate-x-0", isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0")}>
       {/* Logo */}
       <div className="px-5 py-5 border-b border-sidebar-border flex items-center justify-between">
-        <Link href="/dashboard" onClick={close}>
+        <Link href="/dashboard" onClick={close} className="flex items-center gap-2">
+          <img src="/logo.png" alt="MyLife" className="h-8 w-8 rounded-lg object-contain" />
           <span className="font-display text-xl text-white tracking-tight">My<span className="text-accent italic">Life</span></span>
         </Link>
         <div className="flex items-center gap-1">
@@ -150,7 +151,10 @@ export default function Sidebar({ userEmail }: { userEmail: string }) {
         <button onClick={() => setIsOpen(true)} className="w-9 h-9 rounded-lg flex items-center justify-center text-sidebar-text hover:text-white hover:bg-sidebar-hover transition-all">
           <MenuIcon />
         </button>
-        <Link href="/dashboard"><span className="font-display text-xl text-white tracking-tight">My<span className="text-accent italic">Life</span></span></Link>
+        <Link href="/dashboard" className="flex items-center gap-2">
+          <img src="/logo.png" alt="MyLife" className="h-7 w-7 rounded-lg object-contain" />
+          <span className="font-display text-xl text-white tracking-tight">My<span className="text-accent italic">Life</span></span>
+        </Link>
         <button onClick={toggle} className="w-9 h-9 rounded-lg flex items-center justify-center text-sidebar-text hover:text-white hover:bg-sidebar-hover transition-all">
           {theme==="dark" ? <SunIcon /> : <MoonIcon />}
         </button>

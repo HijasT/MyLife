@@ -1,11 +1,4 @@
-export type ModuleId =
-  | "dashboard"
-  | "expenses"
-  | "budget"
-  | "portfolio"
-  | "perfumes"
-  | "expiry";
-
+export type ModuleId = "dashboard" | "expenses" | "budget" | "portfolio" | "perfumes" | "expiry" | "calendar";
 export type ModuleStatus = "active" | "coming-soon";
 
 export interface Module {

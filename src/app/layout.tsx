@@ -18,19 +18,22 @@ const playfair = Playfair_Display({
 
 export const metadata: Metadata = {
   title: "MyLife — Personal Dashboard",
-  description: "Your personal life management hub",
+  description: "The Super App for your Every Day",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/favicon.ico",    sizes: "32x32",   type: "image/x-icon" },
+      { url: "/icon-16.png",    sizes: "16x16",   type: "image/png" },
+      { url: "/icon-32.png",    sizes: "32x32",   type: "image/png" },
+      { url: "/icon-192.png",   sizes: "192x192", type: "image/png" },
+    ],
+    apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+  },
 };
 
-export const viewport = {
-  themeColor: "#0E1015",
-};
+export const viewport = { themeColor: "#0E1015" };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${dmSans.variable} ${playfair.variable}`}>
       <body className="font-sans antialiased">
