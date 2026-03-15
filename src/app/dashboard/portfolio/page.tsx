@@ -25,29 +25,36 @@ const toAed = (a:number,c:Currency) => a*(FX[c]??1);
 const fmtN = (n:number,d=2) => n.toLocaleString("en-AE",{minimumFractionDigits:d,maximumFractionDigits:d});
 const ASSET_ICONS:Record<AssetType,string> = {gold:"🥇",silver:"🥈",stock:"📊",crypto:"₿",other:"💼"};
 
-// Live price fetching via Yahoo Finance (serverless-friendly public endpoint)
+// Live price fetching
 async function fetchLivePrice(symbol:string, assetType:AssetType): Promise<number|null> {
+  const sym = symbol.toUpperCase();
   try {
-    // Map symbol to Yahoo Finance ticker
-    const tickerMap: Record<string,string> = {
-      XAU: "GC=F",   // Gold futures in USD
-      XAG: "SI=F",   // Silver futures in USD
-      BTC: "BTC-USD",
-      ETH: "ETH-USD",
-    };
-    const ticker = tickerMap[symbol.toUpperCase()] ?? symbol;
-    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
+    // Gold: fetch from xau.today
+    if (assetType === "gold" || sym === "XAU") {
+      const res = await fetch("https://xau.today/gold-price-ounce-aed/", { headers:{ "User-Agent":"Mozilla/5.0" } });
+      const html = await res.text();
+      // Find price pattern like 30527 or 30,527
+      const m = html.match(/(?:AED|aed)[\s:]*([\d,]+(?:\.\d+)?)/i) || html.match(/([\d]{4,6}(?:,\d{3})*(?:\.\d+)?)/);
+      if (m) { const p = parseFloat(m[1].replace(/,/g,"")); if(p > 1000) return p; }
+    }
+    // Silver: fetch from xag.today
+    if (assetType === "silver" || sym === "XAG") {
+      const res = await fetch("https://xag.today/silver-price-ounce-aed/", { headers:{ "User-Agent":"Mozilla/5.0" } });
+      const html = await res.text();
+      const m = html.match(/(?:AED|aed)[\s:]*([\d,]+(?:\.\d+)?)/i) || html.match(/([\d]{2,5}(?:,\d{3})*(?:\.\d+)?)/);
+      if (m) { const p = parseFloat(m[1].replace(/,/g,"")); if(p > 10) return p; }
+    }
+    // Crypto and stocks: Yahoo Finance in USD → convert to AED
+    const tickerMap: Record<string,string> = { BTC:"BTC-USD", ETH:"ETH-USD", AAPL:"AAPL", TSLA:"TSLA", NVDA:"NVDA" };
+    const ticker = tickerMap[sym] ?? sym;
+    const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`, { headers:{ "User-Agent":"Mozilla/5.0" } });
     if (!res.ok) return null;
     const data = await res.json();
-    const priceUsd = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    if (!priceUsd) return null;
-    // Convert to AED (Yahoo gives USD for commodities)
-    if (assetType === "gold" || assetType === "silver" || assetType === "crypto") {
-      return priceUsd * FX["USD"]; // convert USD → AED
-    }
-    return priceUsd;
+    const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    if (!price) return null;
+    // Stocks in AED exchange already; USD-quoted crypto/stocks → convert
+    if (assetType === "crypto") return price * FX["USD"];
+    return price;
   } catch { return null; }
 }
 

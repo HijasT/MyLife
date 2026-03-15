@@ -12,6 +12,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [timezone, setTimezone] = useState("Asia/Dubai");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -24,6 +25,7 @@ export default function SettingsPage() {
       setEmail(user.email ?? "");
       const { data } = await supabase.from("profiles").select("display_name, hidden_modules").eq("id", user.id).single();
       setDisplayName(data?.display_name ?? "");
+      setTimezone(data?.timezone ?? "Asia/Dubai");
       setHiddenModules(data?.hidden_modules ?? []);
       setLoading(false);
     }
@@ -34,7 +36,7 @@ export default function SettingsPage() {
     setSaving(true); setSaved(false);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from("profiles").update({ display_name: displayName.trim(), hidden_modules: hiddenModules }).eq("id", user.id);
+    await supabase.from("profiles").update({ display_name: displayName.trim(), hidden_modules: hiddenModules, timezone }).eq("id", user.id);
     setSaving(false); setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -107,6 +109,27 @@ export default function SettingsPage() {
           <button onClick={handleSave} disabled={saving}
             className="mt-2 px-5 py-3 rounded-xl text-sm font-semibold bg-accent text-white hover:bg-amber-500 transition-colors disabled:opacity-50 self-end">
             {saving ? "Saving…" : saved ? "✓ Saved" : "Save visibility"}
+          </button>
+        </div>
+      </div>
+
+      {/* Timezone */}
+      <div className="rounded-2xl border overflow-hidden mb-6" style={{ background:"var(--card-bg)", borderColor:"var(--card-border)" }}>
+        <div className="px-6 py-4 border-b" style={{ borderColor:"var(--card-border)" }}>
+          <h2 className="text-sm font-bold tracking-widest uppercase" style={{ color:"var(--text-muted)" }}>Timezone</h2>
+          <p className="text-xs mt-1" style={{ color:"var(--text-muted)" }}>Affects how dates and times are displayed throughout the app.</p>
+        </div>
+        <div className="px-6 py-6">
+          <select value={timezone} onChange={e => setTimezone(e.target.value)}
+            className="w-full px-4 py-3 rounded-xl text-sm outline-none"
+            style={{ background:"var(--main-bg2)", border:"1px solid var(--card-border)", color:"var(--text-primary)" }}>
+            {["Asia/Dubai","Asia/Kolkata","Asia/Riyadh","Europe/London","America/New_York","America/Los_Angeles","Asia/Singapore","Australia/Sydney","UTC"].map(tz => (
+              <option key={tz} value={tz}>{tz.replace(/_/g," ")}</option>
+            ))}
+          </select>
+          <button onClick={handleSave} disabled={saving}
+            className="mt-3 px-5 py-3 rounded-xl text-sm font-semibold bg-accent text-white hover:bg-amber-500 transition-colors disabled:opacity-50">
+            {saving ? "Saving…" : saved ? "✓ Saved" : "Save timezone"}
           </button>
         </div>
       </div>

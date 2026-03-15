@@ -79,7 +79,7 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
   const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
   const [loading, setLoading] = useState(true);
   const [editTest, setEditTest] = useState(false);
-  const [editFields, setEditFields] = useState({ method:"", refRange:"", refMin:"", refMax:"", unit:"" });
+  const [editFields, setEditFields] = useState({ method:"", refRange:"", refMin:"", refMax:"", unit:"", groupName:"" });
   const [toast, setToast] = useState("");
   const [userId, setUserId] = useState<string|null>(null);
 
@@ -101,7 +101,7 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
         if (tr.data) {
           const t = tr.data;
           setTest({ id:t.id, groupName:t.group_name, name:t.name, method:t.method??"", refRange:t.ref_range??"", refMin:t.ref_min??null, refMax:t.ref_max??null, unit:t.unit??"" });
-          setEditFields({ method:t.method??"", refRange:t.ref_range??"", refMin:t.ref_min?.toString()??"", refMax:t.ref_max?.toString()??"", unit:t.unit??"" });
+          setEditFields({ method:t.method??"", refRange:t.ref_range??"", refMin:t.ref_min?.toString()??"", refMax:t.ref_max?.toString()??"", unit:t.unit??"", groupName:t.group_name??"" });
         }
         setResults((rr.data??[]).map(r => ({ id:r.id, testDate:r.test_date, valueNum:r.value_num??null, valueText:r.value_text??"", notes:r.notes??"" })));
       }
@@ -114,8 +114,8 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
     if (!test) return;
     const rMin = editFields.refMin ? parseFloat(editFields.refMin) : null;
     const rMax = editFields.refMax ? parseFloat(editFields.refMax) : null;
-    await supabase.from("biomarker_tests").update({ method:editFields.method, ref_range:editFields.refRange, ref_min:rMin, ref_max:rMax, unit:editFields.unit }).eq("id",test.id);
-    setTest(p => p ? {...p,...editFields,refMin:rMin,refMax:rMax} : p);
+    await supabase.from("biomarker_tests").update({ method:editFields.method, ref_range:editFields.refRange, ref_min:rMin, ref_max:rMax, unit:editFields.unit, group_name:editFields.groupName }).eq("id",test.id);
+    setTest(p => p ? {...p,...editFields,refMin:rMin,refMax:rMax,groupName:editFields.groupName} : p);
     setEditTest(false); showToast("Updated");
   }
 
@@ -230,6 +230,9 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
               </label>
               <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em"}}>
                 Unit <input style={inp} value={editFields.unit} onChange={e=>setEditFields(p=>({...p,unit:e.target.value}))} />
+              </label>
+              <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em"}}>
+                Group <input style={inp} value={editFields.groupName} onChange={e=>setEditFields(p=>({...p,groupName:e.target.value}))} placeholder="e.g. Liver Profile" />
               </label>
             </div>
             <div style={{padding:"0 16px 16px",display:"flex",justifyContent:"flex-end",gap:8}}>

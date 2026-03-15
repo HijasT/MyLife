@@ -94,7 +94,8 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [toast, setToast] = useState("");
   const [photoMode, setPhotoMode] = useState<"url"|"upload">("url");
   const [photoInput, setPhotoInput] = useState("");
-  const [showPhoto, setShowPhoto] = useState(false);
+  const [showAddBottle, setShowAddBottle] = useState(false);
+  const [newBottle, setNewBottle] = useState({ bottleType:"Full bottle" as BottleType, sizeMl:"100", price:"", currency:"AED", date:new Date().toISOString().slice(0,10), shopName:"", shopLink:"" });
 
   const USAGE_OPTIONS = ["Casual","Office","Party","Date","Night out","Travel","Gym","Home"];
   const getUsageTags = (item: Perfume | null) => item?.notesText?.startsWith("usage:") ? item.notesText.slice(6).split(",").filter(Boolean) : [];
@@ -196,7 +197,30 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     catch { showToast("Clipboard blocked"); }
   }
 
-  async function copyToWishlist() {
+  async function addBottle() {
+    if (!userId || !item) return;
+    const { data: bd } = await supabase.from("perfume_bottles").insert({
+      perfume_id: item.id, user_id: userId,
+      bottle_size_ml: parseFloat(newBottle.sizeMl)||100,
+      bottle_type: newBottle.bottleType, status:"In collection", usage: newBottle.price,
+    }).select("*").single();
+    if (bd) {
+      const price = parseFloat(newBottle.price) || 0;
+      if (price > 0 || newBottle.shopName) {
+        const { data: pur } = await supabase.from("perfume_purchases").insert({
+          perfume_id: item.id, bottle_id: bd.id, user_id: userId,
+          date: newBottle.date, ml: parseFloat(newBottle.sizeMl)||100,
+          price, currency: newBottle.currency,
+          shop_name: newBottle.shopName || "Unknown", shop_link: newBottle.shopLink || null,
+        }).select("*").single();
+        if (pur) setPurchases(p => [...p, { id:pur.id, bottleId:pur.bottle_id, date:pur.date, ml:pur.ml, price:pur.price, currency:pur.currency, shopName:pur.shop_name, shopLink:pur.shop_link }]);
+      }
+      setItem(prev => prev ? { ...prev, bottles: [...prev.bottles, { id:bd.id, bottleSizeMl:bd.bottle_size_ml, bottleType:bd.bottle_type, status:bd.status, usage:bd.usage }] } : prev);
+      setShowAddBottle(false);
+      setNewBottle({ bottleType:"Full bottle", sizeMl:"100", price:"", currency:"AED", date:new Date().toISOString().slice(0,10), shopName:"", shopLink:"" });
+      showToast("Bottle added");
+    }
+  }
     if (!item || !userId) return;
     const { data } = await supabase.from("perfumes").insert({ user_id:userId, brand:item.brand, model:item.model, status:"wishlist", image_url:item.imageUrl, rating_stars:item.ratingStars, notes_tags:item.notesTags, weather_tags:item.weatherTags, gender_scale:item.genderScale, longevity:item.longevity, sillage:item.sillage, value_rating:item.value, clone_similar:item.cloneSimilar, notes_text:item.notesText }).select("*").single();
     if (data) { showToast("Added to wishlist ✓"); router.push(`/dashboard/perfumes/${data.id}`); }
@@ -440,73 +464,83 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         {/* Bottles */}
         <div style={sectionStyle}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-            <span style={labelStyle}>Bottles</span>
-            <Link href={`/dashboard/perfumes/${item.id}/add-bottle`} style={{ ...btnStyle, textDecoration:"none", fontSize:12, padding:"5px 12px" }}>+ Add bottle</Link>
+            <span style={labelStyle}>Purchase Details</span>
+            <button onClick={() => setShowAddBottle(true)} style={{ ...btnStyle, fontSize:12, padding:"5px 12px" }}>+ Add purchase</button>
           </div>
           {item.bottles.length === 0
-            ? <span style={{ fontSize:13, color: V.faint }}>No bottles recorded</span>
+            ? <span style={{ fontSize:13, color: V.faint }}>No purchases recorded · Click + Add purchase</span>
             : (
-              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {item.bottles.map(b => (
-                  <div key={b.id} style={{ display:"grid", gridTemplateColumns:"1fr 80px 120px 1fr", gap:10, padding:"10px 14px", background: V.inputBg, borderRadius:10, border:`1px solid ${V.border}`, alignItems:"center", fontSize:13 }}>
-                    <div>
-                      {!isEdit
-                        ? <span style={{ fontWeight:700 }}>{b.bottleType}</span>
-                        : <select style={{ ...inputStyle, padding:"5px 8px", fontSize:12 }} value={b.bottleType} onChange={e => updateBottle(b.id, { bottleType: e.target.value as BottleType })}>
-                            <option>Full bottle</option><option>Decant</option><option>Sample</option><option>Tester</option>
-                          </select>
-                      }
+              <div>
+                <div style={{ display:"grid", gridTemplateColumns:"0.8fr 0.5fr 0.7fr 0.6fr 1fr", gap:8, padding:"6px 14px", fontSize:10, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.07em" }}>
+                  <div>Type</div><div>Size</div><div>Price</div><div>Date</div><div>Shop</div>
+                </div>
+                {item.bottles.map(b => {
+                  const pur = purchases.find(p => p.bottleId === b.id);
+                  return (
+                    <div key={b.id} style={{ display:"grid", gridTemplateColumns:"0.8fr 0.5fr 0.7fr 0.6fr 1fr", gap:8, padding:"10px 14px", background:V.inputBg, borderRadius:10, border:`1px solid ${V.border}`, alignItems:"center", fontSize:13, marginTop:4 }}>
+                      <span style={{ fontWeight:700 }}>{b.bottleType}</span>
+                      <span style={{ color:V.muted }}>{b.bottleSizeMl}ml</span>
+                      <span style={{ fontWeight:700 }}>{pur && pur.price > 0 ? fmtMoney(pur.currency, pur.price) : <span style={{ color:V.faint }}>—</span>}</span>
+                      <span style={{ fontSize:11, color:V.faint }}>{pur?.date ?? "—"}</span>
+                      <span>{pur?.shopLink ? <a href={pur.shopLink} target="_blank" rel="noreferrer" style={{ color:V.accent, textDecoration:"none", fontWeight:600, fontSize:11 }}>{pur.shopName}</a> : <span style={{ color:V.faint, fontSize:11 }}>{pur?.shopName ?? "—"}</span>}</span>
                     </div>
-                    <div>
-                      {!isEdit
-                        ? <span style={{ color: V.muted }}>{b.bottleSizeMl}ml</span>
-                        : <input style={{ ...inputStyle, padding:"5px 8px", fontSize:12 }} value={b.bottleSizeMl} onChange={e => updateBottle(b.id, { bottleSizeMl: safeNum(e.target.value, 0) })} />
-                      }
-                    </div>
-                    <div>
-                      {!isEdit
-                        ? <span style={{ color: b.status==="In collection"?"#16a34a":V.muted, fontWeight:600, fontSize:12 }}>{b.status}</span>
-                        : <select style={{ ...inputStyle, padding:"5px 8px", fontSize:12 }} value={b.status} onChange={e => updateBottle(b.id, { status: e.target.value as BottleStatus })}>
-                            <option>In collection</option><option>Emptied</option><option>Sold</option><option>Gifted</option>
-                          </select>
-                      }
-                    </div>
-                    <div>
-                      {!isEdit
-                        ? <span style={{ color: V.muted, fontSize:12 }}>{b.usage}</span>
-                        : <input style={{ ...inputStyle, padding:"5px 8px", fontSize:12 }} value={b.usage} onChange={e => updateBottle(b.id, { usage: e.target.value })} />
-                      }
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
-          }
-        </div>
-
-        {/* Purchase history */}
-        <div style={sectionStyle}>
-          <span style={labelStyle}>Purchase history</span>
-          {purchases.length === 0
-            ? <span style={{ fontSize:13, color: V.faint }}>No purchases recorded</span>
-            : (
-              <div style={{ display:"flex", flexDirection:"column", gap:8, marginTop:4 }}>
-                {purchases.map(p => (
-                  <div key={p.id} style={{ display:"grid", gridTemplateColumns:"0.8fr 0.6fr 0.7fr 1fr", gap:10, padding:"10px 14px", background: V.inputBg, borderRadius:10, border:`1px solid ${V.border}`, alignItems:"center", fontSize:13 }}>
-                    <span style={{ color: V.muted, fontSize:12 }}>{p.date}</span>
-                    <span style={{ fontWeight:700 }}>{p.price > 0 ? fmtMoney(p.currency, p.price) : <span style={{ color: V.faint }}>Free</span>}</span>
-                    <span style={{ color: V.muted, fontSize:12 }}>{p.ml ? `${p.ml}ml` : "—"}</span>
-                    <span>{p.shopLink
-                      ? <a href={p.shopLink} target="_blank" rel="noreferrer" style={{ color: V.accent, textDecoration:"none", fontWeight:600, fontSize:12 }}>{p.shopName}</a>
-                      : <span style={{ color: V.muted, fontSize:12 }}>{p.shopName}</span>
-                    }</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )
           }
         </div>
       </div>
+
+      {/* ── Add bottle/purchase modal ── */}
+      {showAddBottle && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:18, width:"min(500px,100%)", maxHeight:"90vh", overflow:"auto" }} onClick={e=>e.stopPropagation()}>
+            <div style={{ padding:"16px 20px", borderBottom:`1px solid ${V.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:18, fontWeight:800 }}>Add purchase</div>
+              <button onClick={() => setShowAddBottle(false)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:20, color:V.muted }}>✕</button>
+            </div>
+            <div style={{ padding:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Bottle type
+                <select style={inputStyle} value={newBottle.bottleType} onChange={e=>setNewBottle(p=>({...p,bottleType:e.target.value as BottleType}))}>
+                  <option>Full bottle</option><option>Decant</option><option>Sample</option><option>Tester</option>
+                </select>
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Size (ml)
+                <input style={inputStyle} type="number" value={newBottle.sizeMl} onChange={e=>setNewBottle(p=>({...p,sizeMl:e.target.value}))} />
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Price paid
+                <input style={inputStyle} type="number" value={newBottle.price} onChange={e=>setNewBottle(p=>({...p,price:e.target.value}))} placeholder="0" />
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Currency
+                <select style={inputStyle} value={newBottle.currency} onChange={e=>setNewBottle(p=>({...p,currency:e.target.value}))}>
+                  <option>AED</option><option>USD</option><option>INR</option><option>GBP</option>
+                </select>
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Purchase date
+                <input style={inputStyle} type="date" value={newBottle.date} onChange={e=>setNewBottle(p=>({...p,date:e.target.value}))} />
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Shop name
+                <input style={inputStyle} value={newBottle.shopName} onChange={e=>setNewBottle(p=>({...p,shopName:e.target.value}))} placeholder="Optional" />
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", gridColumn:"1/-1" }}>
+                Shop link
+                <input style={inputStyle} value={newBottle.shopLink} onChange={e=>setNewBottle(p=>({...p,shopLink:e.target.value}))} placeholder="https://… (optional)" />
+              </label>
+            </div>
+            <div style={{ padding:"0 20px 20px", display:"flex", justifyContent:"flex-end", gap:8 }}>
+              <button style={btnStyle} onClick={() => setShowAddBottle(false)}>Cancel</button>
+              <button style={primaryBtnStyle} onClick={addBottle}>Add</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Overlays ─────────────────────────────────────── */}
       {/* Note manager */}

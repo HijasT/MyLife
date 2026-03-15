@@ -79,6 +79,7 @@ export default function CalendarPage() {
   const [addAnnivType, setAddAnnivType] = useState("Birthday");
   const [addAnnivName, setAddAnnivName] = useState("");
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [addSaving,  setAddSaving]  = useState(false);
 
   const isDark = typeof document!=="undefined"&&document.documentElement.classList.contains("dark");
@@ -127,9 +128,9 @@ export default function CalendarPage() {
     const dates=isWork?datesBetween(addDateFrom,addDateTo):[addDateFrom];
     const color=isWork?SHIFT_COLORS[addShift]:EVENT_COLORS[addType];
     // For work events, title = "Work:{shiftName}"
-    // Work titles: named shifts get "Work:ShiftName", Custom just uses whatever user typed
-    const shiftLabel = addShift === "Custom" ? (addTitle.trim() || "Work") : `Work:${addTitle.trim()||addShift}`;
-    const finalTitle = isWork ? shiftLabel : title;
+    // All work events get "Work:" prefix
+    const workTitle = addTitle.trim() || addShift;
+    const finalTitle = isWork ? `Work:${workTitle}` : title;
     const rows=dates.map(date=>({
       user_id:userId,date,title:finalTitle,event_type:addType,source_module:"manual",
       work_start:isWork&&!noTime?addStart:null,work_end:isWork&&!noTime?addEnd:null,
@@ -158,11 +159,13 @@ export default function CalendarPage() {
   const firstDay=firstDayOfMonth(year,mo);
   const todayStr=new Date().toISOString().slice(0,10);
 
-  // Apply type filter
+  // Apply type + search filter
   const filteredEvents=useMemo(()=>{
-    if(!filterTypes.length) return events;
-    return events.filter(e=>filterTypes.includes(e.eventType));
-  },[events,filterTypes]);
+    let evs = events;
+    if(filterTypes.length) evs = evs.filter(e=>filterTypes.includes(e.eventType));
+    if(searchQuery.trim()) evs = evs.filter(e=>e.title.toLowerCase().includes(searchQuery.toLowerCase()));
+    return evs;
+  },[events,filterTypes,searchQuery]);
 
   const eventsByDate=useMemo(()=>{
     const map=new Map<string,CalEvent[]>();

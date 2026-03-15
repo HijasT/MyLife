@@ -12,6 +12,7 @@ type DueItem = {
   id: string; name: string; group: string; dueDay: number | null;
   statementDay: number | null; defaultCurrency: Currency;
   defaultAmount: number | null; isFixed: boolean; isHidden: boolean; sortOrder: number;
+  isRemittance?: boolean;
 };
 
 type DueEntry = {
@@ -30,70 +31,17 @@ function fmtMonth(m: string) { const [y, mo] = m.split("-"); return new Date(Num
 function prevMonth(m: string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function nextMonth(m: string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function fmtDateTime(iso: string | null) { if (!iso) return "—"; return new Date(iso).toLocaleString("en-AE",{day:"2-digit",month:"short",year:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+function ordinal(n: number) { const s=["th","st","nd","rd"]; const v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 
-function toTargetCurrency(amount: number, from: Currency, to: Currency, rates: Record<string, number>): number {
-  if (from === to) return amount;
-  // Convert to AED first
-  const aed = from === "AED" ? amount : amount / (rates[from] ?? 1);
-  // Convert AED to target
-  if (to === "AED") return aed;
-  return aed * (rates[to] ?? 1);
-}
-
-function toAed(amount: number, currency: Currency, rates: Record<string, number>) {
+function toAed(amount: number, currency: Currency, rates: Record<string, number>): number {
   if (currency === "AED") return amount;
   const rate = rates[currency];
   return rate ? amount / rate : amount;
 }
 
-// Smart due date display
-function getDueDateDisplay(item: DueItem, month: string): { label: string; type: "statement"|"due"|null } {
-  const today = new Date();
-  const todayDay = today.getDate();
-  const [y, mo] = month.split("-").map(Number);
-
-  if (!item.statementDay && !item.dueDay) return { label: "", type: null };
-
-  const isCurrentMonth = today.getFullYear() === y && (today.getMonth()+1) === mo;
-
-  if (!isCurrentMonth) {
-    // Show static info
-    if (item.statementDay && item.dueDay) return { label: `S:${item.statementDay} D:${item.dueDay}`, type: null };
-    if (item.statementDay) return { label: `S:${item.statementDay}`, type: "statement" };
-    return { label: `D:${item.dueDay}`, type: "due" };
-  }
-
-  const sd = item.statementDay;
-  const dd = item.dueDay;
-
-  // Logic: statement → due
-  // If today < statement: show statement date
-  // If today >= statement and today < due: show due date
-  // If today >= due: show next statement
-  if (sd && dd) {
-    if (dd > sd) {
-      // Statement this month, due this month (same month)
-      if (todayDay < sd) return { label: `S:${sd}`, type: "statement" };
-      if (todayDay >= sd && todayDay < dd) return { label: `D:${dd}`, type: "due" };
-      // Past due — show next statement
-      return { label: `Next S:${sd}`, type: "statement" };
-    } else {
-      // Statement this month, due next month (e.g. S:22 Mar, D:10 Apr)
-      if (todayDay < sd) return { label: `S:${sd}`, type: "statement" };
-      if (todayDay >= sd) return { label: `D:${dd} (next mo)`, type: "due" };
-    }
-  }
-  if (sd) return { label: `S:${sd}`, type: "statement" };
-  if (dd) {
-    if (todayDay < dd) return { label: `D:${dd}`, type: "due" };
-    return { label: `Next D:${dd}`, type: "due" };
-  }
-  return { label: "", type: null };
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(r: any): DueItem {
-  return { id:r.id, name:r.name, group:r.group_name??"General", dueDay:r.due_date_day??r.due_day??null, statementDay:r.statement_date??null, defaultCurrency:(r.default_currency??"AED") as Currency, defaultAmount:r.default_amount??null, isFixed:r.is_fixed??false, isHidden:r.is_hidden??false, sortOrder:r.sort_order??0 };
+  return { id:r.id, name:r.name, group:r.group_name??"General", dueDay:r.due_date_day??r.due_day??null, statementDay:r.statement_date??null, defaultCurrency:(r.default_currency??"AED") as Currency, defaultAmount:r.default_amount??null, isFixed:r.is_fixed??false, isHidden:r.is_hidden??false, sortOrder:r.sort_order??0, isRemittance:r.is_remittance??false };
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToEntry(r: any): DueEntry {
@@ -192,7 +140,8 @@ export default function DueTrackerPage() {
   async function updateEntryField(item: DueItem, field: string, value: unknown) {
     const entry = await ensureEntry(item);
     await supabase.from("due_entries").update({ [field]: value }).eq("id", entry.id);
-    setEntries(p => p.map(e => e.id === entry.id ? { ...e, [field === "amount" ? "amount" : field === "currency" ? "currency" : "note"]: value } : e));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setEntries(p => p.map(e => e.id === entry.id ? { ...e, [field]: value } as any : e));
   }
 
   async function saveSettings() {
@@ -207,18 +156,10 @@ export default function DueTrackerPage() {
     if (data) { setItems(p => [...p, dbToItem(data)]); setNewItem({ name:"", group:"UAE", statementDay:"", dueDay:"", defaultCurrency:"AED", defaultAmount:"", isFixed:false }); setShowAddItem(false); showToast("Added"); }
   }
 
-  async function updateItem(id: string, patch: Partial<{ statementDay: string; dueDay: string }>) {
-    const updates: Record<string, unknown> = {};
-    if (patch.statementDay !== undefined) updates.statement_date = patch.statementDay ? parseInt(patch.statementDay) : null;
-    if (patch.dueDay !== undefined) updates.due_date_day = patch.dueDay ? parseInt(patch.dueDay) : null;
-    await supabase.from("due_items").update(updates).eq("id", id);
-    setItems(p => p.map(x => x.id === id ? { ...x, statementDay:patch.statementDay !== undefined ? (patch.statementDay ? parseInt(patch.statementDay) : null) : x.statementDay, dueDay:patch.dueDay !== undefined ? (patch.dueDay ? parseInt(patch.dueDay) : null) : x.dueDay } : x));
-  }
-
   async function toggleHide(item: DueItem) {
     await supabase.from("due_items").update({ is_hidden:!item.isHidden }).eq("id", item.id);
     setItems(p => p.map(x => x.id === item.id ? { ...x, isHidden:!x.isHidden } : x));
-    showToast(item.isHidden ? "Item shown" : "Item hidden");
+    showToast(item.isHidden ? "Item shown" : "Item hidden (still counted in totals)");
   }
 
   function toggleGroup(g: string) {
@@ -229,65 +170,46 @@ export default function DueTrackerPage() {
     });
   }
 
-  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(""), 2500); }
+  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(""), 2800); }
 
-  // ── Stats ────────────────────────────────────────────────
+  // ── Stats ── ALL items count (including hidden)
   const stats = useMemo(() => {
     const fxRates = settings.fxRates;
     const indiaGroup = "India";
-    const indiaItems = items.filter(x => x.group === indiaGroup);
-    const indiaIds = new Set(indiaItems.map(x => x.id));
+    const indiaIds = new Set(items.filter(x => x.group === indiaGroup).map(x => x.id));
 
     let totalAed = 0, paidAed = 0, paidCount = 0, pendingCount = 0;
     let indiaTotalInr = 0;
 
-    for (const item of items) {
+    for (const item of items) { // ALL items, hidden or not
       const isIndia = indiaIds.has(item.id);
       const entry = getEntry(item.id);
       const amount = entry?.amount ?? item.defaultAmount ?? 0;
       const currency = (entry?.currency ?? item.defaultCurrency) as Currency;
 
       if (isIndia) {
-        // India items: track INR total separately
-        const inr = currency === "INR" ? amount : toTargetCurrency(amount, currency, "INR", fxRates);
+        const inr = currency === "INR" ? amount : toAed(amount, currency, fxRates) * (fxRates["INR"] ?? 25.2);
         indiaTotalInr += inr;
-        // Don't add to global total — remittance item will represent it
+        // India items do NOT add to global total — remittance item represents them
       } else {
         const aed = toAed(amount, currency, fxRates);
         totalAed += aed;
       }
 
-      if (entry?.status === "paid" || amount === 0) { paidCount++; paidAed += isIndia ? 0 : toAed(amount, currency, fxRates); }
-      else { pendingCount++; }
+      if (entry?.status === "paid" || amount === 0) paidCount++;
+      else pendingCount++;
+      if ((entry?.status === "paid") && !isIndia) paidAed += toAed(amount, currency, fxRates);
     }
 
-    // Remittance = india total converted to AED
     const remittanceAed = indiaTotalInr / (fxRates["INR"] ?? 25.2);
-    totalAed += remittanceAed;
-
     return { totalAed, paidAed, pendingAed: totalAed - paidAed, paidCount, pendingCount, indiaTotalInr, remittanceAed };
   }, [items, entries, settings]);
 
-  // Compute dynamic remittance amount
-  const remittanceAmount = useMemo(() => {
-    const indiaItems = items.filter(x => x.group === "India");
-    const indiaIds = new Set(indiaItems.map(x => x.id));
-    let totalInr = 0;
-    for (const id of indiaIds) {
-      const item = items.find(x => x.id === id)!;
-      const entry = getEntry(item.id);
-      const amount = entry?.amount ?? item.defaultAmount ?? 0;
-      const currency = (entry?.currency ?? item.defaultCurrency) as Currency;
-      const inr = currency === "INR" ? amount : toTargetCurrency(amount, currency, "INR", settings.fxRates);
-      totalInr += inr;
-    }
-    return totalInr;
-  }, [items, entries, settings]);
-
+  // Groups — show all items but render hidden ones dimmed
   const groups = useMemo(() => {
-    const visible = showHidden ? items : items.filter(x => !x.isHidden);
+    const display = showHidden ? items : items.filter(x => !x.isHidden);
     const map = new Map<string, DueItem[]>();
-    for (const item of visible) {
+    for (const item of display) {
       const g = item.group || "General";
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(item);
@@ -295,9 +217,20 @@ export default function DueTrackerPage() {
     return map;
   }, [items, showHidden]);
 
+  // India total using ALL items (hidden or not)
+  const indiaTotalInr = useMemo(() => {
+    const fxRates = settings.fxRates;
+    return items.filter(x => x.group === "India").reduce((s, item) => {
+      const entry = getEntry(item.id);
+      const amount = entry?.amount ?? item.defaultAmount ?? 0;
+      const currency = (entry?.currency ?? item.defaultCurrency) as Currency;
+      return s + (currency === "INR" ? amount : toAed(amount, currency, fxRates) * (fxRates["INR"] ?? 25.2));
+    }, 0);
+  }, [items, entries, settings]);
+
   const V = { bg:isDark?"#0d0f14":"#f9f8f5", card:isDark?"#16191f":"#ffffff", border:isDark?"rgba(255,255,255,0.07)":"rgba(0,0,0,0.07)", text:isDark?"#f0ede8":"#1a1a1a", muted:isDark?"#9ba3b2":"#6b7280", faint:isDark?"#5c6375":"#9ca3af", input:isDark?"#1e2130":"#f9fafb", accent:"#F5A623" };
   const btn = { padding:"8px 14px", borderRadius:10, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:13, fontWeight:600 } as const;
-  const btnPrimary = { ...btn, background:V.accent, border:"none", color:"#fff", fontWeight:700 } as const;
+  const btnP = { ...btn, background:V.accent, border:"none", color:"#fff", fontWeight:700 } as const;
   const inp = { padding:"8px 12px", borderRadius:8, border:`1px solid ${V.border}`, background:V.input, color:V.text, fontSize:13, outline:"none" } as const;
 
   if (loading) return <div style={{ minHeight:"60vh", display:"flex", alignItems:"center", justifyContent:"center", background:V.bg }}><div style={{ width:28, height:28, border:`2.5px solid ${V.accent}`, borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
@@ -313,7 +246,7 @@ export default function DueTrackerPage() {
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           <button style={btn} onClick={() => setShowHidden(v=>!v)}>{showHidden?"Hide hidden":"Show hidden"}</button>
           <button style={btn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          <button style={btnPrimary} onClick={() => setShowAddItem(true)}>+ Add due</button>
+          <button style={btnP} onClick={() => setShowAddItem(true)}>+ Add due</button>
         </div>
       </div>
 
@@ -329,7 +262,7 @@ export default function DueTrackerPage() {
       <div style={{ padding:"12px 24px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))", gap:10 }}>
         {[
           { label:"Total due (AED)", value:`AED ${stats.totalAed.toFixed(0)}`, color:V.accent },
-          { label:"Paid",            value:`AED ${stats.paidAed.toFixed(0)}`, color:"#16a34a" },
+          { label:"Paid",            value:`AED ${stats.paidAed.toFixed(0)}`,  color:"#16a34a" },
           { label:"Pending",         value:`AED ${stats.pendingAed.toFixed(0)}`, color:"#ef4444" },
           { label:"Items paid",      value:`${stats.paidCount}/${stats.paidCount+stats.pendingCount}`, color:V.muted },
         ].map(s => (
@@ -340,32 +273,33 @@ export default function DueTrackerPage() {
         ))}
       </div>
 
-      {settings.note && <div style={{ margin:"10px 24px 0", padding:"9px 14px", background:"rgba(245,166,35,0.08)", border:"1px solid rgba(245,166,35,0.2)", borderRadius:10, fontSize:13, color:V.text }}>📝 {settings.note}</div>}
+      {settings.note && <div style={{ margin:"10px 24px 0", padding:"9px 14px", background:"rgba(245,166,35,0.08)", border:"1px solid rgba(245,166,35,0.2)", borderRadius:10, fontSize:13 }}>📝 {settings.note}</div>}
 
       {/* Due items */}
       <div style={{ padding:"14px 24px 24px", display:"flex", flexDirection:"column", gap:14 }}>
         {Array.from(groups.entries()).map(([group, groupItems]) => {
           const isIndia = group === "India";
           const fxRates = settings.fxRates;
+          const isCollapsed = collapsedGroups.has(group);
 
-          // Group totals
-          let groupTotalDisplay = 0, groupPaidDisplay = 0;
-          for (const item of groupItems) {
+          // Group totals use ALL items in that group (even hidden ones)
+          const allGroupItems = items.filter(x => x.group === group);
+          let groupTotal = 0, groupPaid = 0;
+          for (const item of allGroupItems) {
             const entry = getEntry(item.id);
             const amount = entry?.amount ?? item.defaultAmount ?? 0;
             const cur = (entry?.currency ?? item.defaultCurrency) as Currency;
             if (isIndia) {
-              const inr = cur === "INR" ? amount : toTargetCurrency(amount, cur, "INR", fxRates);
-              groupTotalDisplay += inr;
-              if (entry?.status === "paid" || amount === 0) groupPaidDisplay += inr;
+              const inr = cur === "INR" ? amount : toAed(amount, cur, fxRates) * (fxRates["INR"] ?? 25.2);
+              groupTotal += inr;
+              if (entry?.status === "paid" || amount === 0) groupPaid += inr;
             } else {
               const aed = toAed(amount, cur, fxRates);
-              groupTotalDisplay += aed;
-              if (entry?.status === "paid" || amount === 0) groupPaidDisplay += aed;
+              groupTotal += aed;
+              if (entry?.status === "paid" || amount === 0) groupPaid += aed;
             }
           }
           const currLabel = isIndia ? "INR" : "AED";
-          const isCollapsed = collapsedGroups.has(group);
 
           return (
             <div key={group} style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:14, overflow:"hidden" }}>
@@ -374,26 +308,28 @@ export default function DueTrackerPage() {
                 <div style={{ display:"flex", gap:10, alignItems:"center" }}>
                   <span style={{ fontSize:12, color:V.faint, transition:"transform 0.2s", display:"inline-block", transform:isCollapsed?"rotate(-90deg)":"rotate(0deg)" }}>▾</span>
                   <span style={{ fontSize:14, fontWeight:800 }}>{group}</span>
-                  <span style={{ fontSize:11, color:V.faint }}>{groupItems.length}</span>
+                  <span style={{ fontSize:11, color:V.faint }}>{allGroupItems.length}</span>
                 </div>
                 <div style={{ display:"flex", gap:14, fontSize:12, color:V.muted }} onClick={e=>e.stopPropagation()}>
-                  <span>Total: <strong style={{ color:V.text }}>{currLabel} {groupTotalDisplay.toFixed(0)}</strong></span>
-                  <span>Paid: <strong style={{ color:"#16a34a" }}>{currLabel} {groupPaidDisplay.toFixed(0)}</strong></span>
-                  <span>Due: <strong style={{ color:"#ef4444" }}>{currLabel} {(groupTotalDisplay-groupPaidDisplay).toFixed(0)}</strong></span>
+                  <span>Total: <strong style={{ color:V.text }}>{currLabel} {groupTotal.toFixed(0)}</strong></span>
+                  <span style={{ color:"#16a34a" }}>Paid: <strong>{currLabel} {groupPaid.toFixed(0)}</strong></span>
+                  <span style={{ color:"#ef4444" }}>Due: <strong>{currLabel} {(groupTotal-groupPaid).toFixed(0)}</strong></span>
                 </div>
               </div>
 
-              {/* Remittance row for UAE group */}
+              {/* Remittance row (auto, shown in UAE group only) */}
               {!isCollapsed && !isIndia && group === "UAE" && (
-                <div style={{ padding:"10px 16px", borderBottom:`1px solid ${V.border}`, background:isDark?"rgba(245,166,35,0.05)":"rgba(245,166,35,0.03)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
-                  <div style={{ width:22, height:22, flexShrink:0 }}/>
-                  <div style={{ flex:1 }}>
-                    <span style={{ fontSize:13, fontWeight:700, color:V.text }}>Remittance (India)</span>
-                    <span style={{ fontSize:11, color:V.faint, marginLeft:8 }}>auto-calculated from India section</span>
-                  </div>
+                <div style={{ padding:"10px 16px", borderBottom:`1px solid ${V.border}`, background:isDark?"rgba(245,166,35,0.04)":"rgba(245,166,35,0.02)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                  <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ background:"none", border:"none", padding:0, cursor:"pointer", display:"flex", gap:10, alignItems:"center", flex:1 }}>
+                    <div style={{ width:22, height:22, flexShrink:0 }}/>
+                    <div>
+                      <span style={{ fontSize:14, fontWeight:700, color:V.text }}>Remittance</span>
+                      <span style={{ fontSize:11, color:V.faint, marginLeft:8 }}>India total → AED</span>
+                    </div>
+                  </button>
                   <span style={{ fontSize:14, fontWeight:700, color:V.accent }}>
-                    AED {stats.remittanceAed.toFixed(0)}
-                    <span style={{ fontSize:11, color:V.faint, marginLeft:6 }}>({stats.indiaTotalInr.toFixed(0)} INR ÷ {settings.fxRates["INR"]??25.2})</span>
+                    AED {(indiaTotalInr / (fxRates["INR"] ?? 25.2)).toFixed(0)}
+                    <span style={{ fontSize:11, color:V.faint, marginLeft:6 }}>({indiaTotalInr.toFixed(0)} INR ÷ {fxRates["INR"] ?? 25.2})</span>
                   </span>
                 </div>
               )}
@@ -405,10 +341,15 @@ export default function DueTrackerPage() {
                 const isEditing = editItemId === item.id;
                 const displayAmt = entry?.amount ?? item.defaultAmount ?? 0;
                 const displayCur = (entry?.currency ?? item.defaultCurrency) as Currency;
-                const dateInfo = getDueDateDisplay(item, month);
+
+                // Statement/Due notation
+                let dateNotation = "";
+                if (item.statementDay && item.dueDay) dateNotation = `Statement: ${ordinal(item.statementDay)}  Due: ${ordinal(item.dueDay)}`;
+                else if (item.statementDay) dateNotation = `Statement: ${ordinal(item.statementDay)}`;
+                else if (item.dueDay) dateNotation = `Due: ${ordinal(item.dueDay)}`;
 
                 return (
-                  <div key={item.id} style={{ padding:"11px 16px", borderBottom:`1px solid ${V.border}`, opacity:item.isHidden?0.5:1 }}>
+                  <div key={item.id} style={{ padding:"11px 16px", borderBottom:`1px solid ${V.border}`, opacity:item.isHidden?0.45:1 }}>
                     <div style={{ display:"flex", gap:10, alignItems:"flex-start", flexWrap:"wrap" }}>
                       {/* Checkbox */}
                       <button onClick={() => togglePaid(item)} style={{ width:22, height:22, borderRadius:6, border:`2px solid ${isPaid?"#16a34a":V.border}`, background:isPaid?"#16a34a":"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:2 }}>
@@ -422,45 +363,21 @@ export default function DueTrackerPage() {
                           {item.isFixed && <span style={{ fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:999, background:"rgba(99,102,241,0.1)", color:"#6366f1" }}>Fixed</span>}
                           {item.isHidden && <span style={{ fontSize:10, color:V.faint }}>(hidden)</span>}
                         </div>
-                        {/* Date badges */}
-                        {isEditing ? (
-                          <div style={{ display:"flex", gap:8, marginTop:6, flexWrap:"wrap" }}>
-                            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                              <span style={{ fontSize:11, fontWeight:700, color:"#F5A623" }}>S:</span>
-                              <input type="number" min="1" max="31" placeholder="day" defaultValue={item.statementDay??""} onBlur={e=>updateItem(item.id,{statementDay:e.target.value})} style={{ ...inp, width:55, padding:"4px 8px", fontSize:12 }} />
-                            </div>
-                            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                              <span style={{ fontSize:11, fontWeight:700, color:"#ef4444" }}>D:</span>
-                              <input type="number" min="1" max="31" placeholder="day" defaultValue={item.dueDay??""} onBlur={e=>updateItem(item.id,{dueDay:e.target.value})} style={{ ...inp, width:55, padding:"4px 8px", fontSize:12 }} />
-                            </div>
-                          </div>
-                        ) : (
-                          dateInfo.label ? (
-                            <div style={{ display:"flex", gap:6, marginTop:3, flexWrap:"wrap", alignItems:"center" }}>
-                              {item.statementDay && (
-                                <span style={{ fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:999, background:"rgba(245,166,35,0.12)", color:"#F5A623" }}>
-                                  S:{item.statementDay}
-                                </span>
-                              )}
-                              {item.dueDay && (
-                                <span style={{ fontSize:11, fontWeight:700, padding:"2px 8px", borderRadius:999, background:"rgba(239,68,68,0.1)", color:"#ef4444" }}>
-                                  D:{item.dueDay}
-                                </span>
-                              )}
-                              {dateInfo.type && <span style={{ fontSize:11, color:dateInfo.type==="due"?"#ef4444":"#F5A623", fontWeight:600 }}>← today</span>}
-                              {entry?.note && <span style={{ fontSize:11, color:V.muted, fontStyle:"italic" }}>{entry.note}</span>}
-                            </div>
-                          ) : entry?.note ? (
-                            <div style={{ marginTop:3 }}><span style={{ fontSize:11, color:V.muted, fontStyle:"italic" }}>{entry.note}</span></div>
-                          ) : null
-                        )}
+                        {dateNotation && <div style={{ fontSize:11, color:V.muted, marginTop:3 }}>
+                          {item.statementDay && <span style={{ marginRight:8, fontWeight:600, color:"#F5A623" }}>S:{item.statementDay}</span>}
+                          {item.dueDay && <span style={{ fontWeight:600, color:"#ef4444" }}>D:{item.dueDay}</span>}
+                        </div>}
+                        {/* Edit fields */}
                         {isEditing && (
-                          <input placeholder="Note for this month…" defaultValue={entry?.note??""} onBlur={e=>updateEntryField(item,"note",e.target.value)} style={{ ...inp, width:"100%", marginTop:6, fontSize:12, boxSizing:"border-box" }} />
+                          <div style={{ marginTop:8, display:"flex", flexDirection:"column", gap:6 }}>
+                            <input defaultValue={entry?.note??""} placeholder="Note for this month…" onBlur={e=>updateEntryField(item,"note",e.target.value)} style={{ ...inp, fontSize:12, boxSizing:"border-box" as const }} />
+                          </div>
                         )}
+                        {!isEditing && entry?.note && <div style={{ fontSize:11, color:V.muted, fontStyle:"italic", marginTop:3 }}>{entry.note}</div>}
                         {isPaid && entry?.paidAt && <div style={{ fontSize:11, color:"#16a34a", marginTop:3 }}>Paid: {fmtDateTime(entry.paidAt)}</div>}
                       </div>
 
-                      {/* Amount + currency */}
+                      {/* Amount */}
                       <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                         {isEditing ? (
                           <>
@@ -490,14 +407,6 @@ export default function DueTrackerPage() {
             </div>
           );
         })}
-
-        {groups.size === 0 && (
-          <div style={{ padding:"60px 0", textAlign:"center", color:V.faint }}>
-            <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
-            <div style={{ fontSize:16, fontWeight:600, color:V.muted }}>No due items yet</div>
-            <div style={{ fontSize:13, marginTop:6 }}>Click + Add due to get started</div>
-          </div>
-        )}
       </div>
 
       {/* Add item modal */}
@@ -510,7 +419,7 @@ export default function DueTrackerPage() {
             </div>
             <div style={{ padding:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", gridColumn:"1/-1" }}>
-                Name <input style={{ ...inp, width:"100%", boxSizing:"border-box" }} value={newItem.name} onChange={e=>setNewItem(p=>({...p,name:e.target.value}))} placeholder="e.g. Rent" />
+                Name <input style={{ ...inp, width:"100%", boxSizing:"border-box" as const }} value={newItem.name} onChange={e=>setNewItem(p=>({...p,name:e.target.value}))} placeholder="e.g. Rent" />
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Group
@@ -539,7 +448,7 @@ export default function DueTrackerPage() {
             </div>
             <div style={{ padding:"0 20px 20px", display:"flex", justifyContent:"flex-end", gap:8 }}>
               <button style={btn} onClick={()=>setShowAddItem(false)}>Cancel</button>
-              <button style={btnPrimary} onClick={addDueItem}>Add</button>
+              <button style={btnP} onClick={addDueItem}>Add</button>
             </div>
           </div>
         </div>
@@ -554,15 +463,8 @@ export default function DueTrackerPage() {
               <button style={btn} onClick={()=>setShowSettings(false)}>✕</button>
             </div>
             <div style={{ padding:20, display:"flex", flexDirection:"column", gap:16 }}>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Main currency
-                <select style={inp} value={settings.mainCurrency} onChange={e=>setSettings(p=>({...p,mainCurrency:e.target.value as Currency}))}>
-                  <option>AED</option><option>INR</option><option>USD</option>
-                </select>
-              </label>
               <div>
-                <div style={{ fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Exchange rates (this month)</div>
-                <div style={{ fontSize:11, color:V.faint, marginBottom:8 }}>AED to other currencies (e.g. 1 AED = 25.4 INR)</div>
+                <div style={{ fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:8 }}>Exchange rates (1 AED = ? local currency)</div>
                 {(["INR","USD"] as const).map(cur => (
                   <div key={cur} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
                     <span style={{ fontSize:13, fontWeight:600, width:40 }}>{cur}:</span>
@@ -579,7 +481,7 @@ export default function DueTrackerPage() {
                 </div>
                 <div style={{ display:"flex", gap:8 }}>
                   <input style={{ ...inp, flex:1 }} placeholder="Add new group…" id="new-group-input" />
-                  <button style={btnPrimary} onClick={() => {
+                  <button style={btnP} onClick={() => {
                     const input = document.getElementById("new-group-input") as HTMLInputElement;
                     const v = input.value.trim();
                     if (v && !settings.groups.includes(v)) { setSettings(p=>({...p,groups:[...p.groups,v]})); input.value=""; }
@@ -593,7 +495,7 @@ export default function DueTrackerPage() {
             </div>
             <div style={{ padding:"0 20px 20px", display:"flex", justifyContent:"flex-end", gap:8 }}>
               <button style={btn} onClick={()=>setShowSettings(false)}>Cancel</button>
-              <button style={btnPrimary} onClick={saveSettings}>Save</button>
+              <button style={btnP} onClick={saveSettings}>Save</button>
             </div>
           </div>
         </div>
