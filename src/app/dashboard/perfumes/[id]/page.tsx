@@ -16,7 +16,7 @@ type Purchase = { id: string; bottleId: string; date: string; ml: number; price:
 type Perfume = {
   id: string; status: "wardrobe"|"wishlist"|"archive"; brand: string; model: string; imageUrl: string;
   ratingStars: number|null; notesTags: string[]; weatherTags: ("Cold"|"Neutral"|"Hot")[];
-  genderScale: GenderScale; longevity: string; sillage: string;
+  genderScale: GenderScale; longevity: string; sillage: string  // = projection;
   value: "Worth it"|"Neutral"|"Not worth it"; cloneSimilar: string; notesText: string;
   bottles: Bottle[]; archiveReason?: string;
 };
@@ -96,6 +96,10 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [photoInput, setPhotoInput] = useState("");
   const [showPhoto, setShowPhoto] = useState(false);
 
+  const USAGE_OPTIONS = ["Casual","Office","Party","Date","Night out","Travel","Gym","Home"];
+  const getUsageTags = (item: Perfume | null) => item?.notesText?.startsWith("usage:") ? item.notesText.slice(6).split(",").filter(Boolean) : [];
+  const setUsageTags = (tags: string[]) => { if (item) update({ notesText: tags.length ? `usage:${tags.join(",")}` : "" }); };
+
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 
   useEffect(() => {
@@ -161,6 +165,32 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     router.push("/dashboard/perfumes");
   }
 
+  async function copyToWishlist() {
+    if (!item) return;
+    const { data } = await supabase.from("perfumes").insert({
+      user_id: userId, brand:item.brand, model:item.model, status:"wishlist",
+      image_url:item.imageUrl, rating_stars:item.ratingStars,
+      notes_tags:item.notesTags, weather_tags:item.weatherTags,
+      gender_scale:item.genderScale, longevity:item.longevity,
+      sillage:item.sillage, value_rating:item.value,
+      clone_similar:item.cloneSimilar, notes_text:item.notesText
+    }).select("id").single();
+    if (data) showToast("Copied to wishlist");
+  }
+
+  // Price per 100ml calculation
+  const priceStats = (() => {
+    if (!purchases.length) return null;
+    let totalAed = 0;
+    let totalMl = 0;
+    for (const p of purchases) {
+      if (p.price > 0) { totalAed += p.currency === "AED" ? p.price : p.price * 3.67; }
+      if (p.ml > 0) totalMl += p.ml;
+    }
+    const per100ml = totalMl > 0 ? (totalAed / totalMl) * 100 : null;
+    return { totalAed, totalMl, per100ml };
+  })();
+
   async function doArchive() {
     if (!item || item.status === "wishlist") return;
     await supabase.from("perfumes").update({ status:"archive", archive_reason: archiveChoice }).eq("id", item.id);
@@ -188,6 +218,32 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     try { await navigator.clipboard.writeText(text); showToast("Copied to clipboard"); }
     catch { showToast("Clipboard blocked"); }
   }
+
+  async function copyToWishlist() {
+    if (!item || !userId) return;
+    const { data } = await supabase.from("perfumes").insert({ user_id:userId, brand:item.brand, model:item.model, status:"wishlist", image_url:item.imageUrl, rating_stars:item.ratingStars, notes_tags:item.notesTags, weather_tags:item.weatherTags, gender_scale:item.genderScale, longevity:item.longevity, sillage:item.sillage, value_rating:item.value, clone_similar:item.cloneSimilar, notes_text:item.notesText }).select("*").single();
+    if (data) { showToast("Added to wishlist ✓"); router.push(`/dashboard/perfumes/${data.id}`); }
+    else showToast("Failed to copy");
+  }
+
+  // Price per 100ml calculation
+  const priceStats = (() => {
+    if (!item || !purchases.length) return null;
+    let totalSpent = 0;
+    let price100ml = 0;
+    const bottleData: { ml: number; priceAed: number }[] = [];
+    for (const p of purchases) {
+      const aed = p.currency === "AED" ? p.price : p.price * (p.currency === "INR" ? 0.044 : 3.67);
+      totalSpent += aed;
+      if (p.ml > 0) bottleData.push({ ml: p.ml, priceAed: aed });
+    }
+    if (bottleData.length > 0) {
+      const totalMl  = bottleData.reduce((s,b) => s + b.ml, 0);
+      const totalAed = bottleData.reduce((s,b) => s + b.priceAed, 0);
+      price100ml = totalMl > 0 ? (totalAed / totalMl) * 100 : 0;
+    }
+    return { totalSpent, price100ml };
+  })();
 
   const V = { bg: isDark ? "#0d0f14" : "#f9f8f5", card: isDark ? "#16191f" : "#ffffff", border: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)", text: isDark ? "#f0ede8" : "#1a1a1a", muted: isDark ? "#9ba3b2" : "#6b7280", faint: isDark ? "#5c6375" : "#9ca3af", inputBg: isDark ? "#1e2130" : "#f9fafb", accent: "#F5A623" };
 
@@ -225,8 +281,10 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         </Link>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           <button style={btnStyle} onClick={copyToClipboard}>Share</button>
+          {item.status !== "wishlist" && <button style={btnStyle} onClick={copyToWishlist}>+ Wishlist</button>}
           <button style={isEdit ? { ...primaryBtnStyle } : btnStyle} onClick={() => setIsEdit(v => !v)}>{isEdit ? "✓ Done" : "Edit"}</button>
           {item.status !== "wishlist" && <button style={btnStyle} onClick={() => { setArchiveChoice("Emptied"); setShowArchive(true); }}>Archive</button>}
+          <button style={btnStyle} onClick={copyToWishlist}>+ Wishlist</button>
           <button style={dangerBtnStyle} onClick={() => setShowRemove(true)}>Remove</button>
         </div>
       </div>
@@ -276,7 +334,15 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
 
             {/* Quick stats */}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:10 }}>
-              {[["Longevity", item.longevity], ["Sillage", item.sillage], ["Gender", genderLabel(item.genderScale)], ["Value", item.value]].map(([k, v]) => (
+              {priceStats && priceStats.price100ml > 0 && <div key="price100" style={{ background: V.inputBg, borderRadius:10, padding:"10px 12px", border:`1px solid ${V.border}` }}>
+                <span style={labelStyle}>Per 100ml</span>
+                <span style={{ fontSize:13, fontWeight:700, color:"#F5A623" }}>AED {priceStats.price100ml.toFixed(0)}</span>
+              </div>}
+              {priceStats && priceStats.totalSpent > 0 && <div key="totalspent" style={{ background: V.inputBg, borderRadius:10, padding:"10px 12px", border:`1px solid ${V.border}` }}>
+                <span style={labelStyle}>Total spent</span>
+                <span style={{ fontSize:13, fontWeight:700, color:V.text }}>AED {priceStats.totalSpent.toFixed(0)}</span>
+              </div>}
+            {[["Longevity", item.longevity], ["Projection", item.sillage], ["Gender", genderLabel(item.genderScale)], ["Value", item.value]].map(([k, v]) => (
                 <div key={k} style={{ background: V.inputBg, borderRadius:10, padding:"10px 12px", border:`1px solid ${V.border}` }}>
                   <span style={labelStyle}>{k}</span>
                   <span style={{ fontSize:13, fontWeight:700, color: k==="Value" ? (v==="Worth it"?"#16a34a":v==="Not worth it"?"#dc2626":V.muted) : V.text }}>{v || "—"}</span>
@@ -314,7 +380,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         <div style={sectionStyle}>
           <span style={labelStyle}>Details</span>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:16 }}>
-            {([["Longevity","longevity"],["Sillage","sillage"],["Clone / similar","cloneSimilar"]] as const).map(([label, key]) => (
+            {([["Longevity","longevity"],["Projection","projection"],["Clone / similar","cloneSimilar"]] as const).map(([label, key]) => (
               <div key={key}>
                 <span style={labelStyle}>{label}</span>
                 {!isEdit
@@ -345,12 +411,34 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           </div>
         </div>
 
+        {/* Usage */}
+        <div style={sectionStyle}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <span style={labelStyle}>Usage occasions</span>
+          </div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {["Casual","Office","Party","Date","Night out","Travel","Gym","Home"].map(opt => {
+              const usageTags = getUsageTags(item);
+              const isSelected = usageTags.includes(opt);
+              return (
+                <button key={opt} onClick={() => isEdit ? setUsageTags(isSelected ? usageTags.filter(x=>x!==opt) : [...usageTags, opt]) : undefined}
+                  style={{ padding:"5px 12px", borderRadius:999, border:"none", cursor:isEdit?"pointer":"default", fontSize:12, fontWeight:600,
+                    background: isSelected ? "#F5A623" : isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.06)",
+                    color: isSelected ? "#fff" : V.muted }}>
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+          {!isEdit && getUsageTags(item).length === 0 && <span style={{ fontSize:12, color:V.faint }}>No usage set — click Edit to add</span>}
+        </div>
+
         {/* Notes text */}
         <div style={sectionStyle}>
           <span style={labelStyle}>Notes</span>
           {!isEdit
-            ? <div style={{ fontSize:14, lineHeight:1.7, color: item.notesText ? V.text : V.faint, whiteSpace:"pre-wrap" }}>{item.notesText || "No notes yet"}</div>
-            : <textarea style={{ ...inputStyle, resize:"vertical", minHeight:100, lineHeight:1.6 }} value={item.notesText} onChange={e => update({ notesText: e.target.value })} placeholder="Your thoughts on this fragrance…" />
+            ? <div style={{ fontSize:14, lineHeight:1.7, color: (item.notesText&&!item.notesText.startsWith("usage:")) ? V.text : V.faint, whiteSpace:"pre-wrap" }}>{item.notesText?.startsWith("usage:") ? "No notes yet" : item.notesText || "No notes yet"}</div>
+            : <textarea style={{ ...inputStyle, resize:"vertical", minHeight:100, lineHeight:1.6 }} value={item.notesText?.startsWith("usage:") ? "" : item.notesText} onChange={e => update({ notesText: e.target.value })} placeholder="Your thoughts on this fragrance…" />
           }
         </div>
 

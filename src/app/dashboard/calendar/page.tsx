@@ -35,7 +35,7 @@ const EVENT_COLORS:Record<EventType,string> = {
   work:"#3b82f6",birthday:"#ec4899",event:"#8b5cf6",due_paid:"#16a34a",note:"#6b7280"
 };
 const EVENT_LABELS:Record<EventType,string> = {
-  work:"Work",birthday:"Birthday 🎂",event:"Event",due_paid:"Due paid ✓",note:"Note"
+  work:"Work",birthday:"Anniversary 🎂",event:"Event",due_paid:"Due paid ✓",note:"Note"
 };
 
 function nowMonth() { return new Date().toISOString().slice(0,7); }
@@ -76,6 +76,9 @@ export default function CalendarPage() {
   const [addDateTo,  setAddDateTo]  = useState(new Date().toISOString().slice(0,10));
   const [addNotes,   setAddNotes]   = useState("");
   const [addRecur,   setAddRecur]   = useState(false);
+  const [addAnnivType, setAddAnnivType] = useState("Birthday");
+  const [addAnnivName, setAddAnnivName] = useState("");
+  const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [addSaving,  setAddSaving]  = useState(false);
 
   const isDark = typeof document!=="undefined"&&document.documentElement.classList.contains("dark");
@@ -114,7 +117,8 @@ export default function CalendarPage() {
 
   async function addEvent(){
     if(!userId) return;
-    const title=(addTitle.trim()||( addType==="work"?addShift:""));
+    const annivTitle = addType==="birthday" ? (addTitle.trim()||(addAnnivName?`${addAnnivType}: ${addAnnivName}`:addAnnivType)) : "";
+    const title=(addTitle.trim()||( addType==="work"?addShift:addType==="birthday"?annivTitle:""));
     if(!title) return;
     setAddSaving(true);
     const isWork=addType==="work";
@@ -123,7 +127,9 @@ export default function CalendarPage() {
     const dates=isWork?datesBetween(addDateFrom,addDateTo):[addDateFrom];
     const color=isWork?SHIFT_COLORS[addShift]:EVENT_COLORS[addType];
     // For work events, title = "Work:{shiftName}"
-    const finalTitle = isWork ? `Work:${addTitle.trim()||addShift}` : title;
+    // Work titles: named shifts get "Work:ShiftName", Custom just uses whatever user typed
+    const shiftLabel = addShift === "Custom" ? (addTitle.trim() || "Work") : `Work:${addTitle.trim()||addShift}`;
+    const finalTitle = isWork ? shiftLabel : title;
     const rows=dates.map(date=>({
       user_id:userId,date,title:finalTitle,event_type:addType,source_module:"manual",
       work_start:isWork&&!noTime?addStart:null,work_end:isWork&&!noTime?addEnd:null,
@@ -152,9 +158,15 @@ export default function CalendarPage() {
   const firstDay=firstDayOfMonth(year,mo);
   const todayStr=new Date().toISOString().slice(0,10);
 
+  // Apply type filter
+  const filteredEvents=useMemo(()=>{
+    if(!filterTypes.length) return events;
+    return events.filter(e=>filterTypes.includes(e.eventType));
+  },[events,filterTypes]);
+
   const eventsByDate=useMemo(()=>{
     const map=new Map<string,CalEvent[]>();
-    for(const ev of events){
+    for(const ev of filteredEvents){
       let date=ev.date;
       if(ev.isRecurring&&ev.recurType==="monthly"){ const d=new Date(ev.date); date=`${year}-${String(mo).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
       if(ev.isRecurring&&ev.recurType==="yearly"){ const d=new Date(ev.date); date=`${year}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
@@ -418,6 +430,20 @@ export default function CalendarPage() {
                 </div>
               </div>
 
+              {/* Anniversary subtype */}
+              {addType==="birthday"&&(
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                  <label style={lbl}>Type
+                    <select style={inp} value={addAnnivType} onChange={e=>setAddAnnivType(e.target.value)}>
+                      <option>Birthday</option><option>Wedding</option><option>Work</option><option>Custom</option>
+                    </select>
+                  </label>
+                  <label style={lbl}>Name
+                    <input style={inp} value={addAnnivName} onChange={e=>setAddAnnivName(e.target.value)} placeholder="e.g. John" />
+                  </label>
+                </div>
+              )}
+
               {/* Shift picker for work */}
               {addType==="work"&&(
                 <div style={lbl}>Shift
@@ -445,7 +471,7 @@ export default function CalendarPage() {
               {/* Title */}
               <label style={lbl}>
                 {addType==="work"?"Title (optional — defaults to shift name)":"Title"}
-                <input style={{...inp,width:"100%",boxSizing:"border-box" as const}} value={addTitle} onChange={e=>setAddTitle(e.target.value)} placeholder={addType==="work"?addShift:addType==="birthday"?"Name":"Event title"} />
+                <input style={{...inp,width:"100%",boxSizing:"border-box" as const}} value={addTitle} onChange={e=>setAddTitle(e.target.value)} placeholder={addType==="work"?addShift:addType==="birthday"?`${addAnnivType} name`:"Event title"} />
               </label>
 
               {/* Date range */}

@@ -74,6 +74,7 @@ export default function PortfolioPage() {
   const [recent,  setRecent]  = useState<Purchase[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [showAddItem, setShowAddItem] = useState(false);
+  const [showDeleteItem, setShowDeleteItem] = useState<string|null>(null);
   const [showUpdatePrice, setShowUpdatePrice] = useState<PortfolioItem|null>(null);
   const [newPrice, setNewPrice] = useState("");
   const [toast,   setToast]   = useState("");
@@ -139,6 +140,14 @@ export default function PortfolioPage() {
       setAllStats(p=>({...p,[added.id]:{totalUnits:0,totalPaidAed:0,avgUnitPrice:0}}));
       setShowAddItem(false);showToast("Asset added");
     }
+  }
+
+  async function deleteItem(id: string) {
+    await supabase.from("portfolio_items").delete().eq("id", id);
+    setItems(p => p.filter(x => x.id !== id));
+    setAllStats(p => { const n = {...p}; delete n[id]; return n; });
+    setShowDeleteItem(null);
+    showToast("Asset deleted");
   }
 
   async function updateCurrentPrice(item:PortfolioItem){
@@ -324,6 +333,19 @@ export default function PortfolioPage() {
             <div style={{padding:"0 20px 20px",display:"flex",justifyContent:"flex-end",gap:8}}>
               <button style={btn} onClick={()=>setShowUpdatePrice(null)}>Cancel</button>
               <button style={btnP} onClick={()=>updateCurrentPrice(showUpdatePrice)}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteItem && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowDeleteItem(null)}>
+          <div style={{background:V.card,border:`1px solid ${V.border}`,borderRadius:16,padding:22,width:"min(360px,100%)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:8}}>Delete asset?</div>
+            <div style={{fontSize:13,color:V.muted,marginBottom:16}}>All purchases for this asset will also be deleted.</div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+              <button style={btn} onClick={()=>setShowDeleteItem(null)}>Cancel</button>
+              <button style={{...btn,borderColor:"rgba(239,68,68,0.4)",color:"#ef4444"}} onClick={()=>deleteItem(showDeleteItem)}>Delete</button>
             </div>
           </div>
         </div>

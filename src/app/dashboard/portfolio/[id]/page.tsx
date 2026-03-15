@@ -36,6 +36,8 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [editPurchase, setEditPurchase] = useState<Purchase|null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string|null>(null);
   const [showUpdatePrice, setShowUpdatePrice] = useState(false);
   const [newPrice, setNewPrice] = useState("");
   const [toast, setToast] = useState("");
@@ -94,6 +96,54 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     }
   }
 
+  async function deleteItem() {
+    if (!item || !userId) return;
+    await supabase.from("portfolio_purchases").delete().eq("item_id", item.id);
+    await supabase.from("portfolio_items").delete().eq("id", item.id);
+    router.push("/dashboard/portfolio");
+  }
+
+  async function saveEditPurchase() {
+    if (!editPurchase) return;
+    const unitPrice = parseFloat(af.unitPrice) || editPurchase.unitPrice;
+    const units = parseFloat(af.units) || editPurchase.units;
+    const totalPaid = parseFloat(af.totalPaid) || (unitPrice * units);
+    await supabase.from("portfolio_purchases").update({
+      purchased_at: new Date(af.purchasedAt).toISOString(),
+      unit_price: unitPrice, units, total_paid: totalPaid,
+      currency: af.currency, source: af.source, notes: af.notes,
+    }).eq("id", editPurchase.id);
+    setPurchases(p => p.map(x => x.id === editPurchase.id ? { ...x, purchasedAt:new Date(af.purchasedAt).toISOString(), unitPrice, units, totalPaid, currency:af.currency, source:af.source, notes:af.notes } : x));
+    setEditPurchase(null);
+    setAf({ purchasedAt:new Date().toISOString().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });
+    showToast("Purchase updated");
+  }
+
+  async function deletePurchase(id: string) {
+    await supabase.from("portfolio_purchases").delete().eq("id", id);
+    setPurchases(p => p.filter(x => x.id !== id));
+    setShowDeleteConfirm(null);
+    showToast("Purchase deleted");
+  }
+
+  async function saveEditPurchase() {
+    if (!editPurchase || !userId) return;
+    const { data } = await supabase.from("portfolio_purchases").update({
+      purchased_at: new Date(af.purchasedAt).toISOString(),
+      unit_price: parseFloat(af.unitPrice) || editPurchase.unitPrice,
+      units: parseFloat(af.units) || editPurchase.units,
+      total_paid: parseFloat(af.totalPaid) || editPurchase.totalPaid,
+      currency: af.currency,
+      source: af.source,
+      notes: af.notes,
+    }).eq("id", editPurchase.id).select("*").single();
+    if (data) {
+      setPurchases(p => p.map(x => x.id === editPurchase.id ? dbToPurchase(data) : x));
+      setEditPurchase(null);
+      showToast("Purchase updated");
+    }
+  }
+
   async function updatePrice() {
     if (!item) return;
     const price = parseFloat(newPrice);
@@ -128,6 +178,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
           Portfolio
         </Link>
         <div style={{ display:"flex", gap:8 }}>
+          <button style={{ ...btn, padding:"6px 12px", fontSize:12, borderColor:"rgba(239,68,68,0.3)", color:"#ef4444" }} onClick={() => setShowDeleteItem(true)}>Delete</button>
           <button style={{ ...btn, padding:"6px 12px", fontSize:12 }} onClick={() => { setNewPrice(item.currentPrice?.toString()??""); setShowUpdatePrice(true); }}>Update price</button>
           <button style={btnPrimary} onClick={() => setShowAdd(true)}>+ Add purchase</button>
         </div>
@@ -200,10 +251,16 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
                       {p.notes && <span style={{ fontStyle:"italic", marginLeft:10 }}>{p.notes}</span>}
                     </div>
                   </div>
-                  <div style={{ textAlign:"right" }}>
+                  <div style={{ textAlign:"right", display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
                     <div style={{ fontSize:14, fontWeight:800 }}>Paid: {p.currency} {fmtNum(p.totalPaid)}</div>
                     {p.currency !== "AED" && <div style={{ fontSize:11, color:V.faint }}>≈ AED {fmtNum(costAed)}</div>}
                     {pl !== null && <div style={{ fontSize:12, fontWeight:700, color:isUpP?"#16a34a":"#ef4444", marginTop:2 }}>{isUpP?"+":""}AED {fmtNum(pl)}</div>}
+                    <div style={{ display:"flex", gap:6, marginTop:4 }}>
+                      <button onClick={() => { setEditPurchase(p); setAf({ purchasedAt:p.purchasedAt.slice(0,16), unitPrice:String(p.unitPrice), units:String(p.units), totalPaid:String(p.totalPaid), currency:p.currency, source:p.source, notes:p.notes }); setShowAdd(true); }}
+                        style={{ padding:"3px 9px", borderRadius:6, border:`1px solid ${V.border}`, background:V.card, color:V.muted, cursor:"pointer", fontSize:11 }}>Edit</button>
+                      <button onClick={() => setShowDeleteConfirm(p.id)}
+                        style={{ padding:"3px 9px", borderRadius:6, border:"1px solid rgba(239,68,68,0.3)", background:"transparent", color:"#ef4444", cursor:"pointer", fontSize:11 }}>Delete</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -217,7 +274,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:50, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={()=>setShowAdd(false)}>
           <div style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:18, width:"min(560px,100%)", maxHeight:"92vh", overflow:"auto" }} onClick={e=>e.stopPropagation()}>
             <div style={{ padding:"18px 20px", borderBottom:`1px solid ${V.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div><div style={{ fontSize:11, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.1em" }}>{item.symbol}</div><div style={{ fontSize:18, fontWeight:800 }}>Add purchase</div></div>
+              <div><div style={{ fontSize:11, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.1em" }}>{item.symbol}</div><div style={{ fontSize:18, fontWeight:800 }}>{editPurchase ? "Edit purchase" : "Add purchase"}</div></div>
               <button style={btn} onClick={()=>setShowAdd(false)}>✕</button>
             </div>
             <div style={{ padding:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
@@ -246,8 +303,8 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
               </label>
             </div>
             <div style={{ padding:"0 20px 20px", display:"flex", justifyContent:"flex-end", gap:8 }}>
-              <button style={btn} onClick={()=>setShowAdd(false)}>Cancel</button>
-              <button style={btnPrimary} onClick={addPurchase}>Save purchase</button>
+              <button style={btn} onClick={()=>{setShowAdd(false);setEditPurchase(null);}}>Cancel</button>
+              <button style={btnPrimary} onClick={editPurchase ? saveEditPurchase : addPurchase}>{editPurchase ? "Update" : "Save purchase"}</button>
             </div>
           </div>
         </div>
@@ -266,6 +323,20 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
             <div style={{ padding:"0 20px 20px", display:"flex", justifyContent:"flex-end", gap:8 }}>
               <button style={btn} onClick={()=>setShowUpdatePrice(false)}>Cancel</button>
               <button style={btnPrimary} onClick={updatePrice}>Update</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirm */}
+      {showDeleteConfirm && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:50, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={()=>setShowDeleteConfirm(null)}>
+          <div style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:16, padding:22, width:"min(380px,100%)" }} onClick={e=>e.stopPropagation()}>
+            <div style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>Delete purchase?</div>
+            <div style={{ fontSize:13, color:V.muted, marginBottom:16 }}>This cannot be undone.</div>
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
+              <button style={btn} onClick={()=>setShowDeleteConfirm(null)}>Cancel</button>
+              <button style={{ ...btn, borderColor:"rgba(239,68,68,0.4)", color:"#ef4444" }} onClick={()=>deletePurchase(showDeleteConfirm)}>Delete</button>
             </div>
           </div>
         </div>

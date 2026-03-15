@@ -9,11 +9,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("hidden_modules")
+    .eq("id", user.id)
+    .single();
+
+  const hiddenModules: string[] = profile?.hidden_modules ?? [];
+
   return (
     <div className="flex h-full min-h-screen">
-      <Sidebar userEmail={user.email ?? ""} />
-      {/* lg: offset for sidebar. mobile: offset for top bar (h-14 = 56px) */}
-      <main className="flex-1 min-h-screen lg:ml-[240px] pt-14 lg:pt-0" style={{ background: "var(--main-bg)" }}>
+      <Sidebar userEmail={user.email ?? ""} hiddenModules={hiddenModules} />
+      {/* main content — uses CSS var set by sidebar JS for smooth resize */}
+      <main className="flex-1 min-h-screen lg:ml-[240px] pt-14 lg:pt-0 transition-all duration-300"
+        id="main-content"
+        style={{ background: "var(--main-bg)" }}>
         <div className="page-enter">{children}</div>
       </main>
     </div>

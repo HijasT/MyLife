@@ -299,19 +299,15 @@ export default function PerfumesPage() {
                       ? <img src={item.imageUrl} alt="" style={{ width:"100%", height:160, objectFit:"cover", borderRadius:"14px 14px 0 0", display:"block" }} />
                       : <div style={{ width:"100%", height:160, borderRadius:"14px 14px 0 0", background:V.input, display:"flex", alignItems:"center", justifyContent:"center", fontSize:36 }}>🌸</div>
                     }
-                    <div style={{ padding:"12px 14px 14px" }}>
-                      <div style={{ fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:V.faint, marginBottom:2 }}>{item.brand}</div>
-                      <div style={{ fontSize:14, fontWeight:700, marginBottom:8, lineHeight:1.3 }}>{item.model}</div>
-                      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, flexWrap:"wrap" }}>
-                        <Stars value={item.ratingStars} size={12} />
-                        <div style={{ display:"flex", gap:4, alignItems:"center" }}>
-                          {tabStats.newIds.has(item.id) && <span style={{ fontSize:9, fontWeight:800, padding:"2px 7px", borderRadius:999, background:"rgba(22,163,74,0.12)", color:"#16a34a", textTransform:"uppercase", letterSpacing:"0.06em" }}>New</span>}
-                          <span style={{ fontSize:10, fontWeight:700, padding:"3px 8px", borderRadius:999, textTransform:"uppercase",
-                            background: item.status==="wardrobe"?"rgba(245,166,35,0.12)":item.status==="wishlist"?"rgba(99,102,241,0.1)":"rgba(107,114,128,0.1)",
-                            color: item.status==="wardrobe"?"#d97706":item.status==="wishlist"?"#6366f1":"#6b7280" }}>
-                            {item.status}
-                          </span>
-                        </div>
+                    <div style={{ padding:"10px 12px 12px" }}>
+                      <div style={{ fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:V.faint, marginBottom:1 }}>{item.brand}</div>
+                      <div style={{ fontSize:13, fontWeight:700, marginBottom:6, lineHeight:1.3 }}>{item.model}</div>
+                      <div style={{ marginBottom:5 }}><Stars value={item.ratingStars} size={11} /></div>
+                      <div style={{ display:"flex", gap:3, flexWrap:"wrap", alignItems:"center" }}>
+                        {tabStats.newIds.has(item.id) && <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:999, background:"rgba(22,163,74,0.12)", color:"#16a34a", textTransform:"uppercase", letterSpacing:"0.06em" }}>New</span>}
+                        {item.weatherTags.slice(0,2).map(w => (
+                          <span key={w} style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:999, background:"rgba(99,102,241,0.1)", color:"#6366f1" }}>{w}</span>
+                        ))}
                       </div>
                     </div>
                   </button>

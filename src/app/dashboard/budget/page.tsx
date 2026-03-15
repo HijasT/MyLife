@@ -116,7 +116,10 @@ export default function DueTrackerPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [editItemId, setEditItemId] = useState<string|null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set<string>();
+    try { const s = localStorage.getItem("due_collapsed"); return s ? new Set(JSON.parse(s)) : new Set<string>(); } catch { return new Set<string>(); }
+  });
   const [toast, setToast] = useState("");
   const [newItem, setNewItem] = useState({ name:"", group:"UAE", statementDay:"", dueDay:"", defaultCurrency:"AED" as Currency, defaultAmount:"", isFixed:false });
 
@@ -219,7 +222,11 @@ export default function DueTrackerPage() {
   }
 
   function toggleGroup(g: string) {
-    setCollapsedGroups(prev => { const n = new Set(prev); n.has(g)?n.delete(g):n.add(g); return n; });
+    setCollapsedGroups(prev => {
+      const n = new Set(prev); n.has(g)?n.delete(g):n.add(g);
+      try { localStorage.setItem("due_collapsed", JSON.stringify([...n])); } catch {}
+      return n;
+    });
   }
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(""), 2500); }
