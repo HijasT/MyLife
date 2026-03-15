@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { saveToCache, loadFromCache, markSynced } from "@/hooks/useSyncStatus";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type TabKey = "wardrobe" | "wishlist" | "archive" | "purchases";
@@ -130,6 +131,12 @@ export default function PerfumesPage() {
   // Load from Supabase
   useEffect(() => {
     async function load() {
+      // Show cached data instantly while fetching
+      const cached = loadFromCache<Perfume[]>("perfumes");
+      const cachedPur = loadFromCache<Purchase[]>("purchases");
+      if (cached) { setItems(cached); setGlobalNotes(Array.from(new Set(cached.flatMap(x=>x.notesTags))).sort()); setLoading(false); }
+      if (cachedPur) setPurchases(cachedPur);
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
       setUserId(user.id);
@@ -138,9 +145,13 @@ export default function PerfumesPage() {
         supabase.from("perfume_purchases").select("*").eq("user_id", user.id).order("date", { ascending:false }),
       ]);
       const loaded = (pr.data??[]).map(dbToItem);
+      const loadedPur = (pur.data??[]).map(dbToPurchase);
       setItems(loaded);
-      setPurchases((pur.data??[]).map(dbToPurchase));
+      setPurchases(loadedPur);
       setGlobalNotes(Array.from(new Set(loaded.flatMap(x=>x.notesTags))).sort());
+      saveToCache("perfumes", loaded);
+      saveToCache("purchases", loadedPur);
+      markSynced();
       setLoading(false);
     }
     load();
@@ -184,8 +195,16 @@ export default function PerfumesPage() {
     timerRef.current[id] = setTimeout(()=>{setToasts(p=>p.filter(x=>x.id!==id));}, 2500);
   }
 
-  function openDetail(id: string) { setSelectedId(id); setIsEditMode(false); setNoteManagerOpen(false); setWeatherManagerOpen(false); }
-  function closeDetail() { setSelectedId(null); setIsEditMode(false); setArchiveOpen(false); setRemoveOpen(false); setPhotoOpen(false); setNoteManagerOpen(false); setWeatherManagerOpen(false); }
+  function openDetail(id: string) {
+    setSelectedId(id); setIsEditMode(false); setNoteManagerOpen(false); setWeatherManagerOpen(false);
+    document.body.style.overflow = "hidden";
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function closeDetail() {
+    setSelectedId(null); setIsEditMode(false); setArchiveOpen(false); setRemoveOpen(false);
+    setPhotoOpen(false); setNoteManagerOpen(false); setWeatherManagerOpen(false);
+    document.body.style.overflow = "";
+  }
 
   async function updateItem(partial: Partial<Perfume>) {
     if (!selected) return;
@@ -269,6 +288,16 @@ export default function PerfumesPage() {
     if (selected.status==="wishlist") { toast("Already in wishlist","info"); return; }
     const { data } = await supabase.from("perfumes").insert({ user_id:userId, brand:selected.brand, model:selected.model, status:"wishlist", image_url:selected.imageUrl, rating_stars:selected.ratingStars, notes_tags:selected.notesTags, weather_tags:selected.weatherTags, gender_scale:selected.genderScale, longevity:selected.longevity, sillage:selected.sillage, value_rating:selected.value, clone_similar:selected.cloneSimilar, notes_text:selected.notesText }).select("*").single();
     if (data) { setItems(p=>[...p,{...selected,id:data.id,status:"wishlist",bottles:[],archiveReason:undefined}]); toast("Added to wishlist"); }
+  }
+
+  async function uploadPhoto(file: File): Promise<string | null> {
+    if (!userId || !selected) return null;
+    const ext = file.name.split(".").pop() ?? "jpg";
+    const path = `${userId}/${selected.id}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("aromatica").upload(path, file, { upsert: true });
+    if (error) { toast("Upload failed: " + error.message, "error"); return null; }
+    const { data } = supabase.storage.from("aromatica").getPublicUrl(path);
+    return data.publicUrl;
   }
 
   async function shareItem() {
@@ -429,7 +458,7 @@ export default function PerfumesPage() {
 
       {/* Header */}
       <div className="aro-header">
-        <div className="aro-title">Aroma<span>tica</span></div>
+        <div className="aro-title">Aroma<span>tica</span> <span style={{fontSize:13,fontStyle:"normal",fontWeight:600,color:"var(--c-muted)",letterSpacing:"normal"}}>— Fragrance Collection</span></div>
         <div className="aro-header-btns">
           <button className="aro-btn" onClick={downloadCsv}>Export CSV</button>
           <button className="aro-btn aro-btn-primary" onClick={() => { setAddMode("perfume"); setAddContextId(null); setAf(f=>({...f,status:tabStatusMap[activeTab]??"wardrobe",brand:"",model:"",imageDataUrl:"",rating:4,bottleType:"Full bottle",sizeMl:"100",usage:"Casual",price:"0",shop:"Unknown",shopLink:"",date:nowIso()})); setShowAdd(true); }}>+ Add</button>
@@ -674,7 +703,27 @@ export default function PerfumesPage() {
             {/* Prompts */}
             {removeOpen && <div className="aro-inline-prompt"><div className="aro-prompt-box"><div className="aro-prompt-title">Remove this perfume?</div><div className="aro-prompt-sub">This will permanently delete {selected.brand} {selected.model} and all its purchase records.</div><div className="aro-prompt-btns"><button className="aro-btn" onClick={()=>setRemoveOpen(false)}>Cancel</button><button className="aro-btn aro-btn-danger" onClick={doRemove}>Remove</button></div></div></div>}
             {archiveOpen && selected.status!=="wishlist" && <div className="aro-inline-prompt"><div className="aro-prompt-box"><div className="aro-prompt-title">Move to archive</div><div className="aro-prompt-sub">What happened to this one?</div><div className="aro-radio-group">{(["Sold","Emptied","Gifted"] as const).map(r=><label key={r} className="aro-radio"><input type="radio" checked={archiveChoice===r} onChange={()=>setArchiveChoice(r)} />{r}</label>)}</div><div className="aro-prompt-btns"><button className="aro-btn" onClick={()=>setArchiveOpen(false)}>Cancel</button><button className="aro-btn aro-btn-primary" onClick={doArchive}>Archive</button></div></div></div>}
-            {photoOpen && <div className="aro-inline-prompt"><div className="aro-prompt-box"><div className="aro-prompt-title">Change photo</div><div className="aro-prompt-sub">Paste an image URL or a direct link to any image.</div><input className="aro-input" value={photoInput} onChange={e=>setPhotoInput(e.target.value)} placeholder="https://…" style={{marginBottom:4}} /><div className="aro-prompt-btns"><button className="aro-btn" onClick={()=>setPhotoOpen(false)}>Cancel</button><button className="aro-btn aro-btn-primary" onClick={async()=>{await updateItem({imageUrl:photoInput.trim()});setPhotoOpen(false);toast("Photo updated");}}>Apply</button></div></div></div>}
+            {photoOpen && <div className="aro-inline-prompt"><div className="aro-prompt-box">
+              <div className="aro-prompt-title">Change photo</div>
+              <div className="aro-prompt-sub">Upload a photo or paste an image URL.</div>
+              <div style={{marginBottom:10}}>
+                <div className="aro-field-label" style={{marginBottom:6}}>Upload from device</div>
+                <input type="file" accept="image/*" style={{fontSize:12,color:"var(--c-secondary)"}}
+                  onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    toast("Uploading…", "info");
+                    const url = await uploadPhoto(file);
+                    if (url) { await updateItem({imageUrl:url}); setPhotoOpen(false); toast("Photo updated"); }
+                  }} />
+              </div>
+              <div className="aro-field-label" style={{marginBottom:6}}>Or paste image URL</div>
+              <input className="aro-input" value={photoInput} onChange={e=>setPhotoInput(e.target.value)} placeholder="https://…" />
+              <div className="aro-prompt-btns">
+                <button className="aro-btn" onClick={()=>setPhotoOpen(false)}>Cancel</button>
+                <button className="aro-btn aro-btn-primary" onClick={async()=>{if(!photoInput.trim())return;await updateItem({imageUrl:photoInput.trim()});setPhotoOpen(false);toast("Photo updated");}}>Apply URL</button>
+              </div>
+            </div></div>}
             {noteManagerOpen && <div className="aro-inline-prompt"><div className="aro-prompt-box"><div className="aro-prompt-title">Notes tags</div><div className="aro-prompt-sub">Tap to toggle. Add new tags to your global list.</div><div className="aro-tag-picker">{globalNotes.map(t=><button key={t} className={`aro-tag-opt${selected.notesTags.includes(t)?" sel":""}`} onClick={()=>updateItem({notesTags:selected.notesTags.includes(t)?selected.notesTags.filter(x=>x!==t):[...selected.notesTags,t]})}>{t}</button>)}</div><div className="aro-tag-adder"><input className="aro-input" value={noteInput} onChange={e=>setNoteInput(e.target.value)} placeholder="New tag…" /><button className="aro-btn aro-btn-primary" onClick={()=>{const v=noteInput.trim();if(!v||globalNotes.includes(v))return;setGlobalNotes(p=>[...p,v].sort());setNoteInput("");toast("Tag added");}}>Add</button></div><div className="aro-prompt-btns"><button className="aro-btn aro-btn-primary" onClick={()=>setNoteManagerOpen(false)}>Done</button></div></div></div>}
             {weatherManagerOpen && <div className="aro-inline-prompt"><div className="aro-prompt-box"><div className="aro-prompt-title">Weather</div><div className="aro-tag-picker">{(["Cold","Neutral","Hot"] as const).map(w=><button key={w} className={`aro-tag-opt${selected.weatherTags.includes(w)?" sel":""}`} onClick={()=>updateItem({weatherTags:selected.weatherTags.includes(w)?selected.weatherTags.filter(x=>x!==w):[...selected.weatherTags,w] as ("Cold"|"Neutral"|"Hot")[]})}>{w}</button>)}</div><div className="aro-prompt-btns"><button className="aro-btn aro-btn-primary" onClick={()=>setWeatherManagerOpen(false)}>Done</button></div></div></div>}
           </div>
