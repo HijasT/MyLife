@@ -165,18 +165,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     router.push("/dashboard/perfumes");
   }
 
-  async function copyToWishlist() {
-    if (!item) return;
-    const { data } = await supabase.from("perfumes").insert({
-      user_id: userId, brand:item.brand, model:item.model, status:"wishlist",
-      image_url:item.imageUrl, rating_stars:item.ratingStars,
-      notes_tags:item.notesTags, weather_tags:item.weatherTags,
-      gender_scale:item.genderScale, longevity:item.longevity,
-      sillage:item.sillage, value_rating:item.value,
-      clone_similar:item.cloneSimilar, notes_text:item.notesText
-    }).select("id").single();
-    if (data) showToast("Copied to wishlist");
-  }
 
   // Price per 100ml calculation
 
@@ -273,7 +261,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           {item.status !== "wishlist" && <button style={btnStyle} onClick={copyToWishlist}>+ Wishlist</button>}
           <button style={isEdit ? { ...primaryBtnStyle } : btnStyle} onClick={() => setIsEdit(v => !v)}>{isEdit ? "✓ Done" : "Edit"}</button>
           {item.status !== "wishlist" && <button style={btnStyle} onClick={() => { setArchiveChoice("Emptied"); setShowArchive(true); }}>Archive</button>}
-          <button style={btnStyle} onClick={copyToWishlist}>+ Wishlist</button>
           <button style={dangerBtnStyle} onClick={() => setShowRemove(true)}>Remove</button>
         </div>
       </div>
