@@ -140,7 +140,7 @@ export default function PerfumesPage() {
       const loaded = (pr.data??[]).map(dbToItem);
       setItems(loaded);
       setPurchases((pur.data??[]).map(dbToPurchase));
-      setGlobalNotes([...new Set(loaded.flatMap(x=>x.notesTags))].sort());
+      setGlobalNotes(Array.from(new Set(loaded.flatMap(x=>x.notesTags))).sort());
       setLoading(false);
     }
     load();
