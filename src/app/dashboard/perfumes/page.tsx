@@ -262,7 +262,7 @@ export default function PerfumesPage() {
           <div style={{ margin:"10px 24px 0", padding:"10px 16px", background:V.card, border:`1px solid ${V.border}`, borderRadius:12, display:"flex", gap:20, flexWrap:"wrap", fontSize:13 }}>
             <span style={{ color:V.muted }}><strong style={{ color:V.text, fontWeight:700 }}>{s.count}</strong> perfumes</span>
             {s.total > 0 && <span style={{ color:V.muted }}>Total spent: <strong style={{ color:V.accent, fontWeight:700 }}>{s.currency} {s.total.toFixed(2)}</strong></span>}
-            {tabStats.newIds.size > 0 && activeTab === "wardrobe" && <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {[...tabStats.newIds].filter(id => items.find(x=>x.id===id&&x.status==="wardrobe")).length} added this month</span>}
+            {tabStats.newIds.size > 0 && activeTab === "wardrobe" && <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter(id => items.find(x=>x.id===id&&x.status==="wardrobe")).length} added this month</span>}
           </div>
         ) : null;
       })()}
