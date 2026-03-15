@@ -147,8 +147,9 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
         </div>
         <div style={{maxWidth:860,margin:"0 auto",padding:"24px 20px"}}>
           {BODY_FIELDS.map(field => {
-            const pts = bodyMetrics.filter(m => (m as Record<string,unknown>)[field.key] !== null)
-              .map(m => ({ date:m.measuredAt, val:(m as Record<string,number>)[field.key] }));
+            const pts = bodyMetrics
+              .filter(m => (m as unknown as Record<string,unknown>)[field.key] !== null)
+              .map(m => ({ date:m.measuredAt, val:(m as unknown as Record<string,number>)[field.key] }));
             if (!pts.length) return null;
             return (
               <div key={field.key} style={{...section,marginBottom:20}}>
