@@ -103,22 +103,6 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     router.push("/dashboard/portfolio");
   }
 
-  async function saveEditPurchase() {
-    if (!editPurchase) return;
-    const unitPrice = parseFloat(af.unitPrice) || editPurchase.unitPrice;
-    const units = parseFloat(af.units) || editPurchase.units;
-    const totalPaid = parseFloat(af.totalPaid) || (unitPrice * units);
-    await supabase.from("portfolio_purchases").update({
-      purchased_at: new Date(af.purchasedAt).toISOString(),
-      unit_price: unitPrice, units, total_paid: totalPaid,
-      currency: af.currency, source: af.source, notes: af.notes,
-    }).eq("id", editPurchase.id);
-    setPurchases(p => p.map(x => x.id === editPurchase.id ? { ...x, purchasedAt:new Date(af.purchasedAt).toISOString(), unitPrice, units, totalPaid, currency:af.currency, source:af.source, notes:af.notes } : x));
-    setEditPurchase(null);
-    setAf({ purchasedAt:new Date().toISOString().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });
-    showToast("Purchase updated");
-  }
-
   async function deletePurchase(id: string) {
     await supabase.from("portfolio_purchases").delete().eq("id", id);
     setPurchases(p => p.filter(x => x.id !== id));
