@@ -179,17 +179,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   }
 
   // Price per 100ml calculation
-  const priceStats = (() => {
-    if (!purchases.length) return null;
-    let totalAed = 0;
-    let totalMl = 0;
-    for (const p of purchases) {
-      if (p.price > 0) { totalAed += p.currency === "AED" ? p.price : p.price * 3.67; }
-      if (p.ml > 0) totalMl += p.ml;
-    }
-    const per100ml = totalMl > 0 ? (totalAed / totalMl) * 100 : null;
-    return { totalAed, totalMl, per100ml };
-  })();
 
   async function doArchive() {
     if (!item || item.status === "wishlist") return;
