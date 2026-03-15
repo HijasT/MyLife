@@ -162,7 +162,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
           Portfolio
         </Link>
         <div style={{ display:"flex", gap:8 }}>
-          <button style={{ ...btn, padding:"6px 12px", fontSize:12, borderColor:"rgba(239,68,68,0.3)", color:"#ef4444" }} onClick={() => setShowDeleteItem(true)}>Delete</button>
+          <button style={{ ...btn, padding:"6px 12px", fontSize:12, borderColor:"rgba(239,68,68,0.3)", color:"#ef4444" }} onClick={() => setShowDeleteConfirm("__item__")}>Delete asset</button>
           <button style={{ ...btn, padding:"6px 12px", fontSize:12 }} onClick={() => { setNewPrice(item.currentPrice?.toString()??""); setShowUpdatePrice(true); }}>Update price</button>
           <button style={btnPrimary} onClick={() => setShowAdd(true)}>+ Add purchase</button>
         </div>
@@ -312,15 +312,25 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
         </div>
       )}
 
-      {/* Delete confirm */}
       {showDeleteConfirm && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:50, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={()=>setShowDeleteConfirm(null)}>
           <div style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:16, padding:22, width:"min(380px,100%)" }} onClick={e=>e.stopPropagation()}>
-            <div style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>Delete purchase?</div>
-            <div style={{ fontSize:13, color:V.muted, marginBottom:16 }}>This cannot be undone.</div>
+            <div style={{ fontSize:16, fontWeight:800, marginBottom:8 }}>
+              {showDeleteConfirm === "__item__" ? `Delete ${item.name}?` : "Delete purchase?"}
+            </div>
+            <div style={{ fontSize:13, color:V.muted, marginBottom:16 }}>
+              {showDeleteConfirm === "__item__" ? "This will delete the asset and all its purchases. Cannot be undone." : "This cannot be undone."}
+            </div>
             <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
               <button style={btn} onClick={()=>setShowDeleteConfirm(null)}>Cancel</button>
-              <button style={{ ...btn, borderColor:"rgba(239,68,68,0.4)", color:"#ef4444" }} onClick={()=>deletePurchase(showDeleteConfirm)}>Delete</button>
+              <button style={{ ...btn, borderColor:"rgba(239,68,68,0.4)", color:"#ef4444" }} onClick={async () => {
+                if (showDeleteConfirm === "__item__") {
+                  await supabase.from("portfolio_items").delete().eq("id", item.id);
+                  router.push("/dashboard/portfolio");
+                } else {
+                  deletePurchase(showDeleteConfirm);
+                }
+              }}>Delete</button>
             </div>
           </div>
         </div>
