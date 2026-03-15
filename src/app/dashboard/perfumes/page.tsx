@@ -240,7 +240,6 @@ export default function PerfumesPage() {
       <div style={{ padding:"22px 24px 0", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
         <div style={{ fontSize:22, fontWeight:800 }}>Aroma<span style={{ color:V.accent, fontStyle:"italic" }}>tica</span> <span style={{ fontSize:13, fontWeight:500, color:V.faint, fontStyle:"normal" }}>— Fragrance Collection</span></div>
         <div style={{ display:"flex", gap:8 }}>
-          <button style={btn} onClick={downloadCsv}>Export CSV</button>
           <button style={btnPrimary} onClick={() => { setAf({ status:"wardrobe", brand:"", model:"", imageDataUrl:"", rating:4, bottleType:"Full bottle", sizeMl:"100", usage:"Casual", price:"0", currency:"AED", shop:"Unknown", shopLink:"", date:nowIso() }); setShowAdd(true); }}>+ Add</button>
         </div>
       </div>
