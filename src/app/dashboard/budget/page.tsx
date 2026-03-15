@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 
@@ -61,6 +62,7 @@ function dbToEntry(r: any): DueEntry {
 
 export default function DueTrackerPage() {
   const supabase = createClient();
+  const router = useRouter();
   const [userId, setUserId] = useState<string|null>(null);
   const [loading, setLoading] = useState(true);
   const [month, setMonth] = useState(nowMonth());
@@ -71,6 +73,7 @@ export default function DueTrackerPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [editEntryId, setEditEntryId] = useState<string|null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState("");
   const [newItem, setNewItem] = useState({ name:"", group:"UAE", dueDay:"", defaultCurrency:"AED" as Currency, defaultAmount:"", isFixed:false });
 
@@ -137,9 +140,12 @@ export default function DueTrackerPage() {
     setEntries(p => p.map(e => e.id === entry.id ? { ...e, status:newStatus, paidAt } : e));
     showToast(newStatus === "paid" ? "✓ Marked as paid" : "Unmarked");
 
-    // Log to calendar
     if (newStatus === "paid" && userId) {
+      // Add calendar event
       await supabase.from("calendar_events").insert({ user_id:userId, date:new Date().toISOString().slice(0,10), title:`Due paid: ${item.name}`, event_type:"due_paid", source_module:"due_tracker", source_id:entry.id, color:"#16a34a" });
+    } else if (newStatus === "pending" && userId) {
+      // Remove calendar event when unmarking
+      await supabase.from("calendar_events").delete().eq("user_id", userId).eq("source_id", entry.id).eq("event_type", "due_paid");
     }
   }
 
@@ -226,6 +232,14 @@ export default function DueTrackerPage() {
   const btnPrimary = { ...btn, background:V.accent, border:"none", color:"#fff", fontWeight:700 } as const;
   const inp = { padding:"8px 12px", borderRadius:8, border:`1px solid ${V.border}`, background:V.input, color:V.text, fontSize:13, outline:"none" } as const;
 
+  function toggleGroup(group: string) {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(group) ? next.delete(group) : next.add(group);
+      return next;
+    });
+  }
+
   if (loading) return <div style={{ minHeight:"60vh", display:"flex", alignItems:"center", justifyContent:"center", background:V.bg }}><div style={{ width:28, height:28, border:`2.5px solid ${V.accent}`, borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
 
   return (
@@ -276,7 +290,7 @@ export default function DueTrackerPage() {
 
       {/* Due items by group */}
       <div style={{ padding:"16px 24px 24px", display:"flex", flexDirection:"column", gap:16 }}>
-        {Array.from(groups.entries()).map(([group, groupItems]) => {
+        {[...groups.entries()].map(([group, groupItems]) => {
           const groupEntries = groupItems.map(item => ({ item, entry: getEntry(item.id) }));
           const groupTotalAed = groupEntries.reduce((s,{item,entry}) => {
             const amt = entry?.amount ?? item.defaultAmount ?? 0;
@@ -291,21 +305,22 @@ export default function DueTrackerPage() {
 
           return (
             <div key={group} style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:14, overflow:"hidden" }}>
-              {/* Group header */}
-              <div style={{ padding:"12px 16px", borderBottom:`1px solid ${V.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)" }}>
+              {/* Group header — clickable to collapse */}
+              <div onClick={() => toggleGroup(group)} style={{ padding:"12px 16px", borderBottom:`1px solid ${V.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)", cursor:"pointer", userSelect:"none" }}>
                 <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                  <span style={{ fontSize:13, color:V.faint, transition:"transform 0.2s", display:"inline-block", transform:collapsedGroups.has(group)?"rotate(-90deg)":"rotate(0deg)" }}>▾</span>
                   <span style={{ fontSize:14, fontWeight:800 }}>{group}</span>
                   <span style={{ fontSize:11, color:V.faint }}>{groupItems.length} items</span>
                 </div>
-                <div style={{ display:"flex", gap:16, fontSize:12, color:V.muted }}>
+                <div style={{ display:"flex", gap:16, fontSize:12, color:V.muted }} onClick={e=>e.stopPropagation()}>
                   <span>Total: <strong style={{ color:V.text }}>AED {groupTotalAed.toFixed(0)}</strong></span>
                   <span>Paid: <strong style={{ color:"#16a34a" }}>AED {groupPaidAed.toFixed(0)}</strong></span>
                   <span>Pending: <strong style={{ color:"#ef4444" }}>AED {(groupTotalAed-groupPaidAed).toFixed(0)}</strong></span>
                 </div>
               </div>
 
-              {/* Items */}
-              {groupItems.map(item => {
+              {/* Items — hidden when collapsed */}
+              {!collapsedGroups.has(group) && groupItems.map(item => {
                 const entry = getEntry(item.id);
                 const isPaid = entry?.status === "paid";
                 const isEditing = editEntryId === item.id;
@@ -366,6 +381,9 @@ export default function DueTrackerPage() {
 
                       {/* Actions */}
                       <div style={{ display:"flex", gap:6 }}>
+                        <button onClick={() => router.push(`/dashboard/budget/${item.id}`)} style={{ ...btn, padding:"5px 10px", fontSize:11, color:V.accent }}>
+                          Stats
+                        </button>
                         <button onClick={() => setEditEntryId(isEditing ? null : item.id)} style={{ ...btn, padding:"5px 10px", fontSize:11, color:isEditing?V.accent:V.muted }}>
                           {isEditing ? "Done" : "Edit"}
                         </button>
