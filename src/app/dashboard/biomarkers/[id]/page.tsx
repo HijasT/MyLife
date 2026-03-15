@@ -80,6 +80,8 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
   const [loading, setLoading] = useState(true);
   const [editTest, setEditTest] = useState(false);
   const [editFields, setEditFields] = useState({ method:"", refRange:"", refMin:"", refMax:"", unit:"", groupName:"" });
+  const [allGroups, setAllGroups] = useState<string[]>([]);
+  const [newGroupName, setNewGroupName] = useState("");
   const [toast, setToast] = useState("");
   const [userId, setUserId] = useState<string|null>(null);
 
@@ -105,6 +107,11 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
         }
         setResults((rr.data??[]).map(r => ({ id:r.id, testDate:r.test_date, valueNum:r.value_num??null, valueText:r.value_text??"", notes:r.notes??"" })));
       }
+      // Load all unique groups
+      const { data: gData } = await supabase.from("biomarker_tests").select("group_name").eq("user_id", user.id);
+      const uniqueGroups = [...new Set((gData??[]).map((r:{group_name:string})=>r.group_name))].sort();
+      setAllGroups(uniqueGroups);
+
       setLoading(false);
     }
     load();
@@ -232,7 +239,17 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
                 Unit <input style={inp} value={editFields.unit} onChange={e=>setEditFields(p=>({...p,unit:e.target.value}))} />
               </label>
               <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em"}}>
-                Group <input style={inp} value={editFields.groupName} onChange={e=>setEditFields(p=>({...p,groupName:e.target.value}))} placeholder="e.g. Liver Profile" />
+                Group
+                <select style={inp} value={editFields.groupName} onChange={e=>setEditFields(p=>({...p,groupName:e.target.value}))}>
+                  {allGroups.map(g=><option key={g} value={g}>{g}</option>)}
+                  <option value="__new__">+ Add new group…</option>
+                </select>
+                {editFields.groupName==="__new__"&&(
+                  <div style={{display:"flex",gap:6,marginTop:4}}>
+                    <input style={{...inp,flex:1}} value={newGroupName} onChange={e=>setNewGroupName(e.target.value)} placeholder="New group name" />
+                    <button style={{...btnP,padding:"6px 12px",fontSize:12}} onClick={()=>{if(newGroupName.trim()&&!allGroups.includes(newGroupName.trim())){setAllGroups(p=>[...p,newGroupName.trim()].sort());setEditFields(p=>({...p,groupName:newGroupName.trim()}));setNewGroupName("")}}}>Add</button>
+                  </div>
+                )}
               </label>
             </div>
             <div style={{padding:"0 16px 16px",display:"flex",justifyContent:"flex-end",gap:8}}>

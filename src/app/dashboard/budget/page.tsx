@@ -64,6 +64,10 @@ export default function DueTrackerPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [editItemId, setEditItemId] = useState<string|null>(null);
+  const [remittancePaid, setRemittancePaid] = useState<Record<string,boolean>>({});
+  const [remittanceEditMonth, setRemittanceEditMonth] = useState(false);
+  const [remittanceInr, setRemittanceInr] = useState("");
+  const [remittanceRate, setRemittanceRate] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set<string>();
     try { const s = localStorage.getItem("due_collapsed"); return s ? new Set(JSON.parse(s)) : new Set<string>(); } catch { return new Set<string>(); }
@@ -124,13 +128,13 @@ export default function DueTrackerPage() {
   async function togglePaid(item: DueItem) {
     const entry = await ensureEntry(item);
     const newStatus: Status = entry.status === "paid" ? "pending" : "paid";
-    const paidAt = newStatus === "paid" ? new Date().toISOString() : null;
+    const paidAt = newStatus === "paid" ? new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Dubai"})).toISOString() : null;
     await supabase.from("due_entries").update({ status:newStatus, paid_at:paidAt }).eq("id", entry.id);
     setEntries(p => p.map(e => e.id === entry.id ? { ...e, status:newStatus, paidAt } : e));
     showToast(newStatus === "paid" ? "✓ Marked as paid" : "Unmarked");
     if (userId) {
       if (newStatus === "paid") {
-        await supabase.from("calendar_events").insert({ user_id:userId, date:new Date().toISOString().slice(0,10), title:`Due paid: ${item.name}`, event_type:"due_paid", source_module:"due_tracker", source_id:entry.id, color:"#16a34a" });
+        await supabase.from("calendar_events").insert({ user_id:userId, date:new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Dubai"}), title:`Due paid: ${item.name}`, event_type:"due_paid", source_module:"due_tracker", source_id:entry.id, color:"#16a34a" });
       } else {
         await supabase.from("calendar_events").delete().eq("user_id", userId).eq("source_id", entry.id).eq("event_type", "due_paid");
       }
@@ -317,22 +321,57 @@ export default function DueTrackerPage() {
                 </div>
               </div>
 
-              {/* Remittance row (auto, shown in UAE group only) */}
-              {!isCollapsed && !isIndia && group === "UAE" && (
-                <div style={{ padding:"10px 16px", borderBottom:`1px solid ${V.border}`, background:isDark?"rgba(245,166,35,0.04)":"rgba(245,166,35,0.02)", display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
-                  <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ background:"none", border:"none", padding:0, cursor:"pointer", display:"flex", gap:10, alignItems:"center", flex:1 }}>
-                    <div style={{ width:22, height:22, flexShrink:0 }}/>
-                    <div>
-                      <span style={{ fontSize:14, fontWeight:700, color:V.text }}>Remittance</span>
-                      <span style={{ fontSize:11, color:V.faint, marginLeft:8 }}>India total → AED</span>
+              {/* Remittance row (auto-calculated from India, shown in UAE group) */}
+              {!isCollapsed && !isIndia && group === "UAE" && (() => {
+                const remAed = indiaTotalInr / (fxRates["INR"] ?? 25.2);
+                const isPaid = remittancePaid[month] ?? false;
+                const displayInr = remittanceInr || indiaTotalInr.toFixed(0);
+                const displayRate = remittanceRate || (fxRates["INR"] ?? 25.2).toString();
+                const calcAed = parseFloat(displayInr) / parseFloat(displayRate);
+                return (
+                  <div style={{ padding:"10px 16px", borderBottom:`1px solid ${V.border}`, background:isDark?"rgba(245,166,35,0.04)":"rgba(245,166,35,0.02)" }}>
+                    <div style={{ display:"flex", gap:10, alignItems:"flex-start", flexWrap:"wrap" }}>
+                      {/* Checkbox */}
+                      <button onClick={() => { setRemittancePaid(p=>({...p,[month]:!isPaid})); showToast(isPaid?"Unmarked":"✓ Remittance paid"); }}
+                        style={{ width:22, height:22, borderRadius:6, border:`2px solid ${isPaid?"#16a34a":V.border}`, background:isPaid?"#16a34a":"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:2 }}>
+                        {isPaid && <span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
+                      </button>
+                      {/* Name */}
+                      <div style={{ flex:1, minWidth:120 }}>
+                        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                          <button onClick={() => router.push("/dashboard/budget/remittance")}
+                            style={{ background:"none", border:"none", padding:0, cursor:"pointer", fontSize:14, fontWeight:700, color:isPaid?V.faint:V.text, textDecoration:isPaid?"line-through":"none" }}>
+                            Remittance
+                          </button>
+                          <span style={{ fontSize:11, color:V.faint }}>India → AED</span>
+                        </div>
+                        {remittanceEditMonth && (
+                          <div style={{ display:"flex", gap:8, marginTop:6, flexWrap:"wrap" }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                              <span style={{ fontSize:11, color:V.faint }}>INR:</span>
+                              <input type="number" style={{ ...inp, width:100, padding:"4px 8px", fontSize:12 }} value={remittanceInr} onChange={e=>setRemittanceInr(e.target.value)} placeholder={indiaTotalInr.toFixed(0)} />
+                            </div>
+                            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                              <span style={{ fontSize:11, color:V.faint }}>Rate:</span>
+                              <input type="number" step="0.01" style={{ ...inp, width:70, padding:"4px 8px", fontSize:12 }} value={remittanceRate} onChange={e=>setRemittanceRate(e.target.value)} placeholder={(fxRates["INR"]??25.2).toString()} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {/* Amount */}
+                      <span style={{ fontSize:14, fontWeight:700, color:V.accent }}>
+                        AED {(remittanceEditMonth ? (isNaN(calcAed)?0:calcAed) : remAed).toFixed(0)}
+                        <span style={{ fontSize:11, color:V.faint, marginLeft:6 }}>({displayInr} INR ÷ {displayRate})</span>
+                      </span>
+                      {/* Actions */}
+                      <div style={{ display:"flex", gap:5 }}>
+                        <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ ...btn, padding:"4px 9px", fontSize:11, color:V.accent }}>History</button>
+                        <button onClick={() => setRemittanceEditMonth(v=>!v)} style={{ ...btn, padding:"4px 9px", fontSize:11, color:remittanceEditMonth?V.accent:V.muted }}>{remittanceEditMonth?"Done":"Edit"}</button>
+                      </div>
                     </div>
-                  </button>
-                  <span style={{ fontSize:14, fontWeight:700, color:V.accent }}>
-                    AED {(indiaTotalInr / (fxRates["INR"] ?? 25.2)).toFixed(0)}
-                    <span style={{ fontSize:11, color:V.faint, marginLeft:6 }}>({indiaTotalInr.toFixed(0)} INR ÷ {fxRates["INR"] ?? 25.2})</span>
-                  </span>
-                </div>
-              )}
+                  </div>
+                );
+              })()}
 
               {/* Items */}
               {!isCollapsed && groupItems.map(item => {

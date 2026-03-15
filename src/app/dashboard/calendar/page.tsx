@@ -125,7 +125,7 @@ export default function CalendarPage() {
     const isWork=addType==="work";
     const shift=SHIFTS[addShift];
     const noTime=shift.noTime;
-    const dates=isWork?datesBetween(addDateFrom,addDateTo):[addDateFrom];
+    const dates=datesBetween(addDateFrom,addDateTo);
     const color=isWork?SHIFT_COLORS[addShift]:EVENT_COLORS[addType];
     // For work events, title = "Work:{shiftName}"
     // All work events get "Work:" prefix
@@ -244,6 +244,22 @@ export default function CalendarPage() {
           <button style={btnP} onClick={()=>{setAddDateFrom(selectedDate??todayStr);setAddDateTo(selectedDate??todayStr);setShowAdd(true);}}>+ Add event</button>
         </div>
       </div>
+
+      {/* Filter + search bar */}
+      <div style={{padding:"8px 24px 0",display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{fontSize:10,fontWeight:800,color:V.faint,textTransform:"uppercase",letterSpacing:"0.08em",marginRight:2}}>Show:</span>
+        {([["work","Work","#3b82f6"],["birthday","Anniversary","#ec4899"],["event","Events","#8b5cf6"],["due_paid","Due Tracker","#16a34a"],["note","Notes","#6b7280"]] as const).map(([t,label,color])=>(
+          <button key={t} onClick={()=>setFilterTypes(p=>p.includes(t)?p.filter(x=>x!==t):[...p,t])}
+            style={{padding:"4px 11px",borderRadius:999,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
+              background:filterTypes.includes(t)?color:`${color}20`,color:filterTypes.includes(t)?"#fff":color}}>
+            {label}
+          </button>
+        ))}
+        {filterTypes.length>0&&<button onClick={()=>setFilterTypes([])} style={{padding:"4px 9px",borderRadius:999,border:`1px solid ${V.border}`,background:"transparent",color:V.faint,cursor:"pointer",fontSize:11}}>Clear</button>}
+        <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search…"
+          style={{padding:"5px 12px",borderRadius:999,border:`1px solid ${V.border}`,background:V.input,color:V.text,fontSize:12,outline:"none",width:140,marginLeft:4}} />
+      </div>
+
 
       {/* Stats bar */}
       <div style={{padding:"10px 24px 0",display:"flex",gap:10,flexWrap:"wrap"}}>
@@ -477,30 +493,19 @@ export default function CalendarPage() {
                 <input style={{...inp,width:"100%",boxSizing:"border-box" as const}} value={addTitle} onChange={e=>setAddTitle(e.target.value)} placeholder={addType==="work"?addShift:addType==="birthday"?`${addAnnivType} name`:"Event title"} />
               </label>
 
-              {/* Date range */}
-              {addType==="work"?(
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  <label style={lbl}>From <input type="date" style={inp} value={addDateFrom} onChange={e=>{setAddDateFrom(e.target.value);if(e.target.value>addDateTo)setAddDateTo(e.target.value);}} /></label>
-                  <label style={lbl}>To   <input type="date" style={inp} value={addDateTo} min={addDateFrom} onChange={e=>setAddDateTo(e.target.value)} /></label>
-                  {addDateFrom!==addDateTo&&<div style={{gridColumn:"1/-1",fontSize:12,color:"#3b82f6",fontWeight:600,padding:"6px 10px",background:"rgba(59,130,246,0.08)",borderRadius:8}}>Will add {datesBetween(addDateFrom,addDateTo).length} entries</div>}
-                </div>
-              ):(
-                <label style={lbl}>Date <input type="date" style={inp} value={addDateFrom} onChange={e=>{setAddDateFrom(e.target.value);setAddDateTo(e.target.value);}} /></label>
-              )}
-
-              {(addType==="birthday"||addType==="event")&&(
-                <label style={{display:"flex",alignItems:"center",gap:10,fontSize:13,fontWeight:600,cursor:"pointer",color:V.text}}>
-                  <input type="checkbox" checked={addRecur} onChange={e=>setAddRecur(e.target.checked)} />
-                  Repeat yearly
-                </label>
-              )}
+              {/* Date range - From/To for all types */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <label style={lbl}>From <input type="date" style={inp} value={addDateFrom} onChange={e=>{setAddDateFrom(e.target.value);if(e.target.value>addDateTo)setAddDateTo(e.target.value);}} /></label>
+                <label style={lbl}>To   <input type="date" style={inp} value={addDateTo} min={addDateFrom} onChange={e=>setAddDateTo(e.target.value)} /></label>
+                {addDateFrom!==addDateTo&&<div style={{gridColumn:"1/-1",fontSize:12,color:"#3b82f6",fontWeight:600,padding:"6px 10px",background:"rgba(59,130,246,0.08)",borderRadius:8}}>Will add {datesBetween(addDateFrom,addDateTo).length} entries</div>}
+              </div>
 
               <label style={lbl}>Notes (optional) <textarea style={{...inp,resize:"vertical" as const,minHeight:60}} value={addNotes} onChange={e=>setAddNotes(e.target.value)} /></label>
             </div>
             <div style={{padding:"0 20px 20px",display:"flex",justifyContent:"flex-end",gap:8}}>
               <button style={btn} onClick={()=>setShowAdd(false)}>Cancel</button>
               <button style={btnP} onClick={addEvent} disabled={addSaving}>
-                {addSaving?"Saving…":addType==="work"&&addDateFrom!==addDateTo?`Add ${datesBetween(addDateFrom,addDateTo).length} days`:"Save"}
+                {addSaving?"Saving…":addDateFrom!==addDateTo?`Add ${datesBetween(addDateFrom,addDateTo).length} entries`:"Save"}
               </button>
             </div>
           </div>

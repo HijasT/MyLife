@@ -80,6 +80,11 @@ export default function PortfolioPage() {
   const [allStats,setAllStats]= useState<Record<string,ItemStats>>({});
   const [recent,  setRecent]  = useState<Purchase[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<"assets"|"prices">("assets");
+  const [livePrices, setLivePrices] = useState<Record<string,{bid:number;ask:number;updated:string}>>({});
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [customSymbols, setCustomSymbols] = useState<string[]>(["PARKIN.DFM"]);
+  const [newSymbol, setNewSymbol] = useState("");
   const [showAddItem, setShowAddItem] = useState(false);
   const [showDeleteItem, setShowDeleteItem] = useState<string|null>(null);
   const [showUpdatePrice, setShowUpdatePrice] = useState<PortfolioItem|null>(null);
@@ -136,6 +141,46 @@ export default function PortfolioPage() {
     setItems([...updates]);
     setLiveLoading(false);
     showToast("Live prices updated");
+  }
+
+  async function fetchSpotPrices() {
+    setPriceLoading(true);
+    const results: Record<string,{bid:number;ask:number;updated:string}> = {};
+    const now = new Date().toLocaleTimeString("en-AE",{timeZone:"Asia/Dubai"});
+
+    // Gold & Silver via Yahoo Finance gold/silver futures
+    const metals = [
+      { sym:"XAU_OZ", ticker:"GC=F", name:"24K Gold (oz)" },
+      { sym:"XAU_G",  ticker:"GC=F", name:"24K Gold (g)",  divisor:31.1035 },
+      { sym:"XAG_OZ", ticker:"SI=F", name:"999 Silver (oz)" },
+      { sym:"XAG_G",  ticker:"SI=F", name:"999 Silver (g)", divisor:31.1035 },
+    ];
+    for (const m of metals) {
+      try {
+        const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${m.ticker}?interval=1d&range=1d`,{headers:{"User-Agent":"Mozilla/5.0"}});
+        const data = await res.json();
+        const priceUSD = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+        const aed = priceUSD * FX["USD"] / (m.divisor ?? 1);
+        results[m.sym] = { bid: aed*0.999, ask: aed, updated: now };
+      } catch { /* skip */ }
+    }
+
+    // Custom symbols (DFM stocks etc)
+    for (const sym of customSymbols) {
+      try {
+        const ticker = sym.includes(".") ? sym : sym;
+        const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,{headers:{"User-Agent":"Mozilla/5.0"}});
+        const data = await res.json();
+        const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+        // DFM stocks are in AED already; USD stocks need conversion
+        const currency = data?.chart?.result?.[0]?.meta?.currency ?? "USD";
+        const aed = currency === "USD" ? price * FX["USD"] : price;
+        if (aed > 0) results[sym] = { bid: aed*0.999, ask: aed, updated: now };
+      } catch { /* skip */ }
+    }
+    setLivePrices(results);
+    setPriceLoading(false);
+    showToast("Prices updated");
   }
 
   async function addItem(){
@@ -197,14 +242,72 @@ export default function PortfolioPage() {
           <div style={{fontSize:22,fontWeight:800}}>Port<span style={{color:V.accent,fontStyle:"italic"}}>folio</span></div>
           <div style={{fontSize:13,color:V.faint,marginTop:2}}>Stocks · Gold · Metals</div>
         </div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button style={btn} onClick={fetchAllLivePrices} disabled={liveLoading}>
-            {liveLoading?"Fetching…":"🔄 Live prices"}
-          </button>
-          <button style={btnP} onClick={()=>setShowAddItem(true)}>+ Add asset</button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <div style={{display:"flex",borderRadius:10,overflow:"hidden",border:`1px solid ${V.border}`}}>
+            {(["assets","prices"] as const).map(t=>(
+              <button key={t} onClick={()=>setActiveTab(t)}
+                style={{padding:"7px 14px",background:activeTab===t?V.accent:"transparent",color:activeTab===t?"#fff":V.muted,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,textTransform:"capitalize"}}>
+                {t==="prices"?"📊 Live Prices":t==="assets"?"My Assets":""}
+              </button>
+            ))}
+          </div>
+          {activeTab==="assets"&&<button style={btn} onClick={fetchAllLivePrices} disabled={liveLoading}>{liveLoading?"Fetching…":"🔄 Update prices"}</button>}
+          {activeTab==="assets"&&<button style={btnP} onClick={()=>setShowAddItem(true)}>+ Add asset</button>}
+          {activeTab==="prices"&&<button style={btnP} onClick={fetchSpotPrices} disabled={priceLoading}>{priceLoading?"Loading…":"🔄 Refresh"}</button>}
         </div>
       </div>
 
+      {activeTab==="prices" && (
+        <div style={{padding:"14px 24px"}}>
+          {/* Spot price table */}
+          <div style={{background:V.card,border:`1px solid ${V.border}`,borderRadius:14,overflow:"hidden",marginBottom:16}}>
+            <div style={{padding:"12px 16px",borderBottom:`1px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)"}}>
+              <span style={{fontSize:14,fontWeight:800}}>Spot Prices — AED</span>
+              {Object.keys(livePrices).length===0&&<span style={{fontSize:12,color:V.faint}}>Click Refresh to load</span>}
+            </div>
+            {/* Headers */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 0.7fr",gap:8,padding:"8px 16px",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.08em",color:V.faint,borderBottom:`1px solid ${V.border}`}}>
+              <div>Asset</div><div>Buy (Ask)</div><div>Sell (Bid)</div><div>Updated</div>
+            </div>
+            {[
+              {key:"XAU_OZ",label:"24K Gold",sub:"1 oz"},
+              {key:"XAU_G", label:"24K Gold",sub:"1 g"},
+              {key:"XAG_OZ",label:"999 Silver",sub:"1 oz"},
+              {key:"XAG_G", label:"999 Silver",sub:"1 g"},
+              ...customSymbols.map(s=>({key:s,label:s,sub:""})),
+            ].map(row=>{
+              const p=livePrices[row.key];
+              return (
+                <div key={row.key} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 0.7fr",gap:8,padding:"11px 16px",borderBottom:`1px solid ${V.border}`,alignItems:"center"}}>
+                  <div><div style={{fontSize:13,fontWeight:700}}>{row.label}</div><div style={{fontSize:11,color:V.faint}}>{row.sub}</div></div>
+                  <div style={{fontSize:14,fontWeight:800,color:"#16a34a"}}>{p?`AED ${fmtN(p.ask)}`:<span style={{color:V.faint}}>—</span>}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:"#ef4444"}}>{p?`AED ${fmtN(p.bid)}`:<span style={{color:V.faint}}>—</span>}</div>
+                  <div style={{fontSize:11,color:V.faint}}>{p?.updated??"—"}</div>
+                </div>
+              );
+            })}
+          </div>
+          {/* Add custom symbol */}
+          <div style={{background:V.card,border:`1px solid ${V.border}`,borderRadius:12,padding:"14px 16px"}}>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Custom symbols</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+              {customSymbols.map(s=>(
+                <div key={s} style={{display:"flex",alignItems:"center",gap:4,padding:"4px 10px",borderRadius:999,background:isDark?"rgba(255,255,255,0.08)":"rgba(0,0,0,0.06)",fontSize:12,fontWeight:600}}>
+                  {s}
+                  <button onClick={()=>setCustomSymbols(p=>p.filter(x=>x!==s))} style={{background:"none",border:"none",cursor:"pointer",color:V.faint,fontSize:14,lineHeight:1,padding:0,marginLeft:2}}>×</button>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <input style={{...inp,flex:1}} value={newSymbol} onChange={e=>setNewSymbol(e.target.value)} placeholder="e.g. AAPL, PARKIN.DFM, BTC-USD" onKeyDown={e=>e.key==="Enter"&&newSymbol.trim()&&!customSymbols.includes(newSymbol.trim())&&(setCustomSymbols(p=>[...p,newSymbol.trim()]),setNewSymbol(""))} />
+              <button style={btnP} onClick={()=>{if(newSymbol.trim()&&!customSymbols.includes(newSymbol.trim())){setCustomSymbols(p=>[...p,newSymbol.trim()]);setNewSymbol("");}}}>Add</button>
+            </div>
+            <div style={{fontSize:11,color:V.faint,marginTop:8}}>Yahoo Finance symbols: stocks use ticker (AAPL), DFM stocks add .DFM (PARKIN.DFM), crypto add -USD (BTC-USD)</div>
+          </div>
+        </div>
+      )}
+
+      {activeTab==="assets" && <>
       {/* Summary */}
       <div style={{padding:"12px 24px 0",display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:10}}>
         {[
@@ -298,6 +401,8 @@ export default function PortfolioPage() {
           ))}
         </div>
       )}
+
+      </> }
 
       {/* Add item modal */}
       {showAddItem&&(
