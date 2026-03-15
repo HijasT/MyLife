@@ -399,14 +399,14 @@ export default function DueTrackerPage() {
               <button style={btn} onClick={()=>setShowAddItem(false)}>✕</button>
             </div>
             <div style={{ padding:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
-              {([["Name","text","name","",(v:string)=>setNewItem(p=>({...p,name:v}))] as const,
-                ["Group","text","group","UAE",(v:string)=>setNewItem(p=>({...p,group:v}))] as const
-              ]).map(([label,,key,placeholder,onChange]) => (
-                <label key={key} style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", gridColumn:label==="Name"?"1/-1":"auto" }}>
-                  {label}
-                  <input style={{ ...inp, width:"100%", boxSizing:"border-box" }} value={(newItem as Record<string,string>)[key]} onChange={e=>onChange(e.target.value)} placeholder={placeholder as string} />
-                </label>
-              ))}
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", gridColumn:"1/-1" }}>
+                Name
+                <input style={{ ...inp, width:"100%", boxSizing:"border-box" }} value={newItem.name} onChange={e=>setNewItem(p=>({...p,name:e.target.value}))} placeholder="e.g. Rent" />
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Group
+                <input style={{ ...inp, width:"100%", boxSizing:"border-box" }} value={newItem.group} onChange={e=>setNewItem(p=>({...p,group:e.target.value}))} placeholder="UAE" />
+              </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Due day
                 <input style={inp} type="number" min="1" max="31" value={newItem.dueDay} onChange={e=>setNewItem(p=>({...p,dueDay:e.target.value}))} placeholder="e.g. 14" />
