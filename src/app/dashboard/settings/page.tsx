@@ -23,7 +23,7 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setEmail(user.email ?? "");
-      const { data } = await supabase.from("profiles").select("display_name, hidden_modules").eq("id", user.id).single();
+      const { data } = await supabase.from("profiles").select("display_name, hidden_modules, timezone").eq("id", user.id).single();
       setDisplayName(data?.display_name ?? "");
       setTimezone(data?.timezone ?? "Asia/Dubai");
       setHiddenModules(data?.hidden_modules ?? []);
