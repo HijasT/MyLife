@@ -276,7 +276,7 @@ export default function DueTrackerPage() {
 
       {/* Due items by group */}
       <div style={{ padding:"16px 24px 24px", display:"flex", flexDirection:"column", gap:16 }}>
-        {[...groups.entries()].map(([group, groupItems]) => {
+        {Array.from(groups.entries()).map(([group, groupItems]) => {
           const groupEntries = groupItems.map(item => ({ item, entry: getEntry(item.id) }));
           const groupTotalAed = groupEntries.reduce((s,{item,entry}) => {
             const amt = entry?.amount ?? item.defaultAmount ?? 0;
