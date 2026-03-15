@@ -96,6 +96,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [photoInput, setPhotoInput] = useState("");
   const [showAddBottle, setShowAddBottle] = useState(false);
   const [newBottle, setNewBottle] = useState({ bottleType:"Full bottle" as BottleType, sizeMl:"100", price:"", currency:"AED", date:new Date().toISOString().slice(0,10), shopName:"", shopLink:"" });
+  const [showPhoto, setShowPhoto] = useState(false);
 
   const USAGE_OPTIONS = ["Casual","Office","Party","Date","Night out","Travel","Gym","Home"];
   const getUsageTags = (item: Perfume | null) => item?.notesText?.startsWith("usage:") ? item.notesText.slice(6).split(",").filter(Boolean) : [];
@@ -221,6 +222,8 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
       showToast("Bottle added");
     }
   }
+
+  async function copyToWishlist() {
     if (!item || !userId) return;
     const { data } = await supabase.from("perfumes").insert({ user_id:userId, brand:item.brand, model:item.model, status:"wishlist", image_url:item.imageUrl, rating_stars:item.ratingStars, notes_tags:item.notesTags, weather_tags:item.weatherTags, gender_scale:item.genderScale, longevity:item.longevity, sillage:item.sillage, value_rating:item.value, clone_similar:item.cloneSimilar, notes_text:item.notesText }).select("*").single();
     if (data) { showToast("Added to wishlist ✓"); router.push(`/dashboard/perfumes/${data.id}`); }
