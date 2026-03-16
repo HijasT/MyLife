@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { nowDubai, todayDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 
 type BiomarkerTest = {
@@ -54,9 +55,9 @@ export default function BioMarkersPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [showAddResult, setShowAddResult] = useState(false);
   const [showAddMetric, setShowAddMetric] = useState(false);
-  const [addDate, setAddDate] = useState(new Date().toISOString().slice(0,10));
+  const [addDate, setAddDate] = useState(nowDubai().slice(0,10));
   const [addValues, setAddValues] = useState<Record<string, string>>({});
-  const [metricForm, setMetricForm] = useState({ measuredAt:new Date().toISOString().slice(0,10), weightKg:"", heightCm:"", bmi:"", bodyFatPct:"", visceralFatL:"", skeletalMuscleKg:"", notes:"" });
+  const [metricForm, setMetricForm] = useState({ measuredAt:nowDubai().slice(0,10), weightKg:"", heightCm:"", bmi:"", bodyFatPct:"", visceralFatL:"", skeletalMuscleKg:"", notes:"" });
   const [toast, setToast] = useState("");
 
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");

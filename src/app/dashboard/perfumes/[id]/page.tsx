@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { nowDubai, todayDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { markSynced } from "@/hooks/useSyncStatus";
@@ -95,7 +96,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [photoMode, setPhotoMode] = useState<"url"|"upload">("url");
   const [photoInput, setPhotoInput] = useState("");
   const [showAddBottle, setShowAddBottle] = useState(false);
-  const [newBottle, setNewBottle] = useState({ bottleType:"Full bottle" as BottleType, sizeMl:"100", price:"", currency:"AED", date:new Date().toISOString().slice(0,10), shopName:"", shopLink:"" });
+  const [newBottle, setNewBottle] = useState({ bottleType:"Full bottle" as BottleType, sizeMl:"100", price:"", currency:"AED", date:nowDubai().slice(0,10), shopName:"", shopLink:"" });
   const [showPhoto, setShowPhoto] = useState(false);
 
   const USAGE_OPTIONS = ["Casual","Office","Party","Date","Night out","Travel","Gym","Home"];
@@ -218,7 +219,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
       }
       setItem(prev => prev ? { ...prev, bottles: [...prev.bottles, { id:bd.id, bottleSizeMl:bd.bottle_size_ml, bottleType:bd.bottle_type, status:bd.status, usage:bd.usage }] } : prev);
       setShowAddBottle(false);
-      setNewBottle({ bottleType:"Full bottle", sizeMl:"100", price:"", currency:"AED", date:new Date().toISOString().slice(0,10), shopName:"", shopLink:"" });
+      setNewBottle({ bottleType:"Full bottle", sizeMl:"100", price:"", currency:"AED", date:nowDubai().slice(0,10), shopName:"", shopLink:"" });
       showToast("Bottle added");
     }
   }

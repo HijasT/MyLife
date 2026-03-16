@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { nowDubai, todayDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 
@@ -22,7 +23,7 @@ type DueEntry = {
 function fmtMonth(m: string) { const [y, mo] = m.split("-"); return new Date(Number(y), Number(mo)-1, 1).toLocaleDateString("en-AE", { month:"long", year:"numeric" }); }
 function fmtDateTime(iso: string|null) { if (!iso) return "—"; return new Date(iso).toLocaleString("en-AE", { day:"2-digit", month:"short", year:"2-digit", hour:"2-digit", minute:"2-digit" }); }
 function toAed(amount: number, currency: Currency, rates: Record<string,number>) { if (currency === "AED") return amount; return rates[currency] ? amount / rates[currency] : amount; }
-function nowMonth() { return new Date().toISOString().slice(0, 7); }
+function nowMonth() { return nowDubai().slice(0, 7); }
 function addMonths(m: string, n: number) { const [y, mo] = m.split("-").map(Number); const d = new Date(y, mo - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function ordinal(n: number) { const s=["th","st","nd","rd"]; const v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 
@@ -126,7 +127,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
 
   async function togglePaid(entry: DueEntry) {
     const newStatus: Status = entry.status === "paid" ? "pending" : "paid";
-    const paidAt = newStatus === "paid" ? new Date().toISOString() : null;
+    const paidAt = newStatus === "paid" ? nowDubai() : null;
     await supabase.from("due_entries").update({ status:newStatus, paid_at:paidAt }).eq("id", entry.id);
     setEntries(p => p.map(e => e.id === entry.id ? { ...e, status:newStatus, paidAt } : e));
   }

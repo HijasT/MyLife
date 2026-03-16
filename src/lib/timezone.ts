@@ -1,46 +1,50 @@
-// Timezone utility - always use Dubai/UAE timezone
-export const USER_TZ = "Asia/Dubai";
+/**
+ * Timezone utilities for MyLife app
+ * Always uses Asia/Dubai (UTC+4) as the app timezone
+ */
 
-export function nowInTZ(): Date {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: USER_TZ }));
+export const APP_TZ = "Asia/Dubai";
+
+/** Get current date string in Dubai timezone (YYYY-MM-DD) */
+export function todayDubai(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: APP_TZ });
 }
 
-export function nowISOInTZ(): string {
-  const d = nowInTZ();
-  return d.toISOString().slice(0, 10);
-}
-
-export function nowISO(): string {
-  // Returns current datetime adjusted for Dubai timezone
+/** Get current datetime ISO string adjusted to Dubai timezone offset */
+export function nowDubai(): string {
   const now = new Date();
-  const tzOffset = getTimezoneOffset(USER_TZ);
-  const adjusted = new Date(now.getTime() + tzOffset);
-  return adjusted.toISOString();
+  // Get Dubai time components
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: APP_TZ,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? "00";
+  const year = get("year"), month = get("month"), day = get("day");
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  const min = get("minute"), sec = get("second");
+
+  // Return as ISO with +04:00 offset
+  return `${year}-${month}-${day}T${hour}:${min}:${sec}+04:00`;
 }
 
-export function getTimezoneOffset(tz: string): number {
-  const now = new Date();
-  const utcDate = new Date(now.toLocaleString("en-US", { timeZone: "UTC" }));
-  const tzDate  = new Date(now.toLocaleString("en-US", { timeZone: tz }));
-  return tzDate.getTime() - utcDate.getTime();
-}
-
-export function fmtDateTimeTZ(iso: string | null, tz = USER_TZ): string {
+/** Format a UTC ISO string as Dubai local datetime */
+export function fmtDubai(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-AE", {
-    timeZone: tz,
+    timeZone: APP_TZ,
     day: "2-digit", month: "short", year: "2-digit",
     hour: "2-digit", minute: "2-digit",
   });
 }
 
-export function fmtDateTZ(iso: string | null, tz = USER_TZ): string {
+/** Format a UTC ISO string as Dubai local date only */
+export function fmtDateDubai(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-AE", {
-    timeZone: tz, day: "2-digit", month: "short", year: "numeric",
+    timeZone: APP_TZ,
+    day: "2-digit", month: "short", year: "numeric",
   });
-}
-
-export function todayStringTZ(tz = USER_TZ): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { nowDubai, todayDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 
 type EventType = "work"|"birthday"|"event"|"due_paid"|"note";
@@ -72,14 +73,15 @@ export default function CalendarPage() {
   const [addTitle,   setAddTitle]   = useState("");
   const [addStart,   setAddStart]   = useState("07:00");
   const [addEnd,     setAddEnd]     = useState("15:00");
-  const [addDateFrom,setAddDateFrom]= useState(new Date().toISOString().slice(0,10));
-  const [addDateTo,  setAddDateTo]  = useState(new Date().toISOString().slice(0,10));
+  const [addDateFrom,setAddDateFrom]= useState(todayDubai());
+  const [addDateTo,  setAddDateTo]  = useState(todayDubai());
   const [addNotes,   setAddNotes]   = useState("");
   const [addRecur,   setAddRecur]   = useState(false);
   const [addAnnivType, setAddAnnivType] = useState("Birthday");
   const [addAnnivName, setAddAnnivName] = useState("");
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [addSaving,  setAddSaving]  = useState(false);
 
   const isDark = typeof document!=="undefined"&&document.documentElement.classList.contains("dark");
@@ -146,9 +148,18 @@ export default function CalendarPage() {
   }
 
   async function deleteEvent(id:string){
-    await supabase.from("calendar_events").delete().eq("id",id);
-    setEvents(p=>p.filter(e=>e.id!==id));
-    showToast("Deleted");
+    const ev = events.find(e=>e.id===id);
+    if (ev?.isRecurring && ev?.recurType==="yearly") {
+      // For recurring events: only delete future entries (from today onwards)
+      // Since we store one record per year, just delete this instance
+      await supabase.from("calendar_events").delete().eq("id",id);
+      setEvents(p=>p.filter(e=>e.id!==id));
+      showToast("This anniversary entry deleted (past entries preserved)");
+    } else {
+      await supabase.from("calendar_events").delete().eq("id",id);
+      setEvents(p=>p.filter(e=>e.id!==id));
+      showToast("Deleted");
+    }
   }
 
   function showToast(msg:string){setToast(msg);setTimeout(()=>setToast(""),2500);}
@@ -157,7 +168,7 @@ export default function CalendarPage() {
   const [year,mo]=month.split("-").map(Number);
   const totalDays=daysInMonth(year,mo);
   const firstDay=firstDayOfMonth(year,mo);
-  const todayStr=new Date().toISOString().slice(0,10);
+  const todayStr=todayDubai();
 
   // Apply type + search filter
   const filteredEvents=useMemo(()=>{
@@ -246,18 +257,49 @@ export default function CalendarPage() {
       </div>
 
       {/* Filter + search bar */}
-      <div style={{padding:"8px 24px 0",display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-        <span style={{fontSize:10,fontWeight:800,color:V.faint,textTransform:"uppercase",letterSpacing:"0.08em",marginRight:2}}>Show:</span>
-        {([["work","Work","#3b82f6"],["birthday","Anniversary","#ec4899"],["event","Events","#8b5cf6"],["due_paid","Due Tracker","#16a34a"],["note","Notes","#6b7280"]] as const).map(([t,label,color])=>(
-          <button key={t} onClick={()=>setFilterTypes(p=>p.includes(t)?p.filter(x=>x!==t):[...p,t])}
-            style={{padding:"4px 11px",borderRadius:999,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,
-              background:filterTypes.includes(t)?color:`${color}20`,color:filterTypes.includes(t)?"#fff":color}}>
-            {label}
+      <div style={{padding:"8px 24px 0",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        {/* Multi-select dropdown filter */}
+        <div style={{position:"relative"}}>
+          <button onClick={()=>setShowFilterMenu(v=>!v)}
+            style={{...btn,padding:"6px 12px",fontSize:12,display:"flex",alignItems:"center",gap:6,
+              borderColor:filterTypes.length>0?V.accent:V.border,color:filterTypes.length>0?V.accent:V.muted}}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            {filterTypes.length>0?`${filterTypes.length} filter${filterTypes.length>1?"s":""}` : "Filter"}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
-        ))}
-        {filterTypes.length>0&&<button onClick={()=>setFilterTypes([])} style={{padding:"4px 9px",borderRadius:999,border:`1px solid ${V.border}`,background:"transparent",color:V.faint,cursor:"pointer",fontSize:11}}>Clear</button>}
-        <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search…"
-          style={{padding:"5px 12px",borderRadius:999,border:`1px solid ${V.border}`,background:V.input,color:V.text,fontSize:12,outline:"none",width:140,marginLeft:4}} />
+          {showFilterMenu&&(
+            <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,background:V.card,border:`1px solid ${V.border}`,borderRadius:12,padding:"8px 0",zIndex:30,minWidth:180,boxShadow:"0 8px 24px rgba(0,0,0,0.15)"}}
+              onMouseLeave={()=>setShowFilterMenu(false)}>
+              {([["work","Work","#3b82f6"],["birthday","Anniversary","#ec4899"],["event","Events","#8b5cf6"],["due_paid","Due Tracker","#16a34a"],["note","Notes","#6b7280"]] as const).map(([t,label,color])=>(
+                <button key={t} onClick={()=>setFilterTypes(p=>p.includes(t)?p.filter(x=>x!==t):[...p,t])}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 14px",background:"transparent",border:"none",cursor:"pointer",textAlign:"left",color:filterTypes.includes(t)?color:V.text}}>
+                  <div style={{width:14,height:14,borderRadius:4,border:`2px solid ${color}`,background:filterTypes.includes(t)?color:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    {filterTypes.includes(t)&&<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5"><polyline points="20 6 9 17 4 12"/></svg>}
+                  </div>
+                  <span style={{fontSize:13,fontWeight:600}}>{label}</span>
+                </button>
+              ))}
+              {filterTypes.length>0&&(
+                <>
+                  <div style={{height:1,background:V.border,margin:"6px 0"}}/>
+                  <button onClick={()=>{setFilterTypes([]);setShowFilterMenu(false);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"7px 14px",background:"transparent",border:"none",cursor:"pointer",color:V.faint,fontSize:12}}>
+                    Clear all filters
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        {/* Active filter chips */}
+        {filterTypes.length>0&&filterTypes.map(t=>{
+          const labels:Record<string,string>={work:"Work",birthday:"Anniversary",event:"Events",due_paid:"Due Tracker",note:"Notes"};
+          const colors:Record<string,string>={work:"#3b82f6",birthday:"#ec4899",event:"#8b5cf6",due_paid:"#16a34a",note:"#6b7280"};
+          return <span key={t} style={{padding:"3px 10px",borderRadius:999,fontSize:11,fontWeight:700,background:`${colors[t]}20`,color:colors[t],display:"flex",alignItems:"center",gap:4}}>
+            {labels[t]}<button onClick={()=>setFilterTypes(p=>p.filter(x=>x!==t))} style={{background:"none",border:"none",cursor:"pointer",color:"inherit",padding:0,fontSize:12,lineHeight:1}}>×</button>
+          </span>;
+        })}
+        <input value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="Search events…"
+          style={{padding:"5px 12px",borderRadius:999,border:`1px solid ${V.border}`,background:V.input,color:V.text,fontSize:12,outline:"none",width:150}} />
       </div>
 
 
@@ -441,7 +483,7 @@ export default function CalendarPage() {
               <div style={lbl}>Type
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                   {(["work","event","birthday","note"] as EventType[]).map(t=>(
-                    <button key={t} onClick={()=>{setAddType(t);if(t==="birthday")setAddRecur(true);else setAddRecur(false);}}
+                    <button key={t} onClick={()=>{setAddType(t);setAddRecur(t==="birthday");}}
                       style={{padding:"6px 14px",borderRadius:999,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,background:addType===t?EVENT_COLORS[t]:`${EVENT_COLORS[t]}20`,color:addType===t?"#fff":EVENT_COLORS[t]}}>
                       {EVENT_LABELS[t]}
                     </button>

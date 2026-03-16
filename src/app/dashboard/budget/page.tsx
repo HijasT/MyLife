@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { nowDubai, todayDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 
@@ -26,7 +27,7 @@ type MonthSettings = {
   groups: string[];
 };
 
-function nowMonth() { return new Date().toISOString().slice(0, 7); }
+function nowMonth() { return nowDubai().slice(0, 7); }
 function fmtMonth(m: string) { const [y, mo] = m.split("-"); return new Date(Number(y), Number(mo)-1, 1).toLocaleDateString("en-AE", { month:"long", year:"numeric" }); }
 function prevMonth(m: string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function nextMonth(m: string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
@@ -194,7 +195,7 @@ export default function DueTrackerPage() {
       if (isIndia) {
         const inr = currency === "INR" ? amount : toAed(amount, currency, fxRates) * (fxRates["INR"] ?? 25.2);
         indiaTotalInr += inr;
-        // India items do NOT add to global total — remittance item represents them
+        // India items don't add to global — remittance represents them
       } else {
         const aed = toAed(amount, currency, fxRates);
         totalAed += aed;
@@ -205,9 +206,18 @@ export default function DueTrackerPage() {
       if ((entry?.status === "paid") && !isIndia) paidAed += toAed(amount, currency, fxRates);
     }
 
-    const remittanceAed = indiaTotalInr / (fxRates["INR"] ?? 25.2);
+    // Remittance is manually entered; use remittanceInr + remittanceRate if set
+    const effectiveRate = parseFloat(remittanceRate) || (fxRates["INR"] ?? 25.2);
+    const effectiveInr  = parseFloat(remittanceInr)  || indiaTotalInr;
+    const remittanceAed = effectiveInr / effectiveRate;
+    // Add remittance to global total
+    totalAed += remittanceAed;
+    if (remittancePaid[month]) paidAed += remittanceAed;
+    else pendingCount++;  // remittance counts as one pending item if unpaid
+    paidCount += remittancePaid[month] ? 1 : 0;
+
     return { totalAed, paidAed, pendingAed: totalAed - paidAed, paidCount, pendingCount, indiaTotalInr, remittanceAed };
-  }, [items, entries, settings]);
+  }, [items, entries, settings, remittanceInr, remittanceRate, remittancePaid, month]);
 
   // Groups — show all items but render hidden ones dimmed
   const groups = useMemo(() => {
@@ -321,49 +331,40 @@ export default function DueTrackerPage() {
                 </div>
               </div>
 
-              {/* Remittance row (auto-calculated from India, shown in UAE group) */}
+              {/* Remittance row — manual entry, part of UAE group total */}
               {!isCollapsed && !isIndia && group === "UAE" && (() => {
-                const remAed = indiaTotalInr / (fxRates["INR"] ?? 25.2);
                 const isPaid = remittancePaid[month] ?? false;
-                const displayInr = remittanceInr || indiaTotalInr.toFixed(0);
-                const displayRate = remittanceRate || (fxRates["INR"] ?? 25.2).toString();
-                const calcAed = parseFloat(displayInr) / parseFloat(displayRate);
+                const inrVal = parseFloat(remittanceInr) || 0;
+                const rateVal = parseFloat(remittanceRate) || (fxRates["INR"] ?? 25.2);
+                const aedVal = inrVal > 0 ? inrVal / rateVal : 0;
                 return (
                   <div style={{ padding:"10px 16px", borderBottom:`1px solid ${V.border}`, background:isDark?"rgba(245,166,35,0.04)":"rgba(245,166,35,0.02)" }}>
                     <div style={{ display:"flex", gap:10, alignItems:"flex-start", flexWrap:"wrap" }}>
-                      {/* Checkbox */}
                       <button onClick={() => { setRemittancePaid(p=>({...p,[month]:!isPaid})); showToast(isPaid?"Unmarked":"✓ Remittance paid"); }}
                         style={{ width:22, height:22, borderRadius:6, border:`2px solid ${isPaid?"#16a34a":V.border}`, background:isPaid?"#16a34a":"transparent", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:2 }}>
                         {isPaid && <span style={{ color:"#fff", fontSize:12, fontWeight:800 }}>✓</span>}
                       </button>
-                      {/* Name */}
                       <div style={{ flex:1, minWidth:120 }}>
                         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                           <button onClick={() => router.push("/dashboard/budget/remittance")}
                             style={{ background:"none", border:"none", padding:0, cursor:"pointer", fontSize:14, fontWeight:700, color:isPaid?V.faint:V.text, textDecoration:isPaid?"line-through":"none" }}>
                             Remittance
                           </button>
-                          <span style={{ fontSize:11, color:V.faint }}>India → AED</span>
+                          <span style={{ fontSize:10, fontWeight:700, padding:"2px 7px", borderRadius:999, background:"rgba(245,166,35,0.12)", color:V.accent }}>Manual</span>
                         </div>
                         {remittanceEditMonth && (
-                          <div style={{ display:"flex", gap:8, marginTop:6, flexWrap:"wrap" }}>
-                            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                              <span style={{ fontSize:11, color:V.faint }}>INR:</span>
-                              <input type="number" style={{ ...inp, width:100, padding:"4px 8px", fontSize:12 }} value={remittanceInr} onChange={e=>setRemittanceInr(e.target.value)} placeholder={indiaTotalInr.toFixed(0)} />
-                            </div>
-                            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                              <span style={{ fontSize:11, color:V.faint }}>Rate:</span>
-                              <input type="number" step="0.01" style={{ ...inp, width:70, padding:"4px 8px", fontSize:12 }} value={remittanceRate} onChange={e=>setRemittanceRate(e.target.value)} placeholder={(fxRates["INR"]??25.2).toString()} />
-                            </div>
+                          <div style={{ display:"flex", gap:8, marginTop:6, flexWrap:"wrap", alignItems:"center" }}>
+                            <input type="number" style={{ ...inp, width:110, padding:"4px 8px", fontSize:12 }} value={remittanceInr} onChange={e=>setRemittanceInr(e.target.value)} placeholder="INR amount" />
+                            <span style={{ fontSize:11, color:V.faint }}>÷</span>
+                            <input type="number" step="0.01" style={{ ...inp, width:70, padding:"4px 8px", fontSize:12 }} value={remittanceRate} onChange={e=>setRemittanceRate(e.target.value)} placeholder="Rate" />
+                            <span style={{ fontSize:11, color:V.faint }}>= AED {aedVal > 0 ? aedVal.toFixed(0) : "?"}</span>
                           </div>
                         )}
                       </div>
-                      {/* Amount */}
-                      <span style={{ fontSize:14, fontWeight:700, color:V.accent }}>
-                        AED {(remittanceEditMonth ? (isNaN(calcAed)?0:calcAed) : remAed).toFixed(0)}
-                        <span style={{ fontSize:11, color:V.faint, marginLeft:6 }}>({displayInr} INR ÷ {displayRate})</span>
+                      <span style={{ fontSize:14, fontWeight:700, color:aedVal > 0 ? V.accent : V.faint }}>
+                        {aedVal > 0 ? `AED ${aedVal.toFixed(0)}` : <span style={{ fontSize:12 }}>Enter amount →</span>}
+                        {inrVal > 0 && <span style={{ fontSize:11, color:V.faint, marginLeft:6 }}>({inrVal.toFixed(0)} INR ÷ {rateVal})</span>}
                       </span>
-                      {/* Actions */}
                       <div style={{ display:"flex", gap:5 }}>
                         <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ ...btn, padding:"4px 9px", fontSize:11, color:V.accent }}>History</button>
                         <button onClick={() => setRemittanceEditMonth(v=>!v)} style={{ ...btn, padding:"4px 9px", fontSize:11, color:remittanceEditMonth?V.accent:V.muted }}>{remittanceEditMonth?"Done":"Edit"}</button>

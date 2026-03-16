@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { nowDubai, todayDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 
@@ -44,7 +45,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
   const [userId, setUserId] = useState<string|null>(null);
 
   const [af, setAf] = useState({
-    purchasedAt: new Date().toISOString().slice(0,16),
+    purchasedAt: nowDubai().slice(0,16),
     unitPrice:"", units:"", totalPaid:"", currency:"AED" as Currency, source:"", notes:"",
   });
 
@@ -91,7 +92,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     if (data) {
       setPurchases(p => [dbToPurchase(data), ...p]);
       setShowAdd(false);
-      setAf({ purchasedAt:new Date().toISOString().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });
+      setAf({ purchasedAt:nowDubai().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });
       showToast("Purchase added");
     }
   }
@@ -132,8 +133,8 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     if (!item) return;
     const price = parseFloat(newPrice);
     if (isNaN(price)||price<=0) { showToast("Enter a valid price"); return; }
-    await supabase.from("portfolio_items").update({ current_price:price, current_price_updated_at:new Date().toISOString() }).eq("id", item.id);
-    setItem(p => p ? {...p, currentPrice:price, currentPriceUpdatedAt:new Date().toISOString()} : p);
+    await supabase.from("portfolio_items").update({ current_price:price, current_price_updated_at:nowDubai() }).eq("id", item.id);
+    setItem(p => p ? {...p, currentPrice:price, currentPriceUpdatedAt:nowDubai()} : p);
     setShowUpdatePrice(false); setNewPrice(""); showToast("Price updated");
   }
 
