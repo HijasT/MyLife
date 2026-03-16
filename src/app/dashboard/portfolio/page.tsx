@@ -74,19 +74,7 @@ export default function PortfolioPage() {
   const [recent,  setRecent]  = useState<Purchase[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"assets"|"prices">("assets");
-  const [livePrices, setLivePrices] = useState<Record<string,{bid:number;ask:number;updated:string}>>(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const stored = localStorage.getItem("portfolio_live_prices");
-      if (stored) {
-        const { prices, fetchedAt } = JSON.parse(stored);
-        // Use stored prices if less than 4 hours old
-        const age = Date.now() - new Date(fetchedAt).getTime();
-        if (age < 4 * 60 * 60 * 1000) return prices;
-      }
-    } catch {}
-    return {};
-  });
+  const [livePrices, setLivePrices] = useState<Record<string,{bid:number;ask:number;updated:string}>>({});
   const [priceLoading, setPriceLoading] = useState(false);
   const [goldApiKey, setGoldApiKey] = useState("");
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
@@ -118,9 +106,10 @@ export default function PortfolioPage() {
       const {data:{user}} = await supabase.auth.getUser();
       if(!user){setLoading(false);return;}
       setUserId(user.id);
-      const [ir,pr] = await Promise.all([
+      const [ir, pr, profileRes] = await Promise.all([
         supabase.from("portfolio_items").select("*").eq("user_id",user.id).order("created_at"),
         supabase.from("portfolio_purchases").select("*,portfolio_items(name,symbol)").eq("user_id",user.id).order("purchased_at",{ascending:false}).limit(10),
+        supabase.from("profiles").select("goldapi_key, metal_prices").eq("id",user.id).single(),
       ]);
       const loadedItems=(ir.data??[]).map(dbToItem);
       setItems(loadedItems);
@@ -128,6 +117,12 @@ export default function PortfolioPage() {
       setRecent((pr.data??[]).map((r:any)=>dbToPurchase(r)));
       await loadStats(user.id,loadedItems);
       markSynced();
+      // Load API key and cached metal prices from DB
+      if (profileRes.data?.goldapi_key) setGoldApiKey(profileRes.data.goldapi_key);
+      if (profileRes.data?.metal_prices) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setLivePrices(profileRes.data.metal_prices as any);
+      }
       setLoading(false);
     }
     load();
@@ -272,8 +267,10 @@ export default function PortfolioPage() {
     }
 
     setLivePrices(results);
-    // Persist to localStorage so prices survive page reload
-    try { localStorage.setItem("portfolio_live_prices", JSON.stringify({ prices: results, fetchedAt: new Date().toISOString() })); } catch {}
+    // Save fetched prices to DB so all devices see them without re-fetching
+    if (userId && Object.keys(results).length > 0) {
+      await supabase.from("profiles").update({ metal_prices: results }).eq("id", userId);
+    }
     setPriceLoading(false);
 
     // Auto-update current_price for linked assets using BID (sell) price
