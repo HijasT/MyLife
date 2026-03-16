@@ -46,6 +46,14 @@ function fmtMonth(m:string) { const [y,mo]=m.split("-"); return new Date(Number(
 function prevMonth(m:string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function nextMonth(m:string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function workHours(s?:string,e?:string) { if(!s||!e) return 0; const [sh,sm]=s.split(":").map(Number); const [eh,em]=e.split(":").map(Number); return Math.max(0,eh+em/60-sh-sm/60); }
+/** Convert "HH:MM" 24h to "H:MM AM/PM" */
+function fmt12(t?:string):string {
+  if(!t) return "";
+  const [h,m]=t.split(":").map(Number);
+  const ampm = h>=12?"PM":"AM";
+  const h12 = h%12||12;
+  return `${h12}:${String(m).padStart(2,"0")} ${ampm}`;
+}
 function datesBetween(from:string,to:string):string[] {
   const r:string[]=[]; const s=new Date(from); const e=new Date(to);
   for(let d=new Date(s);d<=e;d.setDate(d.getDate()+1)) r.push(d.toISOString().slice(0,10));
@@ -416,7 +424,7 @@ export default function CalendarPage() {
                       <div key={ev.id} style={{fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:5,background:`${ev.color}20`,color:ev.color,lineHeight:1.4}}>
                         {ev.title}
                         {ev.eventType==="work"&&ev.workStart&&!SHIFTS[ev.title.split(":")[1] as ShiftKey]?.noTime&&
-                          <span style={{color:V.faint,marginLeft:4}}>{ev.workStart}–{ev.workEnd}</span>}
+                          <span style={{color:V.faint,marginLeft:4}}>{fmt12(ev.workStart)}–{fmt12(ev.workEnd)}</span>}
                       </div>
                     ))}
                     {dayEvs.length===0&&<div style={{fontSize:10,color:V.faint}}>—</div>}
@@ -446,7 +454,7 @@ export default function CalendarPage() {
                     <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:999,background:`${ev.color}20`,color:ev.color}}>{EVENT_LABELS[ev.eventType]??ev.eventType}</span>
                   </div>
                   {ev.eventType==="work"&&ev.workStart&&ev.workEnd&&(
-                    <div style={{fontSize:12,color:V.muted,marginTop:2}}>⏰ {ev.workStart}–{ev.workEnd} · {workHours(ev.workStart,ev.workEnd).toFixed(1)}h</div>
+                    <div style={{fontSize:12,color:V.muted,marginTop:2}}>⏰ {fmt12(ev.workStart)}–{fmt12(ev.workEnd)} · {workHours(ev.workStart,ev.workEnd).toFixed(1)}h</div>
                   )}
                   {ev.notes&&<div style={{fontSize:12,color:V.muted,marginTop:2}}>{ev.notes}</div>}
                 </div>

@@ -30,23 +30,22 @@ async function fetchLivePrice(symbol:string, assetType:AssetType): Promise<numbe
   const sym = symbol.toUpperCase();
   const proxy = (url:string) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
   try {
-    // Get USD→AED rate
     let usdToAed = FX["USD"];
     try {
       const fxRes = await fetch("https://api.frankfurter.app/latest?from=USD&to=AED");
       const fxData = await fxRes.json();
-      usdToAed = fxData?.rates?.AED ?? FX["USD"];
+      if (fxData?.rates?.AED) usdToAed = fxData.rates.AED;
     } catch { /* use default */ }
 
     const tickerMap: Record<string,string> = {
       XAU:"GC=F", XAG:"SI=F", BTC:"BTC-USD", ETH:"ETH-USD"
     };
     const ticker = tickerMap[sym] ?? sym;
-    const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`));
+    const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`));
     const wrapper = await r.json();
     const data = JSON.parse(wrapper?.contents ?? "{}");
     const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    if (!price) return null;
+    if (!price || price <= 0) return null;
     const currency = data?.chart?.result?.[0]?.meta?.currency ?? "USD";
     return currency === "USD" ? price * usdToAed : price;
   } catch { return null; }
@@ -156,67 +155,77 @@ export default function PortfolioPage() {
     // Use AllOrigins CORS proxy to bypass browser CORS restrictions
     const proxy = (url:string) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
 
-    // Metals prices via frankfurter.app (free, CORS-friendly) + metalpriceapi
-    // XAU and XAG via free metals API
+    // Get live USD→AED exchange rate
+    let usdToAed = FX["USD"];
     try {
-      const res = await fetch("https://api.frankfurter.app/latest?from=USD&to=AED");
-      const fx = await res.json();
-      const usdToAed = fx?.rates?.AED ?? FX["USD"];
+      const fxRes = await fetch("https://api.frankfurter.app/latest?from=USD&to=AED");
+      const fxData = await fxRes.json();
+      if (fxData?.rates?.AED) usdToAed = fxData.rates.AED;
+    } catch { /* use default 3.67 */ }
 
-      // Gold futures GC=F via Yahoo with proxy
+    // Helper: fetch Yahoo Finance price via CORS proxy
+    async function yahooPrice(ticker: string): Promise<number|null> {
       try {
-        const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=1d`));
+        const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`));
         const wrapper = await r.json();
         const data = JSON.parse(wrapper.contents ?? "{}");
-        const priceUSD = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-        if (priceUSD > 0) {
-          const ozAed = priceUSD * usdToAed;
-          const gAed  = ozAed / 31.1035;
-          results["XAU_OZ"] = { bid: ozAed*0.999, ask: ozAed, updated: now };
-          results["XAU_G"]  = { bid: gAed*0.999,  ask: gAed,  updated: now };
-        }
-      } catch { /* skip gold */ }
+        const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        const currency = data?.chart?.result?.[0]?.meta?.currency ?? "USD";
+        if (!price || price <= 0) return null;
+        return currency === "USD" ? price * usdToAed : price;
+      } catch { return null; }
+    }
 
-      // Silver futures SI=F
-      try {
-        const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/SI=F?interval=1d&range=1d`));
-        const wrapper = await r.json();
-        const data = JSON.parse(wrapper.contents ?? "{}");
-        const priceUSD = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-        if (priceUSD > 0) {
-          const ozAed = priceUSD * usdToAed;
-          const gAed  = ozAed / 31.1035;
-          results["XAG_OZ"] = { bid: ozAed*0.999, ask: ozAed, updated: now };
-          results["XAG_G"]  = { bid: gAed*0.999,  ask: gAed,  updated: now };
-        }
-      } catch { /* skip silver */ }
+    // Gold (GC=F) — USD per troy oz
+    const goldAed = await yahooPrice("GC=F");
+    if (goldAed && goldAed > 0) {
+      const gAed = goldAed / 31.1035;
+      results["XAU_OZ"] = { bid: goldAed*0.999, ask: goldAed, updated: now };
+      results["XAU_G"]  = { bid: gAed*0.999,    ask: gAed,    updated: now };
+    }
 
-      // Parkin.ae stock price
-      try {
-        const r = await fetch(proxy("https://parkin.ae/stock-price"));
-        const wrapper = await r.json();
-        const html = wrapper.contents ?? "";
-        // Look for TickerValueTD_LastPrice class
-        const match = html.match(/TickerValueTD_LastPrice[^>]*>[\s]*([\d,\.]+)/);
-        if (match) {
-          const price = parseFloat(match[1].replace(/,/g,""));
-          if (price > 0) results["PARKIN.DFM"] = { bid: price*0.999, ask: price, updated: now };
-        }
-      } catch { /* skip parkin */ }
+    // Silver (SI=F) — USD per troy oz
+    const silverAed = await yahooPrice("SI=F");
+    if (silverAed && silverAed > 0) {
+      const gAed = silverAed / 31.1035;
+      results["XAG_OZ"] = { bid: silverAed*0.999, ask: silverAed, updated: now };
+      results["XAG_G"]  = { bid: gAed*0.999,      ask: gAed,      updated: now };
+    }
 
-      // Custom symbols (Yahoo Finance)
-      for (const sym of customSymbols.filter(s=>s!=="PARKIN.DFM")) {
-        try {
-          const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`));
-          const wrapper = await r.json();
-          const data = JSON.parse(wrapper.contents ?? "{}");
-          const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-          const currency = data?.chart?.result?.[0]?.meta?.currency ?? "USD";
-          const aed = currency === "USD" ? price * usdToAed : price;
-          if (aed > 0) results[sym] = { bid: aed*0.999, ask: aed, updated: now };
-        } catch { /* skip */ }
+    // Parkin (DFM) — try multiple selectors
+    try {
+      const r = await fetch(proxy("https://parkin.ae/stock-price"));
+      const wrapper = await r.json();
+      const html: string = wrapper.contents ?? "";
+      // Try multiple patterns for the price
+      const patterns = [
+        /TickerValueTD_LastPrice[^>]*>[\s\S]{0,20}?([0-9]+(?:\.[0-9]+)?)/,
+        /TickerValueTD[^>]*LastPrice[^>]*>[\s\S]{0,20}?([0-9]+(?:\.[0-9]+)?)/,
+        /"lastPrice"\s*:\s*"?([0-9]+(?:\.[0-9]+)?)"?/,
+        /"last"\s*:\s*([0-9]+(?:\.[0-9]+)?)/,
+      ];
+      let parkinPrice = 0;
+      for (const pat of patterns) {
+        const m = html.match(pat);
+        if (m) { parkinPrice = parseFloat(m[1]); if (parkinPrice > 0) break; }
       }
-    } catch { showToast("Price fetch failed — check connection"); }
+      // If still 0, look for any number near "Parkin" or "PARK" in a price context
+      if (parkinPrice <= 0) {
+        const m2 = html.match(/PARK[^<]*?([0-9]{1,3}\.[0-9]{1,4})/);
+        if (m2) parkinPrice = parseFloat(m2[1]);
+      }
+      if (parkinPrice > 0) {
+        results["PARKIN.DFM"] = { bid: parkinPrice*0.999, ask: parkinPrice, updated: now };
+      }
+    } catch { /* skip parkin */ }
+
+    // Custom symbols via Yahoo Finance
+    for (const sym of customSymbols.filter(s => s !== "PARKIN.DFM")) {
+      const price = await yahooPrice(sym);
+      if (price && price > 0) {
+        results[sym] = { bid: price*0.999, ask: price, updated: now };
+      }
+    }
 
     setLivePrices(results);
     // Persist to localStorage so prices survive page reload

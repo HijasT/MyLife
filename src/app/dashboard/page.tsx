@@ -87,8 +87,15 @@ export default async function DashboardPage() {
   const otherEvents  = todayEvents.filter(e => !["work","birthday","due_paid"].includes(e.event_type));
   const hasAgenda    = workEvents.length > 0 || annivEvents.length > 0 || pendingDues.length > 0 || otherEvents.length > 0;
 
+  function fmt12(t?: string): string {
+    if (!t) return "";
+    const [h, m] = t.split(":").map(Number);
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 || 12;
+    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+  }
   function workLabel(ev: CalEvent): string {
-    if (ev.work_start && ev.work_end) return `${ev.title} · ${ev.work_start}–${ev.work_end}`;
+    if (ev.work_start && ev.work_end) return `${ev.title} · ${fmt12(ev.work_start)}–${fmt12(ev.work_end)}`;
     return ev.title;
   }
 
@@ -103,10 +110,8 @@ export default async function DashboardPage() {
         <h1 className="font-display text-3xl mb-1" style={{ color:"var(--text-primary)" }}>
           {greeting}, <span className="text-accent italic">{firstName}.</span>
         </h1>
-        <p className="text-sm flex items-center gap-2 flex-wrap" style={{ color:"var(--text-muted)" }}>
-          <span>{dateLong}</span>
-          <span style={{ color:"var(--text-primary)", fontWeight:700 }}>·</span>
-          <span style={{ color:"var(--text-primary)", fontWeight:700 }}>{timeDubai}</span>
+        <p className="text-sm" style={{ color:"var(--text-muted)" }}>
+          {dateLong} · <span style={{ color:"var(--text-primary)" }}>{timeDubai}</span>
         </p>
 
         {/* Today's agenda */}
