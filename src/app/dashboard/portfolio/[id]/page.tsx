@@ -147,6 +147,14 @@ export default function PortfolioItemPage({
     document.documentElement.classList.contains("dark");
 
   useEffect(() => {
+    const modalOpen = showAdd || showUpdatePrice || !!showDeleteConfirm;
+    document.body.style.overflow = modalOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [showAdd, showUpdatePrice, showDeleteConfirm]);
+
+  useEffect(() => {
     async function load() {
       const {
         data: { user },
@@ -977,9 +985,10 @@ export default function PortfolioItemPage({
             background: "rgba(0,0,0,0.6)",
             zIndex: 50,
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
-            padding: 16,
+            padding: "40px 16px 24px",
+            overflowY: "auto",
           }}
           onClick={() => setShowAdd(false)}
         >
@@ -1182,9 +1191,10 @@ export default function PortfolioItemPage({
             background: "rgba(0,0,0,0.6)",
             zIndex: 50,
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
-            padding: 16,
+            padding: "24px 16px",
+            overflowY: "auto",
           }}
           onClick={() => setShowUpdatePrice(false)}
         >
@@ -1249,9 +1259,10 @@ export default function PortfolioItemPage({
             background: "rgba(0,0,0,0.6)",
             zIndex: 50,
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
-            padding: 16,
+            padding: "24px 16px",
+            overflowY: "auto",
           }}
           onClick={() => setShowDeleteConfirm(null)}
         >

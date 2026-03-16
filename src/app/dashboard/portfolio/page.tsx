@@ -186,6 +186,14 @@ export default function PortfolioPage() {
     typeof document !== "undefined" &&
     document.documentElement.classList.contains("dark");
 
+  useEffect(() => {
+    const modalOpen = showAddItem || !!showUpdatePrice || !!showDeleteItem;
+    document.body.style.overflow = modalOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [showAddItem, showUpdatePrice, showDeleteItem]);
+
   const loadStats = useCallback(
     async (itemList: PortfolioItem[]) => {
       const results: Record<string, ItemStats> = {};
@@ -561,7 +569,10 @@ export default function PortfolioPage() {
     setLivePrices(results);
 
     if (userId && Object.keys(results).length > 0) {
-      await supabase.from("profiles").update({ metal_prices: results }).eq("id", userId);
+      await supabase
+        .from("profiles")
+        .update({ metal_prices: results })
+        .eq("id", userId);
     }
 
     setPriceLoading(false);
@@ -1516,9 +1527,10 @@ export default function PortfolioPage() {
             background: "rgba(0,0,0,0.6)",
             zIndex: 50,
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
-            padding: 16,
+            padding: "40px 16px 24px",
+            overflowY: "auto",
           }}
           onClick={() => setShowAddItem(false)}
         >
@@ -1698,9 +1710,10 @@ export default function PortfolioPage() {
             background: "rgba(0,0,0,0.6)",
             zIndex: 50,
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
-            padding: 16,
+            padding: "24px 16px",
+            overflowY: "auto",
           }}
           onClick={() => setShowUpdatePrice(null)}
         >
@@ -1765,9 +1778,10 @@ export default function PortfolioPage() {
             background: "rgba(0,0,0,0.6)",
             zIndex: 50,
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
-            padding: 16,
+            padding: "24px 16px",
+            overflowY: "auto",
           }}
           onClick={() => setShowDeleteItem(null)}
         >
