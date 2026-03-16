@@ -150,11 +150,16 @@ export default function CalendarPage() {
   async function deleteEvent(id:string){
     const ev = events.find(e=>e.id===id);
     if (ev?.isRecurring && ev?.recurType==="yearly") {
-      // For recurring events: only delete future entries (from today onwards)
-      // Since we store one record per year, just delete this instance
-      await supabase.from("calendar_events").delete().eq("id",id);
-      setEvents(p=>p.filter(e=>e.id!==id));
-      showToast("This anniversary entry deleted (past entries preserved)");
+      // Delete this and all future entries with same title, keep past entries
+      const today = todayDubai();
+      const futureIds = events
+        .filter(e => e.title===ev.title && e.eventType===ev.eventType && e.date>=today)
+        .map(e => e.id);
+      if (futureIds.length > 0) {
+        await supabase.from("calendar_events").delete().in("id", futureIds);
+        setEvents(p=>p.filter(e=>!futureIds.includes(e.id)));
+        showToast(`Deleted ${futureIds.length} future entr${futureIds.length===1?"y":"ies"} — past entries kept`);
+      }
     } else {
       await supabase.from("calendar_events").delete().eq("id",id);
       setEvents(p=>p.filter(e=>e.id!==id));
@@ -535,12 +540,16 @@ export default function CalendarPage() {
                 <input style={{...inp,width:"100%",boxSizing:"border-box" as const}} value={addTitle} onChange={e=>setAddTitle(e.target.value)} placeholder={addType==="work"?addShift:addType==="birthday"?`${addAnnivType} name`:"Event title"} />
               </label>
 
-              {/* Date range - From/To for all types */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <label style={lbl}>From <input type="date" style={inp} value={addDateFrom} onChange={e=>{setAddDateFrom(e.target.value);if(e.target.value>addDateTo)setAddDateTo(e.target.value);}} /></label>
-                <label style={lbl}>To   <input type="date" style={inp} value={addDateTo} min={addDateFrom} onChange={e=>setAddDateTo(e.target.value)} /></label>
-                {addDateFrom!==addDateTo&&<div style={{gridColumn:"1/-1",fontSize:12,color:"#3b82f6",fontWeight:600,padding:"6px 10px",background:"rgba(59,130,246,0.08)",borderRadius:8}}>Will add {datesBetween(addDateFrom,addDateTo).length} entries</div>}
-              </div>
+              {/* Date range - anniversary = single date only, others get From/To */}
+              {addType==="birthday" ? (
+                <label style={lbl}>Date <input type="date" style={inp} value={addDateFrom} onChange={e=>{setAddDateFrom(e.target.value);setAddDateTo(e.target.value);}} /></label>
+              ) : (
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  <label style={lbl}>From <input type="date" style={inp} value={addDateFrom} onChange={e=>{setAddDateFrom(e.target.value);if(e.target.value>addDateTo)setAddDateTo(e.target.value);}} /></label>
+                  <label style={lbl}>To   <input type="date" style={inp} value={addDateTo} min={addDateFrom} onChange={e=>setAddDateTo(e.target.value)} /></label>
+                  {addDateFrom!==addDateTo&&<div style={{gridColumn:"1/-1",fontSize:12,color:"#3b82f6",fontWeight:600,padding:"6px 10px",background:"rgba(59,130,246,0.08)",borderRadius:8}}>Will add {datesBetween(addDateFrom,addDateTo).length} entries</div>}
+                </div>
+              )}
 
               <label style={lbl}>Notes (optional) <textarea style={{...inp,resize:"vertical" as const,minHeight:60}} value={addNotes} onChange={e=>setAddNotes(e.target.value)} /></label>
             </div>

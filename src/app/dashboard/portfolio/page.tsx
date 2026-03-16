@@ -84,7 +84,7 @@ export default function PortfolioPage() {
   const [showUpdatePrice, setShowUpdatePrice] = useState<PortfolioItem|null>(null);
   const [newPrice, setNewPrice] = useState("");
   const [toast,   setToast]   = useState("");
-  const [newItem, setNewItem] = useState({symbol:"",name:"",assetType:"other" as AssetType,unitLabel:"unit",mainCurrency:"AED" as Currency,notes:""});
+  const [newItem, setNewItem] = useState({symbol:"",name:"",assetType:"other" as AssetType,unitLabel:"unit",mainCurrency:"AED" as Currency,notes:"",livePriceLink:""});
 
   const isDark = typeof document!=="undefined"&&document.documentElement.classList.contains("dark");
 
@@ -179,8 +179,21 @@ export default function PortfolioPage() {
         }
       } catch { /* skip silver */ }
 
-      // Custom symbols
-      for (const sym of customSymbols) {
+      // Parkin.ae stock price
+      try {
+        const r = await fetch(proxy("https://parkin.ae/stock-price"));
+        const wrapper = await r.json();
+        const html = wrapper.contents ?? "";
+        // Look for TickerValueTD_LastPrice class
+        const match = html.match(/TickerValueTD_LastPrice[^>]*>[\s]*([\d,\.]+)/);
+        if (match) {
+          const price = parseFloat(match[1].replace(/,/g,""));
+          if (price > 0) results["PARKIN.DFM"] = { bid: price*0.999, ask: price, updated: now };
+        }
+      } catch { /* skip parkin */ }
+
+      // Custom symbols (Yahoo Finance)
+      for (const sym of customSymbols.filter(s=>s!=="PARKIN.DFM")) {
         try {
           const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&range=1d`));
           const wrapper = await r.json();
@@ -195,13 +208,33 @@ export default function PortfolioPage() {
 
     setLivePrices(results);
     setPriceLoading(false);
+
+    // Auto-update current_price for linked assets using BID (sell) price
+    if (userId && Object.keys(results).length > 0) {
+      const { data: allItems } = await supabase.from("portfolio_items").select("id,notes,current_price").eq("user_id", userId);
+      for (const item of allItems ?? []) {
+        const notesStr = item.notes ?? "";
+        if (notesStr.startsWith("liveprice:")) {
+          const link = notesStr.split("||")[0].replace("liveprice:","").trim();
+          const lp = results[link];
+          if (lp && Math.abs(lp.bid - (item.current_price ?? 0)) > 0.001) {
+            await supabase.from("portfolio_items").update({ current_price: lp.bid, current_price_updated_at: new Date().toISOString() }).eq("id", item.id);
+          }
+        }
+      }
+      // Reload items to reflect updated prices
+      const { data: updated } = await supabase.from("portfolio_items").select("*").eq("user_id", userId).order("created_at");
+      if (updated) setItems(updated.map(dbToItem));
+    }
+
     if (Object.keys(results).length > 0) showToast(`Updated ${Object.keys(results).length} prices`);
     else showToast("No prices loaded — try again");
   }
 
   async function addItem(){
     if(!userId||!newItem.symbol.trim()||!newItem.name.trim()){showToast("Symbol and name required");return;}
-    const {data}=await supabase.from("portfolio_items").insert({user_id:userId,symbol:newItem.symbol.trim().toUpperCase(),name:newItem.name.trim(),asset_type:newItem.assetType,unit_label:newItem.unitLabel,main_currency:newItem.mainCurrency,notes:newItem.notes}).select("*").single();
+    const notesVal = newItem.livePriceLink ? `liveprice:${newItem.livePriceLink}||${newItem.notes}` : newItem.notes;
+    const {data}=await supabase.from("portfolio_items").insert({user_id:userId,symbol:newItem.symbol.trim().toUpperCase(),name:newItem.name.trim(),asset_type:newItem.assetType,unit_label:newItem.unitLabel,main_currency:newItem.mainCurrency,notes:notesVal}).select("*").single();
     if(data){
       const added=dbToItem(data);
       setItems(p=>[...p,added]);
@@ -438,6 +471,19 @@ export default function PortfolioPage() {
               <label style={lbl}>Currency<select style={inp} value={newItem.mainCurrency} onChange={e=>setNewItem(p=>({...p,mainCurrency:e.target.value as Currency}))}>
                 <option>AED</option><option>USD</option><option>INR</option><option>GBP</option><option>EUR</option>
               </select></label>
+              <label style={{...lbl,gridColumn:"1/-1"}}>
+                Live price link
+                <select style={inp} value={newItem.livePriceLink} onChange={e=>setNewItem(p=>({...p,livePriceLink:e.target.value}))}>
+                  <option value="">None — manual price update</option>
+                  <option value="XAU_OZ">24K Gold — 1 oz (AED)</option>
+                  <option value="XAU_G">24K Gold — 1 g (AED)</option>
+                  <option value="XAG_OZ">999 Silver — 1 oz (AED)</option>
+                  <option value="XAG_G">999 Silver — 1 g (AED)</option>
+                  <option value="PARKIN.DFM">Parkin (DFM)</option>
+                  {customSymbols.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+                <span style={{fontSize:11,color:V.faint,marginTop:2}}>Asset current price will auto-update from live prices tab (Bid/Sell rate)</span>
+              </label>
               <label style={{...lbl,gridColumn:"1/-1"}}>Notes<input style={inp} value={newItem.notes} onChange={e=>setNewItem(p=>({...p,notes:e.target.value}))} /></label>
             </div>
             <div style={{padding:"0 20px 20px",display:"flex",justifyContent:"flex-end",gap:8}}>
