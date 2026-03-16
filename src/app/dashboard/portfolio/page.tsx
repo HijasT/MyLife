@@ -75,7 +75,19 @@ export default function PortfolioPage() {
   const [recent,  setRecent]  = useState<Purchase[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<"assets"|"prices">("assets");
-  const [livePrices, setLivePrices] = useState<Record<string,{bid:number;ask:number;updated:string}>>({});
+  const [livePrices, setLivePrices] = useState<Record<string,{bid:number;ask:number;updated:string}>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const stored = localStorage.getItem("portfolio_live_prices");
+      if (stored) {
+        const { prices, fetchedAt } = JSON.parse(stored);
+        // Use stored prices if less than 4 hours old
+        const age = Date.now() - new Date(fetchedAt).getTime();
+        if (age < 4 * 60 * 60 * 1000) return prices;
+      }
+    } catch {}
+    return {};
+  });
   const [priceLoading, setPriceLoading] = useState(false);
   const [customSymbols, setCustomSymbols] = useState<string[]>(["PARKIN.DFM"]);
   const [newSymbol, setNewSymbol] = useState("");
@@ -207,6 +219,8 @@ export default function PortfolioPage() {
     } catch { showToast("Price fetch failed — check connection"); }
 
     setLivePrices(results);
+    // Persist to localStorage so prices survive page reload
+    try { localStorage.setItem("portfolio_live_prices", JSON.stringify({ prices: results, fetchedAt: new Date().toISOString() })); } catch {}
     setPriceLoading(false);
 
     // Auto-update current_price for linked assets using BID (sell) price

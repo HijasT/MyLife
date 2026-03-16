@@ -103,8 +103,11 @@ export default async function DashboardPage() {
         <h1 className="font-display text-3xl mb-1" style={{ color:"var(--text-primary)" }}>
           {greeting}, <span className="text-accent italic">{firstName}.</span>
         </h1>
-        <p className="text-sm mb-1" style={{ color:"var(--text-muted)" }}>{dateLong}</p>
-        <p className="text-2xl font-bold tabular-nums" style={{ color:"var(--text-primary)", letterSpacing:"-0.03em" }}>{timeDubai}</p>
+        <p className="text-sm flex items-center gap-2 flex-wrap" style={{ color:"var(--text-muted)" }}>
+          <span>{dateLong}</span>
+          <span style={{ color:"var(--text-primary)", fontWeight:700 }}>·</span>
+          <span style={{ color:"var(--text-primary)", fontWeight:700 }}>{timeDubai}</span>
+        </p>
 
         {/* Today's agenda */}
         {hasAgenda && (

@@ -31,7 +31,7 @@ function nowMonth() { return nowDubai().slice(0, 7); }
 function fmtMonth(m: string) { const [y, mo] = m.split("-"); return new Date(Number(y), Number(mo)-1, 1).toLocaleDateString("en-AE", { month:"long", year:"numeric" }); }
 function prevMonth(m: string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
 function nextMonth(m: string) { const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; }
-function fmtDateTime(iso: string | null) { if (!iso) return "—"; return new Date(iso).toLocaleString("en-AE",{day:"2-digit",month:"short",year:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+function fmtDateTime(iso: string | null) { if (!iso) return "—"; return new Date(iso).toLocaleString("en-AE",{ timeZone:"Asia/Dubai", day:"2-digit", month:"short", year:"2-digit", hour:"2-digit", minute:"2-digit", hour12:true }); }
 function ordinal(n: number) { const s=["th","st","nd","rd"]; const v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 
 function toAed(amount: number, currency: Currency, rates: Record<string, number>): number {
