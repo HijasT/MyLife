@@ -112,15 +112,17 @@ export default function DueTrackerPage() {
   async function loadAnnualData(uid: string) {
     const year = new Date().getFullYear();
     const months = Array.from({length:12},(_,i)=>`${year}-${String(i+1).padStart(2,"0")}`);
-    const { data: allEntries } = await supabase.from("due_entries").select("month,amount,currency,status")
+    const { data: allEntries } = await supabase.from("due_entries").select("month,amount,currency,status,due_item_id")
       .eq("user_id", uid).gte("month", `${year}-01`).lte("month", `${year}-12`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const typedEntries = (allEntries ?? []) as any[];
     const { data: allItems } = await supabase.from("due_items").select("id,group_name,default_currency,default_amount").eq("user_id", uid);
     const { data: allSettings } = await supabase.from("due_month_settings").select("month,fx_rates,remittance_inr,remittance_rate")
       .eq("user_id", uid).gte("month", `${year}-01`);
     
     const totals: Record<string,number> = {};
     for (const mo of months) {
-      const moEntries = (allEntries??[]).filter(e=>e.month===mo);
+      const moEntries = typedEntries.filter((e: {month:string})=>e.month===mo);
       const moSettings = (allSettings??[]).find(s=>s.month===mo);
       const fxR = (moSettings?.fx_rates as Record<string,number>) ?? {INR:25.2,USD:3.67};
       const indiaIds = new Set((allItems??[]).filter(x=>x.group_name==="India").map(x=>x.id));
@@ -146,6 +148,8 @@ export default function DueTrackerPage() {
     const prev = new Date(y, mo-2, 1);
     const prevMonth = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,"0")}`;
     const { data: entries } = await supabase.from("due_entries").select("amount,currency,due_item_id").eq("user_id",uid).eq("month",prevMonth);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const typedEntries2 = (entries ?? []) as any[];
     const { data: items } = await supabase.from("due_items").select("id,group_name,default_currency,default_amount").eq("user_id",uid);
     const { data: settings } = await supabase.from("due_month_settings").select("fx_rates,remittance_inr,remittance_rate").eq("user_id",uid).eq("month",prevMonth).maybeSingle();
     const fxR = (settings?.fx_rates as Record<string,number>) ?? {INR:25.2,USD:3.67};
@@ -153,7 +157,7 @@ export default function DueTrackerPage() {
     let total = 0;
     for (const item of (items??[])) {
       if (indiaIds.has(item.id)) continue;
-      const entry = (entries??[]).find(e=>e.due_item_id===item.id);
+      const entry = typedEntries2.find((e: {due_item_id:string})=>e.due_item_id===item.id);
       const amt = entry?.amount ?? item.default_amount ?? 0;
       const cur = entry?.currency ?? item.default_currency ?? "AED";
       total += cur==="AED" ? amt : cur==="INR" ? amt/(fxR.INR??25.2) : amt/(fxR.USD??3.67);
