@@ -88,6 +88,11 @@ export default function PortfolioPage() {
     return {};
   });
   const [priceLoading, setPriceLoading] = useState(false);
+  const [goldApiKey, setGoldApiKey] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("goldapi_key") ?? "";
+  });
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [customSymbols, setCustomSymbols] = useState<string[]>(["PARKIN.DFM"]);
   const [newSymbol, setNewSymbol] = useState("");
   const [showAddItem, setShowAddItem] = useState(false);
@@ -180,56 +185,62 @@ export default function PortfolioPage() {
       } catch { return null; }
     };
 
-    // Gold — Yahoo Finance spot price XAUUSD=X (USD per troy oz)
-    let goldOzAed = 0;
-    try {
-      const goldUrl = "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?interval=1d&range=5d";
-      const r = await fetch(proxy(goldUrl));
-      const w = await r.json();
-      const parsed = JSON.parse(w?.contents ?? "{}");
-      const p = parsed?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-      if (p > 0) goldOzAed = p * usdToAed;
-    } catch { /* skip */ }
-    // Fallback: try GC=F futures
-    if (!goldOzAed) {
-      try {
-        const r2 = await fetch(proxy("https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=5d"));
-        const w2 = await r2.json();
-        const parsed2 = JSON.parse(w2?.contents ?? "{}");
-        const p2 = parsed2?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-        if (p2 > 0) goldOzAed = p2 * usdToAed;
-      } catch { /* skip */ }
-    }
-    if (goldOzAed > 0) {
-      const gAed = goldOzAed / 31.1035;
-      results["XAU_OZ"] = { bid: goldOzAed * 0.999, ask: goldOzAed, updated: now };
-      results["XAU_G"]  = { bid: gAed * 0.999,       ask: gAed,       updated: now };
-    }
+    const OZ_TO_G = 31.1034768;
 
-    // Silver — Yahoo Finance spot price XAGUSD=X (USD per troy oz)
-    let silverOzAed = 0;
-    try {
-      const silverUrl = "https://query1.finance.yahoo.com/v8/finance/chart/XAGUSD=X?interval=1d&range=5d";
-      const r = await fetch(proxy(silverUrl));
-      const w = await r.json();
-      const parsed = JSON.parse(w?.contents ?? "{}");
-      const p = parsed?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-      if (p > 0) silverOzAed = p * usdToAed;
-    } catch { /* skip */ }
-    // Fallback: try SI=F futures
-    if (!silverOzAed) {
+    // Gold & Silver via goldapi.io (direct CORS-friendly API, no proxy needed)
+    if (goldApiKey) {
       try {
-        const r2 = await fetch(proxy("https://query1.finance.yahoo.com/v8/finance/chart/SI=F?interval=1d&range=5d"));
-        const w2 = await r2.json();
-        const parsed2 = JSON.parse(w2?.contents ?? "{}");
-        const p2 = parsed2?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-        if (p2 > 0) silverOzAed = p2 * usdToAed;
-      } catch { /* skip */ }
-    }
-    if (silverOzAed > 0) {
-      const gAed = silverOzAed / 31.1035;
-      results["XAG_OZ"] = { bid: silverOzAed * 0.999, ask: silverOzAed, updated: now };
-      results["XAG_G"]  = { bid: gAed * 0.999,         ask: gAed,         updated: now };
+        const [goldRes, silverRes] = await Promise.all([
+          fetch("https://www.goldapi.io/api/XAU/AED", {
+            headers: { "x-access-token": goldApiKey, "Content-Type": "application/json" }
+          }),
+          fetch("https://www.goldapi.io/api/XAG/AED", {
+            headers: { "x-access-token": goldApiKey, "Content-Type": "application/json" }
+          }),
+        ]);
+        if (goldRes.ok) {
+          const gold = await goldRes.json();
+          if (gold?.price > 0) {
+            const ozAed = gold.price;
+            const gAed  = ozAed / OZ_TO_G;
+            results["XAU_OZ"] = { bid: gold.prev_close_price ?? ozAed * 0.999, ask: ozAed, updated: now };
+            results["XAU_G"]  = { bid: (gold.prev_close_price ?? ozAed * 0.999) / OZ_TO_G, ask: gAed, updated: now };
+          }
+        }
+        if (silverRes.ok) {
+          const silver = await silverRes.json();
+          if (silver?.price > 0) {
+            const ozAed = silver.price;
+            const gAed  = ozAed / OZ_TO_G;
+            results["XAG_OZ"] = { bid: silver.prev_close_price ?? ozAed * 0.999, ask: ozAed, updated: now };
+            results["XAG_G"]  = { bid: (silver.prev_close_price ?? ozAed * 0.999) / OZ_TO_G, ask: gAed, updated: now };
+          }
+        }
+      } catch { /* goldapi failed */ }
+    } else {
+      // No API key — fall back to Yahoo Finance via proxy
+      try {
+        const r = await fetch(proxy("https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?interval=1d&range=5d"));
+        const w = await r.json();
+        const p = JSON.parse(w?.contents ?? "{}")?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+        if (p > 0) {
+          const ozAed = p * usdToAed;
+          const gAed  = ozAed / OZ_TO_G;
+          results["XAU_OZ"] = { bid: ozAed * 0.999, ask: ozAed, updated: now };
+          results["XAU_G"]  = { bid: gAed * 0.999,  ask: gAed,  updated: now };
+        }
+      } catch { /* skip gold */ }
+      try {
+        const r = await fetch(proxy("https://query1.finance.yahoo.com/v8/finance/chart/XAGUSD=X?interval=1d&range=5d"));
+        const w = await r.json();
+        const p = JSON.parse(w?.contents ?? "{}")?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+        if (p > 0) {
+          const ozAed = p * usdToAed;
+          const gAed  = ozAed / OZ_TO_G;
+          results["XAG_OZ"] = { bid: ozAed * 0.999, ask: ozAed, updated: now };
+          results["XAG_G"]  = { bid: gAed * 0.999,  ask: gAed,  updated: now };
+        }
+      } catch { /* skip silver */ }
     }
 
     // Parkin (DFM) — fetch from parkin.ae/stock-price
@@ -369,10 +380,32 @@ export default function PortfolioPage() {
         <div style={{padding:"14px 24px"}}>
           {/* Spot price table */}
           <div style={{background:V.card,border:`1px solid ${V.border}`,borderRadius:14,overflow:"hidden",marginBottom:16}}>
-            <div style={{padding:"12px 16px",borderBottom:`1px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)"}}>
+            <div style={{padding:"12px 16px",borderBottom:`1px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)"}}>
               <span style={{fontSize:14,fontWeight:800}}>Spot Prices — AED</span>
-              {Object.keys(livePrices).length===0&&<span style={{fontSize:12,color:V.faint}}>Click Refresh to load</span>}
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                {!goldApiKey && <span style={{fontSize:11,color:"#ef4444",fontWeight:600}}>⚠ Add goldapi.io key for reliable prices</span>}
+                {goldApiKey && <span style={{fontSize:11,color:"#16a34a",fontWeight:600}}>✓ goldapi.io</span>}
+                <button onClick={()=>setShowApiKeyInput(v=>!v)} style={{...btn,padding:"3px 10px",fontSize:11,color:V.accent}}>
+                  {goldApiKey ? "Change API key" : "🔑 Add API key"}
+                </button>
+              </div>
             </div>
+            {showApiKeyInput && (
+              <div style={{padding:"12px 16px",borderBottom:`1px solid ${V.border}`,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",background:isDark?"rgba(245,166,35,0.04)":"rgba(245,166,35,0.02)"}}>
+                <div style={{fontSize:12,color:V.faint,flex:"0 0 auto"}}>goldapi.io key:</div>
+                <input style={{...inp,flex:1,minWidth:200,fontFamily:"monospace",fontSize:12}} type="password"
+                  defaultValue={goldApiKey} id="goldapi-key-input" placeholder="goldapi.io/dashboard → copy your key" />
+                <button style={{...btnP,padding:"6px 12px",fontSize:12}} onClick={()=>{
+                  const val = (document.getElementById("goldapi-key-input") as HTMLInputElement)?.value?.trim();
+                  if (val) { setGoldApiKey(val); try{localStorage.setItem("goldapi_key",val);}catch{} }
+                  setShowApiKeyInput(false); showToast("API key saved");
+                }}>Save</button>
+                <button style={{...btn,padding:"6px 10px",fontSize:12}} onClick={()=>{
+                  setGoldApiKey(""); try{localStorage.removeItem("goldapi_key");}catch{} setShowApiKeyInput(false);
+                }}>Remove</button>
+                <a href="https://www.goldapi.io/" target="_blank" rel="noreferrer" style={{fontSize:11,color:V.accent}}>Get free key →</a>
+              </div>
+            )}
             {/* Headers */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 0.7fr",gap:8,padding:"8px 16px",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.08em",color:V.faint,borderBottom:`1px solid ${V.border}`}}>
               <div>Asset</div><div>Buy (Ask)</div><div>Sell (Bid)</div><div>Updated</div>
