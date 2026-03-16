@@ -46,6 +46,32 @@ export default async function DashboardPage() {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const firstName = displayName || user?.email?.split("@")[0] || "there";
 
+  // Fetch Dubai weather (server-side, no CORS issues)
+  let dubaiTemp: number | null = null;
+  let weatherCode: number | null = null;
+  try {
+    const wRes = await fetch(
+      "https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,weather_code&timezone=Asia%2FDubai",
+      { next: { revalidate: 1800 } } // cache 30 mins
+    );
+    const wData = await wRes.json();
+    dubaiTemp  = wData?.current?.temperature_2m ?? null;
+    weatherCode = wData?.current?.weather_code ?? null;
+  } catch { /* skip */ }
+
+  function weatherEmoji(code: number | null, hr: number): string {
+    if (code === null) return "";
+    const isNight = hr < 6 || hr >= 19;
+    if (code === 0) return isNight ? "🌙" : "☀️";
+    if (code <= 2)  return isNight ? "🌙" : "🌤️";
+    if (code <= 3)  return "⛅";
+    if (code <= 49) return "🌫️";
+    if (code <= 69) return "🌧️";
+    if (code <= 79) return "🌨️";
+    if (code <= 99) return "⛈️";
+    return "🌤️";
+  }
+
   // Fetch today's calendar events
   type CalEvent = { id: string; title: string; event_type: string; work_start?: string; work_end?: string; color?: string; };
   let todayEvents: CalEvent[] = [];
@@ -112,6 +138,11 @@ export default async function DashboardPage() {
         </h1>
         <p className="text-sm" style={{ color:"var(--text-muted)" }}>
           {dateLong} · <span style={{ color:"var(--text-primary)" }}>{timeDubai}</span>
+          {dubaiTemp !== null && (
+            <span style={{ color:"var(--text-muted)" }}>
+              {" "}· {weatherEmoji(weatherCode, hour)} <span style={{ color:"var(--text-primary)" }}>{dubaiTemp.toFixed(0)}°C</span>
+            </span>
+          )}
         </p>
 
         {/* Today's agenda */}

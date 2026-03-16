@@ -89,6 +89,9 @@ export default function DueTrackerPage() {
     try { const s = localStorage.getItem("due_collapsed"); return s ? new Set(JSON.parse(s)) : new Set<string>(); } catch { return new Set<string>(); }
   });
   const [toast, setToast] = useState("");
+  const [lastMonthTotal, setLastMonthTotal] = useState<number|null>(null);
+  const [showAnnual, setShowAnnual] = useState(false);
+  const [annualData, setAnnualData] = useState<Record<string,number>>({});
   const [newItem, setNewItem] = useState({ name:"", group:"UAE", statementDay:"", dueDay:"", defaultCurrency:"AED" as Currency, defaultAmount:"", isFixed:false });
 
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
@@ -100,9 +103,66 @@ export default function DueTrackerPage() {
       setUserId(user.id);
       await loadAll(user.id, month);
       setLoading(false);
+      await loadLastMonth(user.id, month);
+      await loadAnnualData(user.id);
     }
     load();
   }, []);
+
+  async function loadAnnualData(uid: string) {
+    const year = new Date().getFullYear();
+    const months = Array.from({length:12},(_,i)=>`${year}-${String(i+1).padStart(2,"0")}`);
+    const { data: allEntries } = await supabase.from("due_entries").select("month,amount,currency,status")
+      .eq("user_id", uid).gte("month", `${year}-01`).lte("month", `${year}-12`);
+    const { data: allItems } = await supabase.from("due_items").select("id,group_name,default_currency,default_amount").eq("user_id", uid);
+    const { data: allSettings } = await supabase.from("due_month_settings").select("month,fx_rates,remittance_inr,remittance_rate")
+      .eq("user_id", uid).gte("month", `${year}-01`);
+    
+    const totals: Record<string,number> = {};
+    for (const mo of months) {
+      const moEntries = (allEntries??[]).filter(e=>e.month===mo);
+      const moSettings = (allSettings??[]).find(s=>s.month===mo);
+      const fxR = (moSettings?.fx_rates as Record<string,number>) ?? {INR:25.2,USD:3.67};
+      const indiaIds = new Set((allItems??[]).filter(x=>x.group_name==="India").map(x=>x.id));
+      let total = 0;
+      for (const item of (allItems??[])) {
+        if (indiaIds.has(item.id)) continue;
+        const entry = moEntries.find(e=>e.due_item_id===item.id);
+        const amt = entry?.amount ?? item.default_amount ?? 0;
+        const cur = entry?.currency ?? item.default_currency ?? "AED";
+        total += cur==="AED" ? amt : cur==="INR" ? amt/(fxR.INR??25.2) : amt/(fxR.USD??3.67);
+      }
+      // Add remittance
+      const remInr = moSettings?.remittance_inr ?? 0;
+      const remRate = moSettings?.remittance_rate ?? (fxR.INR??25.2);
+      if (remInr > 0) total += remInr / remRate;
+      totals[mo] = total;
+    }
+    setAnnualData(totals);
+  }
+
+  async function loadLastMonth(uid: string, currentMonth: string) {
+    const [y,mo] = currentMonth.split("-").map(Number);
+    const prev = new Date(y, mo-2, 1);
+    const prevMonth = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,"0")}`;
+    const { data: entries } = await supabase.from("due_entries").select("amount,currency,due_item_id").eq("user_id",uid).eq("month",prevMonth);
+    const { data: items } = await supabase.from("due_items").select("id,group_name,default_currency,default_amount").eq("user_id",uid);
+    const { data: settings } = await supabase.from("due_month_settings").select("fx_rates,remittance_inr,remittance_rate").eq("user_id",uid).eq("month",prevMonth).maybeSingle();
+    const fxR = (settings?.fx_rates as Record<string,number>) ?? {INR:25.2,USD:3.67};
+    const indiaIds = new Set((items??[]).filter(x=>x.group_name==="India").map(x=>x.id));
+    let total = 0;
+    for (const item of (items??[])) {
+      if (indiaIds.has(item.id)) continue;
+      const entry = (entries??[]).find(e=>e.due_item_id===item.id);
+      const amt = entry?.amount ?? item.default_amount ?? 0;
+      const cur = entry?.currency ?? item.default_currency ?? "AED";
+      total += cur==="AED" ? amt : cur==="INR" ? amt/(fxR.INR??25.2) : amt/(fxR.USD??3.67);
+    }
+    const remInr = settings?.remittance_inr ?? 0;
+    const remRate = settings?.remittance_rate ?? (fxR.INR??25.2);
+    if (remInr > 0) total += remInr / remRate;
+    setLastMonthTotal(total);
+  }
 
   async function loadAll(uid: string, m: string) {
     const [itemsRes, entriesRes, settingsRes] = await Promise.all([
@@ -130,7 +190,10 @@ export default function DueTrackerPage() {
 
   async function changeMonth(m: string) {
     setMonth(m);
-    if (userId) await loadAll(userId, m);
+    if (userId) {
+      await loadAll(userId, m);
+      await loadLastMonth(userId, m);
+    }
   }
 
   function getEntry(itemId: string) { return entries.find(e => e.dueItemId === itemId); }
@@ -326,6 +389,60 @@ export default function DueTrackerPage() {
           </div>
         ))}
       </div>
+
+      {/* Monthly Summary Card */}
+      <div style={{ margin:"10px 24px 0", display:"flex", gap:10, flexWrap:"wrap" }}>
+        {lastMonthTotal !== null && (
+          <div style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:12, padding:"12px 16px", display:"flex", gap:14, alignItems:"center", flex:1, minWidth:220 }}>
+            <div>
+              <div style={{ fontSize:10, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:3 }}>vs last month</div>
+              <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+                <span style={{ fontSize:16, fontWeight:800, color: stats.totalAed > lastMonthTotal ? "#ef4444" : "#16a34a" }}>
+                  {stats.totalAed > lastMonthTotal ? "▲" : stats.totalAed < lastMonthTotal ? "▼" : "→"}
+                  {" "}AED {Math.abs(stats.totalAed - lastMonthTotal).toFixed(0)}
+                </span>
+                <span style={{ fontSize:11, color:V.faint }}>
+                  {stats.totalAed > lastMonthTotal ? "more" : stats.totalAed < lastMonthTotal ? "less" : "same"} than last month
+                </span>
+              </div>
+              <div style={{ fontSize:11, color:V.faint, marginTop:2 }}>Last month: AED {lastMonthTotal.toFixed(0)}</div>
+            </div>
+          </div>
+        )}
+        <button onClick={() => { setShowAnnual(v=>!v); }} style={{ ...btnP, padding:"10px 16px", fontSize:12, display:"flex", alignItems:"center", gap:6 }}>
+          📅 {showAnnual ? "Hide" : "Annual"} view
+        </button>
+      </div>
+
+      {/* Annual Grid */}
+      {showAnnual && (
+        <div style={{ margin:"10px 24px 0", background:V.card, border:`1px solid ${V.border}`, borderRadius:14, overflow:"hidden" }}>
+          <div style={{ padding:"11px 16px", borderBottom:`1px solid ${V.border}`, fontSize:13, fontWeight:800, display:"flex", justifyContent:"space-between", alignItems:"center", background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)" }}>
+            <span>📅 {new Date().getFullYear()} — Monthly Spending</span>
+            <span style={{ fontSize:11, color:V.faint }}>AED · excludes India group</span>
+          </div>
+          <div style={{ padding:"14px 16px", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))", gap:8 }}>
+            {Array.from({length:12},(_,i)=>{
+              const mo = `${new Date().getFullYear()}-${String(i+1).padStart(2,"0")}`;
+              const val = annualData[mo] ?? 0;
+              const maxVal = Math.max(...Object.values(annualData).filter(v=>v>0), 1);
+              const pct = val > 0 ? (val/maxVal)*100 : 0;
+              const isCurrent = mo === month;
+              const monthName = new Date(Number(mo.split("-")[0]), i, 1).toLocaleDateString("en-AE",{month:"short"});
+              return (
+                <div key={mo} onClick={()=>changeMonth(mo)}
+                  style={{ cursor:"pointer", borderRadius:10, padding:"10px 10px 8px", border:`1px solid ${isCurrent?V.accent:V.border}`, background:isCurrent?"rgba(245,166,35,0.08)":isDark?"rgba(255,255,255,0.02)":"rgba(0,0,0,0.02)", textAlign:"center" }}>
+                  <div style={{ fontSize:10, fontWeight:700, color:isCurrent?V.accent:V.faint, textTransform:"uppercase", marginBottom:6 }}>{monthName}</div>
+                  <div style={{ height:40, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+                    <div style={{ width:"60%", borderRadius:3, background:isCurrent?V.accent:"rgba(245,166,35,0.4)", height:`${Math.max(pct,4)}%`, minHeight:2 }}/>
+                  </div>
+                  <div style={{ fontSize:11, fontWeight:700, marginTop:4, color: val>0?V.text:V.faint }}>{val>0?val.toFixed(0):"—"}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {settings.note && <div style={{ margin:"10px 24px 0", padding:"9px 14px", background:"rgba(245,166,35,0.08)", border:"1px solid rgba(245,166,35,0.2)", borderRadius:10, fontSize:13 }}>📝 {settings.note}</div>}
 

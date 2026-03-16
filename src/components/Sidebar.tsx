@@ -62,6 +62,7 @@ function SyncBadge({ collapsed }: { collapsed: boolean }) {
 function DownloadModal({ onClose }: { onClose: () => void }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [downloading, setDownloading] = useState(false);
+  const [format, setFormat] = useState<"csv"|"json">("json");
   const supabase = createClient();
   const toggle = (id: string) => setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 
@@ -71,6 +72,46 @@ function DownloadModal({ onClose }: { onClose: () => void }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      if (format === "json") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const backup: Record<string, any> = { exportedAt: new Date().toISOString(), modules: {} };
+        for (const mod of selected) {
+          if (mod === "perfumes") {
+            const { data: p } = await supabase.from("perfumes").select("*").eq("user_id", user.id);
+            const { data: pur } = await supabase.from("perfume_purchases").select("*").eq("user_id", user.id);
+            const { data: bot } = await supabase.from("perfume_bottles").select("*").eq("user_id", user.id);
+            backup.modules.aromatica = { perfumes: p, purchases: pur, bottles: bot };
+          }
+          if (mod === "budget") {
+            const { data: items } = await supabase.from("due_items").select("*").eq("user_id", user.id);
+            const { data: entries } = await supabase.from("due_entries").select("*").eq("user_id", user.id);
+            const { data: settings } = await supabase.from("due_month_settings").select("*").eq("user_id", user.id);
+            backup.modules.dueTracker = { items, entries, settings };
+          }
+          if (mod === "portfolio") {
+            const { data: items } = await supabase.from("portfolio_items").select("*").eq("user_id", user.id);
+            const { data: purchases } = await supabase.from("portfolio_purchases").select("*").eq("user_id", user.id);
+            backup.modules.portfolio = { items, purchases };
+          }
+          if (mod === "calendar") {
+            const { data: events } = await supabase.from("calendar_events").select("*").eq("user_id", user.id);
+            backup.modules.calendar = { events };
+          }
+          if (mod === "biomarkers") {
+            const { data: tests } = await supabase.from("biomarker_tests").select("*").eq("user_id", user.id);
+            const { data: results } = await supabase.from("biomarker_results").select("*").eq("user_id", user.id);
+            const { data: metrics } = await supabase.from("body_metrics").select("*").eq("user_id", user.id);
+            backup.modules.biomarkers = { tests, results, bodyMetrics: metrics };
+          }
+        }
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+        const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+        a.download = `mylife-backup-${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+        onClose(); setDownloading(false); return;
+      }
+
       const parts: string[] = [];
       for (const mod of selected) {
         if (mod === "perfumes") {
@@ -129,7 +170,17 @@ function DownloadModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-sidebar-text hover:text-white text-lg">✕</button>
         </div>
         <div className="px-5 py-4">
-          <p className="text-sidebar-text text-xs mb-4">Select modules to export as CSV</p>
+          <div className="flex gap-2 mb-4">
+          {(["json","csv"] as const).map(f => (
+            <button key={f} onClick={()=>setFormat(f)}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-colors ${format===f?"bg-accent text-white":"border border-sidebar-border text-sidebar-text hover:text-white"}`}>
+              {f === "json" ? "📦 JSON (Full backup)" : "📄 CSV (Spreadsheet)"}
+            </button>
+          ))}
+        </div>
+        <p className="text-sidebar-text text-xs mb-4">
+          {format === "json" ? "Complete backup — preserves all data, can be used to restore" : "Select modules to export as CSV"}
+        </p>
           <div className="flex flex-col gap-2">
             {MODULES.filter(m => m.status === "active").map(m => (
               <label key={m.id} className="flex items-center gap-3 cursor-pointer group">
@@ -142,7 +193,7 @@ function DownloadModal({ onClose }: { onClose: () => void }) {
         <div className="px-5 pb-4 flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-sidebar-text border border-sidebar-border hover:text-white transition-colors">Cancel</button>
           <button onClick={doDownload} disabled={!selected.length || downloading} className="flex-1 py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-amber-500 transition-colors disabled:opacity-50">
-            {downloading ? "Exporting…" : `Export (${selected.length})`}
+            {downloading ? "Exporting…" : format === "json" ? `Backup (${selected.length})` : `Export CSV (${selected.length})`}
           </button>
         </div>
       </div>

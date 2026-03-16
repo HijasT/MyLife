@@ -111,6 +111,13 @@ export default function PerfumesPage() {
       saveToCache("purchases", loadedPur);
       markSynced();
       setLoading(false);
+      // Fetch Dubai weather for season suggestions (free, no key needed)
+      try {
+        const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m&timezone=Asia%2FDubai");
+        const data = await r.json();
+        const temp = data?.current?.temperature_2m ?? null;
+        if (temp !== null) setDubaiTemp(temp);
+      } catch { /* skip */ }
     }
     load();
   }, []);
@@ -122,6 +129,17 @@ export default function PerfumesPage() {
   }), [items]);
 
   // Stats per tab: total items + total cost
+  // Weather-based suggestions using open-meteo temp
+  const weatherSuggestedItems = useMemo(() => {
+    if (dubaiTemp === null) return [];
+    // Dubai weather mapping: Cold < 22°C, Moderate 22-32°C, Hot > 32°C
+    let tag = "Moderate";
+    if (dubaiTemp < 22) tag = "Cold";
+    else if (dubaiTemp > 32) tag = "Hot";
+    const wardrobe = items.filter(p => p.status === "wardrobe");
+    return wardrobe.filter(p => p.weatherTags.includes(tag) || p.weatherTags.includes("All Season")).slice(0, 4);
+  }, [items, dubaiTemp]);
+
   const tabStats = useMemo(() => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
