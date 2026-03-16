@@ -38,7 +38,7 @@ async function fetchLivePrice(symbol:string, assetType:AssetType): Promise<numbe
     } catch { /* use default */ }
 
     const tickerMap: Record<string,string> = {
-      XAU:"GC=F", XAG:"SI=F", BTC:"BTC-USD", ETH:"ETH-USD"
+      XAU:"XAUUSD=X", XAG:"XAGUSD=X", BTC:"BTC-USD", ETH:"ETH-USD"
     };
     const ticker = tickerMap[sym] ?? sym;
     const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`));
@@ -180,21 +180,62 @@ export default function PortfolioPage() {
       } catch { return null; }
     };
 
-    // Gold (GC=F) — USD per troy oz
-    const goldAed = await getYahooAed("GC=F");
-    if (goldAed && goldAed > 0) {
-      const gAed = goldAed / 31.1035;
-      results["XAU_OZ"] = { bid: goldAed*0.999, ask: goldAed, updated: now };
-      results["XAU_G"]  = { bid: gAed*0.999,    ask: gAed,    updated: now };
-    }
+    // Gold — scrape xau.today/gold-price-ounce-aed
+    try {
+      const r = await fetch(proxy("https://xau.today/gold-price-ounce-aed/"));
+      const wrapper = await r.json();
+      const html: string = wrapper?.contents ?? "";
+      // Try several patterns that price sites commonly use
+      const goldPatterns = [
+        /id="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
+        /class="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
+        /"price"\s*:\s*"?([\d,]+(?:\.\d+)?)"?/i,
+        /AED\s*<[^>]+>([\d,]+(?:\.\d+)?)/i,
+        />([\d,]{4,7}(?:\.\d+)?)\s*(?:AED|aed)/,
+        />\s*([\d,]{4,7})\s*</,
+      ];
+      let goldOzAed = 0;
+      for (const pat of goldPatterns) {
+        const m = html.match(pat);
+        if (m) {
+          const v = parseFloat(m[1].replace(/,/g, ""));
+          if (v > 5000 && v < 60000) { goldOzAed = v; break; } // sanity: gold oz in AED is ~10k-40k
+        }
+      }
+      if (goldOzAed > 0) {
+        const gAed = goldOzAed / 31.1035;
+        results["XAU_OZ"] = { bid: goldOzAed*0.999, ask: goldOzAed, updated: now };
+        results["XAU_G"]  = { bid: gAed*0.999,       ask: gAed,       updated: now };
+      }
+    } catch { /* skip gold */ }
 
-    // Silver (SI=F) — USD per troy oz
-    const silverAed = await getYahooAed("SI=F");
-    if (silverAed && silverAed > 0) {
-      const gAed = silverAed / 31.1035;
-      results["XAG_OZ"] = { bid: silverAed*0.999, ask: silverAed, updated: now };
-      results["XAG_G"]  = { bid: gAed*0.999,      ask: gAed,      updated: now };
-    }
+    // Silver — scrape xag.today/silver-price-ounce-aed
+    try {
+      const r = await fetch(proxy("https://xag.today/silver-price-ounce-aed/"));
+      const wrapper = await r.json();
+      const html: string = wrapper?.contents ?? "";
+      const silverPatterns = [
+        /id="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
+        /class="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
+        /"price"\s*:\s*"?([\d,]+(?:\.\d+)?)"?/i,
+        /AED\s*<[^>]+>([\d,]+(?:\.\d+)?)/i,
+        />([\d,]{2,5}(?:\.\d+)?)\s*(?:AED|aed)/,
+        />\s*([\d,]{2,5}(?:\.\d+)?)\s*</,
+      ];
+      let silverOzAed = 0;
+      for (const pat of silverPatterns) {
+        const m = html.match(pat);
+        if (m) {
+          const v = parseFloat(m[1].replace(/,/g, ""));
+          if (v > 30 && v < 2000) { silverOzAed = v; break; } // sanity: silver oz in AED is ~100-600
+        }
+      }
+      if (silverOzAed > 0) {
+        const gAed = silverOzAed / 31.1035;
+        results["XAG_OZ"] = { bid: silverOzAed*0.999, ask: silverOzAed, updated: now };
+        results["XAG_G"]  = { bid: gAed*0.999,         ask: gAed,         updated: now };
+      }
+    } catch { /* skip silver */ }
 
     // Parkin (DFM) — fetch from parkin.ae/stock-price
     try {
