@@ -80,6 +80,7 @@ export default function PerfumesPage() {
   const [sortBy, setSortBy] = useState("brand_asc");
   const [showAdd, setShowAdd] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [dubaiTemp, setDubaiTemp] = useState<number|null>(null);
   const [af, setAf] = useState<AddForm>({
     status: "wardrobe", brand: "", model: "", imageDataUrl: "", rating: 4,
     bottleType: "Full bottle", sizeMl: "100", usage: "Casual",
