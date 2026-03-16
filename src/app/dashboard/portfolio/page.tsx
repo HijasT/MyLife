@@ -13,12 +13,14 @@ type PortfolioItem = {
   unitLabel:string; mainCurrency:Currency;
   currentPrice:number|null; currentPriceUpdatedAt:string|null; notes:string;
 };
+type TxType = "buy"|"sell";
+
 type Purchase = {
   id:string; itemId:string; purchasedAt:string; unitPrice:number;
   units:number; totalPaid:number; currency:Currency; source:string;
-  itemName?:string; itemSymbol?:string;
+  itemName?:string; itemSymbol?:string; transactionType:TxType;
 };
-type ItemStats = { totalUnits:number; totalPaidAed:number; avgUnitPrice:number };
+type ItemStats = { totalUnits:number; costBasisAed:number; totalBuysAed:number; totalSellsAed:number; realizedPlAed:number; avgUnitPrice:number };
 
 const FX:Record<string,number> = { AED:1, USD:3.67, INR:0.044, GBP:4.62, EUR:4.0 };
 const toAed = (a:number,c:Currency) => a*(FX[c]??1);
@@ -59,9 +61,17 @@ const dbToItem = (r:any):PortfolioItem => ({
 });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dbToPurchase = (r:any):Purchase => ({
-  id:r.id,itemId:r.item_id,purchasedAt:r.purchased_at,unitPrice:r.unit_price,
-  units:r.units,totalPaid:r.total_paid,currency:(r.currency??"AED") as Currency,
-  source:r.source??"",itemName:r.portfolio_items?.name,itemSymbol:r.portfolio_items?.symbol
+  id:r.id,
+  itemId:r.item_id,
+  purchasedAt:r.purchased_at,
+  unitPrice:Math.abs(r.unit_price),
+  units:Math.abs(r.units),
+  totalPaid:Math.abs(r.total_paid),
+  currency:(r.currency??"AED") as Currency,
+  source:r.source??"",
+  itemName:r.portfolio_items?.name,
+  itemSymbol:r.portfolio_items?.symbol,
+  transactionType:Number(r.units) < 0 || Number(r.total_paid) < 0 ? "sell" : "buy",
 });
 
 export default function PortfolioPage() {
@@ -92,11 +102,45 @@ export default function PortfolioPage() {
   const loadStats = useCallback(async (uid:string, itemList:PortfolioItem[]) => {
     const results:Record<string,ItemStats> = {};
     await Promise.all(itemList.map(async item => {
-      const {data} = await supabase.from("portfolio_purchases").select("units,total_paid,currency").eq("item_id",item.id);
-      if (!data) { results[item.id]={totalUnits:0,totalPaidAed:0,avgUnitPrice:0}; return; }
-      const totalUnits  = data.reduce((s:number,r:{units:number})=>s+r.units,0);
-      const totalPaidAed= data.reduce((s:number,r:{total_paid:number;currency:string})=>s+toAed(r.total_paid,r.currency as Currency),0);
-      results[item.id]  = {totalUnits,totalPaidAed,avgUnitPrice:totalUnits>0?totalPaidAed/totalUnits:0};
+      const {data} = await supabase.from("portfolio_purchases").select("units,total_paid,currency,purchased_at").eq("item_id",item.id).order("purchased_at", { ascending:true });
+      if (!data) {
+        results[item.id]={ totalUnits:0, costBasisAed:0, totalBuysAed:0, totalSellsAed:0, realizedPlAed:0, avgUnitPrice:0 };
+        return;
+      }
+
+      let totalUnits = 0;
+      let costBasisAed = 0;
+      let totalBuysAed = 0;
+      let totalSellsAed = 0;
+      let realizedPlAed = 0;
+
+      for (const row of data as Array<{units:number; total_paid:number; currency:string; purchased_at:string}>) {
+        const units = Number(row.units) || 0;
+        const amountAed = Math.abs(toAed(Number(row.total_paid) || 0, row.currency as Currency));
+
+        if (units >= 0) {
+          totalUnits += units;
+          costBasisAed += amountAed;
+          totalBuysAed += amountAed;
+        } else {
+          const sellUnits = Math.min(Math.abs(units), totalUnits);
+          const avgCostBeforeSell = totalUnits > 0 ? costBasisAed / totalUnits : 0;
+          const costRemoved = avgCostBeforeSell * sellUnits;
+          totalUnits = Math.max(0, totalUnits - sellUnits);
+          costBasisAed = Math.max(0, costBasisAed - costRemoved);
+          totalSellsAed += amountAed;
+          realizedPlAed += amountAed - costRemoved;
+        }
+      }
+
+      results[item.id]  = {
+        totalUnits,
+        costBasisAed,
+        totalBuysAed,
+        totalSellsAed,
+        realizedPlAed,
+        avgUnitPrice:totalUnits>0?costBasisAed/totalUnits:0
+      };
     }));
     setAllStats(results);
   },[supabase]);
@@ -302,7 +346,7 @@ export default function PortfolioPage() {
     if(data){
       const added=dbToItem(data);
       setItems(p=>[...p,added]);
-      setAllStats(p=>({...p,[added.id]:{totalUnits:0,totalPaidAed:0,avgUnitPrice:0}}));
+      setAllStats(p=>({...p,[added.id]:{totalUnits:0,costBasisAed:0,totalBuysAed:0,totalSellsAed:0,realizedPlAed:0,avgUnitPrice:0}}));
       setShowAddItem(false);showToast("Asset added");
     }
   }
@@ -330,8 +374,8 @@ export default function PortfolioPage() {
     for(const item of items){
       const s=allStats[item.id];
       if(!s)continue;
-      cost+=s.totalPaidAed;
-      current+=item.currentPrice?item.currentPrice*s.totalUnits:s.totalPaidAed;
+      cost+=s.costBasisAed;
+      current+=item.currentPrice?item.currentPrice*s.totalUnits:s.costBasisAed;
     }
     return {cost,current,pl:current-cost,plPct:cost>0?((current-cost)/cost)*100:0};
   },[items,allStats]);
@@ -473,10 +517,10 @@ export default function PortfolioPage() {
         ):(
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {items.map(item=>{
-              const s=allStats[item.id]??{totalUnits:0,totalPaidAed:0,avgUnitPrice:0};
+              const s=allStats[item.id]??{totalUnits:0,costBasisAed:0,totalBuysAed:0,totalSellsAed:0,realizedPlAed:0,avgUnitPrice:0};
               const curVal=item.currentPrice?item.currentPrice*s.totalUnits:null;
-              const pl=curVal!==null?curVal-s.totalPaidAed:null;
-              const plPct=pl!==null&&s.totalPaidAed>0?(pl/s.totalPaidAed)*100:null;
+              const pl=curVal!==null?curVal-s.costBasisAed:null;
+              const plPct=pl!==null&&s.costBasisAed>0?(pl/s.costBasisAed)*100:null;
               const up=pl!==null&&pl>=0;
               return (
                 <div key={item.id} onClick={()=>router.push(`/dashboard/portfolio/${item.id}`)}
@@ -511,7 +555,7 @@ export default function PortfolioPage() {
                           {up?"+":""}{fmtN(pl)} ({up?"+":""}{plPct?.toFixed(2)}%)
                         </div>
                       )}
-                      <div style={{fontSize:11,color:V.faint,marginTop:2}}>Cost: AED {fmtN(s.totalPaidAed)}</div>
+                      <div style={{fontSize:11,color:V.faint,marginTop:2}}>Cost basis: AED {fmtN(s.costBasisAed)}</div>
                       <button onClick={e=>{e.stopPropagation();setShowUpdatePrice(item);setNewPrice(item.currentPrice?.toString()??"");}}
                         style={{...btn,padding:"3px 10px",fontSize:10,marginTop:4}}>Update price</button>
                     </div>
@@ -526,13 +570,14 @@ export default function PortfolioPage() {
       {/* Recent purchases */}
       {recent.length>0&&(
         <div style={{margin:"0 24px 24px",background:V.card,border:`1px solid ${V.border}`,borderRadius:14,overflow:"hidden"}}>
-          <div style={{padding:"11px 16px",borderBottom:`1px solid ${V.border}`,fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.1em",color:V.faint,background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)"}}>Last 10 purchases</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 0.6fr 0.7fr 0.8fr",gap:8,padding:"8px 16px",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.08em",color:V.faint,borderBottom:`1px solid ${V.border}`}}>
-            <div>Asset</div><div>Units</div><div>Paid</div><div>Date</div>
+          <div style={{padding:"11px 16px",borderBottom:`1px solid ${V.border}`,fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.1em",color:V.faint,background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)"}}>Last 10 transactions</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 0.6fr 0.7fr 0.8fr 0.8fr",gap:8,padding:"8px 16px",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.08em",color:V.faint,borderBottom:`1px solid ${V.border}`}}>
+            <div>Asset</div><div>Type</div><div>Units</div><div>Amount</div><div>Date</div>
           </div>
           {recent.map(p=>(
-            <div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr 0.6fr 0.7fr 0.8fr",gap:8,padding:"10px 16px",borderBottom:`1px solid ${V.border}`,fontSize:13,alignItems:"center"}}>
+            <div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr 0.6fr 0.7fr 0.8fr 0.8fr",gap:8,padding:"10px 16px",borderBottom:`1px solid ${V.border}`,fontSize:13,alignItems:"center"}}>
               <div style={{fontWeight:700}}>{p.itemName} <span style={{fontSize:11,color:V.faint}}>({p.itemSymbol})</span></div>
+              <div><span style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.08em",color:p.transactionType === "buy" ? "#16a34a" : "#ef4444"}}>{p.transactionType}</span></div>
               <div style={{color:V.muted}}>{fmtN(p.units,4)}</div>
               <div style={{fontWeight:700}}>{p.currency} {fmtN(p.totalPaid)}</div>
               <div style={{fontSize:11,color:V.faint}}>{new Date(p.purchasedAt).toLocaleDateString("en-AE")}</div>

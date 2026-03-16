@@ -15,9 +15,12 @@ type PortfolioItem = {
   currentPrice:number|null; currentPriceUpdatedAt:string|null; notes:string;
 };
 
+type TxType = "buy"|"sell";
+
 type Purchase = {
   id:string; purchasedAt:string; unitPrice:number; units:number;
   totalPaid:number; currency:Currency; source:string; notes:string;
+  transactionType:TxType;
 };
 
 const FX_TO_AED: Record<string,number> = { AED:1, USD:3.67, INR:0.044, GBP:4.62, EUR:4.0 };
@@ -28,7 +31,20 @@ function fmtDateTime(iso: string) { return new Date(iso).toLocaleString("en-AE",
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(r:any): PortfolioItem { return {id:r.id,symbol:r.symbol,name:r.name,assetType:r.asset_type as AssetType,unitLabel:r.unit_label??"unit",mainCurrency:(r.main_currency??"AED") as Currency,currentPrice:r.current_price??null,currentPriceUpdatedAt:r.current_price_updated_at??null,notes:r.notes??""}; }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function dbToPurchase(r:any): Purchase { return {id:r.id,purchasedAt:r.purchased_at,unitPrice:r.unit_price,units:r.units,totalPaid:r.total_paid,currency:(r.currency??"AED") as Currency,source:r.source??"",notes:r.notes??""}; }
+function dbToPurchase(r:any): Purchase {
+  const transactionType: TxType = Number(r.units) < 0 || Number(r.total_paid) < 0 ? "sell" : "buy";
+  return {
+    id:r.id,
+    purchasedAt:r.purchased_at,
+    unitPrice:Math.abs(r.unit_price),
+    units:Math.abs(r.units),
+    totalPaid:Math.abs(r.total_paid),
+    currency:(r.currency??"AED") as Currency,
+    source:r.source??"",
+    notes:r.notes??"",
+    transactionType,
+  };
+}
 
 export default function PortfolioItemPage({ params }: { params: { id: string } }) {
   const supabase = createClient();
@@ -45,6 +61,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
   const [userId, setUserId] = useState<string|null>(null);
 
   const [af, setAf] = useState({
+    transactionType:"buy" as TxType,
     purchasedAt: nowDubai().slice(0,16),
     unitPrice:"", units:"", totalPaid:"", currency:"AED" as Currency, source:"", notes:"",
   });
@@ -68,13 +85,36 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
   }, [params.id]);
 
   const stats = useMemo(() => {
-    const totalUnits = purchases.reduce((s,p) => s+p.units, 0);
-    const totalPaidAed = purchases.reduce((s,p) => s+toAed(p.totalPaid, p.currency), 0);
-    const avgUnitPrice = totalUnits > 0 ? totalPaidAed/totalUnits : 0;
+    const ordered = [...purchases].sort((a,b) => new Date(a.purchasedAt).getTime() - new Date(b.purchasedAt).getTime());
+    let totalUnits = 0;
+    let costBasisAed = 0;
+    let totalBuysAed = 0;
+    let totalSellsAed = 0;
+    let realizedPlAed = 0;
+
+    for (const p of ordered) {
+      const amountAed = toAed(p.totalPaid, p.currency);
+      if (p.transactionType === "buy") {
+        totalUnits += p.units;
+        costBasisAed += amountAed;
+        totalBuysAed += amountAed;
+      } else {
+        const sellUnits = Math.min(p.units, totalUnits);
+        const avgCostBeforeSell = totalUnits > 0 ? costBasisAed / totalUnits : 0;
+        const costRemoved = avgCostBeforeSell * sellUnits;
+        totalUnits = Math.max(0, totalUnits - sellUnits);
+        costBasisAed = Math.max(0, costBasisAed - costRemoved);
+        totalSellsAed += amountAed;
+        realizedPlAed += amountAed - costRemoved;
+      }
+    }
+
+    const avgUnitPrice = totalUnits > 0 ? costBasisAed / totalUnits : 0;
     const currentValueAed = item?.currentPrice ? item.currentPrice * totalUnits : null;
-    const pl = currentValueAed !== null ? currentValueAed - totalPaidAed : null;
-    const plPct = pl !== null && totalPaidAed > 0 ? (pl/totalPaidAed)*100 : null;
-    return { totalUnits, totalPaidAed, avgUnitPrice, currentValueAed, pl, plPct };
+    const pl = currentValueAed !== null ? currentValueAed - costBasisAed : null;
+    const plPct = pl !== null && costBasisAed > 0 ? (pl / costBasisAed) * 100 : null;
+
+    return { totalUnits, costBasisAed, totalBuysAed, totalSellsAed, realizedPlAed, avgUnitPrice, currentValueAed, pl, plPct };
   }, [purchases, item]);
 
   async function addPurchase() {
@@ -83,17 +123,19 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     const units = parseFloat(af.units);
     const totalPaid = parseFloat(af.totalPaid) || (unitPrice * units);
     if (isNaN(unitPrice)||isNaN(units)||unitPrice<=0||units<=0) { showToast("Enter valid price and units"); return; }
+    const signedUnits = af.transactionType === "sell" ? -units : units;
+    const signedTotalPaid = af.transactionType === "sell" ? -totalPaid : totalPaid;
     const { data } = await supabase.from("portfolio_purchases").insert({
       user_id:userId, item_id:item.id,
       purchased_at: new Date(af.purchasedAt).toISOString(),
-      unit_price:unitPrice, units, total_paid:totalPaid,
+      unit_price:unitPrice, units:signedUnits, total_paid:signedTotalPaid,
       currency:af.currency, source:af.source, notes:af.notes,
     }).select("*").single();
     if (data) {
       setPurchases(p => [dbToPurchase(data), ...p]);
       setShowAdd(false);
-      setAf({ purchasedAt:nowDubai().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });
-      showToast("Purchase added");
+      setAf({ transactionType:"buy", purchasedAt:nowDubai().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });
+      showToast(`${af.transactionType === "sell" ? "Sell" : "Buy"} transaction added`);
     }
   }
 
@@ -108,7 +150,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     await supabase.from("portfolio_purchases").delete().eq("id", id);
     setPurchases(p => p.filter(x => x.id !== id));
     setShowDeleteConfirm(null);
-    showToast("Purchase deleted");
+    showToast("Transaction deleted");
   }
 
   async function saveEditPurchase() {
@@ -116,8 +158,8 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     const { data } = await supabase.from("portfolio_purchases").update({
       purchased_at: new Date(af.purchasedAt).toISOString(),
       unit_price: parseFloat(af.unitPrice) || editPurchase.unitPrice,
-      units: parseFloat(af.units) || editPurchase.units,
-      total_paid: parseFloat(af.totalPaid) || editPurchase.totalPaid,
+      units: (af.transactionType === "sell" ? -1 : 1) * (parseFloat(af.units) || editPurchase.units),
+      total_paid: (af.transactionType === "sell" ? -1 : 1) * (parseFloat(af.totalPaid) || editPurchase.totalPaid),
       currency: af.currency,
       source: af.source,
       notes: af.notes,
@@ -125,7 +167,9 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
     if (data) {
       setPurchases(p => p.map(x => x.id === editPurchase.id ? dbToPurchase(data) : x));
       setEditPurchase(null);
-      showToast("Purchase updated");
+      setShowAdd(false);
+      setAf({ transactionType:"buy", purchasedAt:nowDubai().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });
+      showToast("Transaction updated");
     }
   }
 
@@ -165,7 +209,7 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
         <div style={{ display:"flex", gap:8 }}>
           <button style={{ ...btn, padding:"6px 12px", fontSize:12, borderColor:"rgba(239,68,68,0.3)", color:"#ef4444" }} onClick={() => setShowDeleteConfirm("__item__")}>Delete asset</button>
           <button style={{ ...btn, padding:"6px 12px", fontSize:12 }} onClick={() => { setNewPrice(item.currentPrice?.toString()??""); setShowUpdatePrice(true); }}>Update price</button>
-          <button style={btnPrimary} onClick={() => setShowAdd(true)}>+ Add purchase</button>
+          <button style={btnPrimary} onClick={() => { setEditPurchase(null); setAf({ transactionType:"buy", purchasedAt:nowDubai().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" }); setShowAdd(true); }}>+ Add transaction</button>
         </div>
       </div>
 
@@ -182,12 +226,15 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
         {/* Stats */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:10, marginBottom:20 }}>
           {[
-            { label:`Total ${item.unitLabel}s`, value:fmtNum(stats.totalUnits, 4), color:V.accent },
-            { label:"Total invested",           value:`AED ${fmtNum(stats.totalPaidAed)}`, color:V.text },
-            { label:`Current value`,            value:stats.currentValueAed!==null?`AED ${fmtNum(stats.currentValueAed)}`:"No price", color:V.text },
-            { label:"P&L",                      value:stats.pl!==null?`${isUp?"+":""}AED ${fmtNum(Math.abs(stats.pl))}`:"—", color:plColor },
-            { label:"P&L %",                    value:stats.plPct!==null?`${isUp?"+":""}${stats.plPct.toFixed(2)}%`:"—", color:plColor },
-            { label:`Avg cost/${item.unitLabel}`,value:`AED ${fmtNum(stats.avgUnitPrice)}`, color:V.muted },
+            { label:`Total ${item.unitLabel}s`,  value:fmtNum(stats.totalUnits, 4), color:V.accent },
+            { label:"Cost basis",               value:`AED ${fmtNum(stats.costBasisAed)}`, color:V.text },
+            { label:"Bought",                   value:`AED ${fmtNum(stats.totalBuysAed)}`, color:V.text },
+            { label:"Sold",                     value:`AED ${fmtNum(stats.totalSellsAed)}`, color:V.text },
+            { label:`Current value`,             value:stats.currentValueAed!==null?`AED ${fmtNum(stats.currentValueAed)}`:"No price", color:V.text },
+            { label:"Unrealized P&L",           value:stats.pl!==null?`${isUp?"+":""}AED ${fmtNum(Math.abs(stats.pl))}`:"—", color:plColor },
+            { label:"Unrealized P&L %",         value:stats.plPct!==null?`${isUp?"+":""}${stats.plPct.toFixed(2)}%`:"—", color:plColor },
+            { label:"Realized P&L",             value:`AED ${fmtNum(Math.abs(stats.realizedPlAed))}`, color:stats.realizedPlAed >= 0 ? "#16a34a" : "#ef4444" },
+            { label:`Avg cost/${item.unitLabel}`, value:`AED ${fmtNum(stats.avgUnitPrice)}`, color:V.muted },
           ].map(s => (
             <div key={s.label} style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:12, padding:"11px 14px" }}>
               <div style={{ fontSize:10, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>{s.label}</div>
@@ -214,9 +261,9 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
         {/* Purchase history */}
         <div style={section}>
           <div style={{ ...sHead, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span>Purchase history ({purchases.length})</span>
+            <span>Transaction history ({purchases.length})</span>
           </div>
-          {purchases.length===0 && <div style={{ padding:"24px 16px", textAlign:"center", color:V.faint, fontSize:13 }}>No purchases yet</div>}
+          {purchases.length===0 && <div style={{ padding:"24px 16px", textAlign:"center", color:V.faint, fontSize:13 }}>No transactions yet</div>}
           {purchases.map((p, idx) => {
             const costAed = toAed(p.totalPaid, p.currency);
             const currentVal = item.currentPrice ? item.currentPrice * p.units : null;
@@ -226,7 +273,10 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
               <div key={p.id} style={{ padding:"13px 16px", borderBottom:idx<purchases.length-1?`1px solid ${V.border}`:"none" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12, flexWrap:"wrap" }}>
                   <div>
-                    <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:4 }}>
+                    <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:4, flexWrap:"wrap" }}>
+                      <span style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:p.transactionType === "buy" ? "#16a34a" : "#ef4444", border:`1px solid ${p.transactionType === "buy" ? "rgba(22,163,74,0.25)" : "rgba(239,68,68,0.25)"}`, padding:"2px 8px", borderRadius:999 }}>
+                        {p.transactionType}
+                      </span>
                       <span style={{ fontSize:14, fontWeight:700 }}>#{purchases.length-idx} — {fmtNum(p.units, 4)} {item.unitLabel}</span>
                       {p.source && <span style={{ fontSize:11, color:V.faint }}>via {p.source}</span>}
                     </div>
@@ -237,11 +287,11 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
                     </div>
                   </div>
                   <div style={{ textAlign:"right", display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
-                    <div style={{ fontSize:14, fontWeight:800 }}>Paid: {p.currency} {fmtNum(p.totalPaid)}</div>
+                    <div style={{ fontSize:14, fontWeight:800 }}>{p.transactionType === "sell" ? "Received" : "Paid"}: {p.currency} {fmtNum(p.totalPaid)}</div>
                     {p.currency !== "AED" && <div style={{ fontSize:11, color:V.faint }}>≈ AED {fmtNum(costAed)}</div>}
                     {pl !== null && <div style={{ fontSize:12, fontWeight:700, color:isUpP?"#16a34a":"#ef4444", marginTop:2 }}>{isUpP?"+":""}AED {fmtNum(pl)}</div>}
                     <div style={{ display:"flex", gap:6, marginTop:4 }}>
-                      <button onClick={() => { setEditPurchase(p); setAf({ purchasedAt:p.purchasedAt.slice(0,16), unitPrice:String(p.unitPrice), units:String(p.units), totalPaid:String(p.totalPaid), currency:p.currency, source:p.source, notes:p.notes }); setShowAdd(true); }}
+                      <button onClick={() => { setEditPurchase(p); setAf({ transactionType:p.transactionType, purchasedAt:p.purchasedAt.slice(0,16), unitPrice:String(p.unitPrice), units:String(p.units), totalPaid:String(p.totalPaid), currency:p.currency, source:p.source, notes:p.notes }); setShowAdd(true); }}
                         style={{ padding:"3px 9px", borderRadius:6, border:`1px solid ${V.border}`, background:V.card, color:V.muted, cursor:"pointer", fontSize:11 }}>Edit</button>
                       <button onClick={() => setShowDeleteConfirm(p.id)}
                         style={{ padding:"3px 9px", borderRadius:6, border:"1px solid rgba(239,68,68,0.3)", background:"transparent", color:"#ef4444", cursor:"pointer", fontSize:11 }}>Delete</button>
@@ -259,20 +309,26 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:50, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={()=>setShowAdd(false)}>
           <div style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:18, width:"min(560px,100%)", maxHeight:"92vh", overflow:"auto" }} onClick={e=>e.stopPropagation()}>
             <div style={{ padding:"18px 20px", borderBottom:`1px solid ${V.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div><div style={{ fontSize:11, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.1em" }}>{item.symbol}</div><div style={{ fontSize:18, fontWeight:800 }}>{editPurchase ? "Edit purchase" : "Add purchase"}</div></div>
+              <div><div style={{ fontSize:11, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.1em" }}>{item.symbol}</div><div style={{ fontSize:18, fontWeight:800 }}>{editPurchase ? "Edit transaction" : "Add transaction"}</div></div>
               <button style={btn} onClick={()=>setShowAdd(false)}>✕</button>
             </div>
             <div style={{ padding:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+              <label style={{ ...lbl, gridColumn:"1/-1" }}>Type
+                <select style={inp} value={af.transactionType} onChange={e=>setAf(p=>({...p,transactionType:e.target.value as TxType}))}>
+                  <option value="buy">Buy</option>
+                  <option value="sell">Sell</option>
+                </select>
+              </label>
               <label style={{ ...lbl, gridColumn:"1/-1" }}>Date & time
                 <input type="datetime-local" style={inp} value={af.purchasedAt} onChange={e=>setAf(p=>({...p,purchasedAt:e.target.value}))} />
               </label>
               <label style={lbl}>Unit price ({item.mainCurrency} per {item.unitLabel})
                 <input type="number" style={inp} value={af.unitPrice} onChange={e=>setAf(p=>({...p,unitPrice:e.target.value}))} placeholder="e.g. 9200" />
               </label>
-              <label style={lbl}>Units purchased
+              <label style={lbl}>Units {af.transactionType === "sell" ? "sold" : "purchased"}
                 <input type="number" style={inp} value={af.units} onChange={e=>{ setAf(p=>({...p,units:e.target.value,totalPaid:p.unitPrice?String((parseFloat(p.unitPrice)*parseFloat(e.target.value)||0).toFixed(2)):p.totalPaid})); }} placeholder="e.g. 1.069" />
               </label>
-              <label style={lbl}>Total paid (actual amount)
+              <label style={lbl}>Total {af.transactionType === "sell" ? "received" : "paid"} (actual amount)
                 <input type="number" style={inp} value={af.totalPaid} onChange={e=>setAf(p=>({...p,totalPaid:e.target.value}))} placeholder="Auto-calculated" />
               </label>
               <label style={lbl}>Currency
@@ -288,8 +344,8 @@ export default function PortfolioItemPage({ params }: { params: { id: string } }
               </label>
             </div>
             <div style={{ padding:"0 20px 20px", display:"flex", justifyContent:"flex-end", gap:8 }}>
-              <button style={btn} onClick={()=>{setShowAdd(false);setEditPurchase(null);}}>Cancel</button>
-              <button style={btnPrimary} onClick={editPurchase ? saveEditPurchase : addPurchase}>{editPurchase ? "Update" : "Save purchase"}</button>
+              <button style={btn} onClick={()=>{setShowAdd(false);setEditPurchase(null);setAf({ transactionType:"buy", purchasedAt:nowDubai().slice(0,16), unitPrice:"", units:"", totalPaid:"", currency:"AED", source:"", notes:"" });}}>Cancel</button>
+              <button style={btnPrimary} onClick={editPurchase ? saveEditPurchase : addPurchase}>{editPurchase ? "Update" : `Save ${af.transactionType}`}</button>
             </div>
           </div>
         </div>
