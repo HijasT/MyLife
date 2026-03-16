@@ -88,10 +88,7 @@ export default function PortfolioPage() {
     return {};
   });
   const [priceLoading, setPriceLoading] = useState(false);
-  const [goldApiKey, setGoldApiKey] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return localStorage.getItem("goldapi_key") ?? "";
-  });
+  const [goldApiKey, setGoldApiKey] = useState("");
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [customSymbols, setCustomSymbols] = useState<string[]>(["PARKIN.DFM"]);
   const [newSymbol, setNewSymbol] = useState("");
@@ -395,13 +392,17 @@ export default function PortfolioPage() {
                 <div style={{fontSize:12,color:V.faint,flex:"0 0 auto"}}>goldapi.io key:</div>
                 <input style={{...inp,flex:1,minWidth:200,fontFamily:"monospace",fontSize:12}} type="password"
                   defaultValue={goldApiKey} id="goldapi-key-input" placeholder="goldapi.io/dashboard → copy your key" />
-                <button style={{...btnP,padding:"6px 12px",fontSize:12}} onClick={()=>{
+                <button style={{...btnP,padding:"6px 12px",fontSize:12}} onClick={async()=>{
                   const val = (document.getElementById("goldapi-key-input") as HTMLInputElement)?.value?.trim();
-                  if (val) { setGoldApiKey(val); try{localStorage.setItem("goldapi_key",val);}catch{} }
+                  if (val && userId) {
+                    setGoldApiKey(val);
+                    await supabase.from("profiles").update({ goldapi_key: val }).eq("id", userId);
+                  }
                   setShowApiKeyInput(false); showToast("API key saved");
                 }}>Save</button>
-                <button style={{...btn,padding:"6px 10px",fontSize:12}} onClick={()=>{
-                  setGoldApiKey(""); try{localStorage.removeItem("goldapi_key");}catch{} setShowApiKeyInput(false);
+                <button style={{...btn,padding:"6px 10px",fontSize:12}} onClick={async()=>{
+                  if (userId) await supabase.from("profiles").update({ goldapi_key: null }).eq("id", userId);
+                  setGoldApiKey(""); setShowApiKeyInput(false); showToast("API key removed");
                 }}>Remove</button>
                 <a href="https://www.goldapi.io/" target="_blank" rel="noreferrer" style={{fontSize:11,color:V.accent}}>Get free key →</a>
               </div>
