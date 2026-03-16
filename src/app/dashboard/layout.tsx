@@ -4,9 +4,17 @@ import Sidebar from "@/components/Sidebar";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   if (!user) redirect("/login");
 
   const { data: profile } = await supabase
@@ -15,15 +23,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
     .eq("id", user.id)
     .single();
 
-  const hiddenModules: string[] = profile?.hidden_modules ?? [];
+  const hiddenModules: string[] = Array.isArray(profile?.hidden_modules)
+    ? profile.hidden_modules
+    : [];
 
   return (
-    <div className="flex h-full min-h-screen">
+    <div className="flex min-h-screen">
       <Sidebar userEmail={user.email ?? ""} hiddenModules={hiddenModules} />
-      {/* main content — uses CSS var set by sidebar JS for smooth resize */}
-      <main className="flex-1 min-h-screen lg:ml-[240px] pt-14 lg:pt-0 transition-all duration-300"
+
+      <main
         id="main-content"
-        style={{ background: "var(--main-bg)" }}>
+        className="flex-1 min-h-screen pt-14 lg:pt-0 transition-all duration-300"
+        style={{
+          background: "var(--main-bg)",
+          marginLeft: "var(--sidebar-offset, 0px)",
+        }}
+      >
         <div className="page-enter">{children}</div>
       </main>
     </div>
