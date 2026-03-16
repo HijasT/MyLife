@@ -180,62 +180,57 @@ export default function PortfolioPage() {
       } catch { return null; }
     };
 
-    // Gold — scrape xau.today/gold-price-ounce-aed
+    // Gold — Yahoo Finance spot price XAUUSD=X (USD per troy oz)
+    let goldOzAed = 0;
     try {
-      const r = await fetch(proxy("https://xau.today/gold-price-ounce-aed/"));
-      const wrapper = await r.json();
-      const html: string = wrapper?.contents ?? "";
-      // Try several patterns that price sites commonly use
-      const goldPatterns = [
-        /id="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
-        /class="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
-        /"price"\s*:\s*"?([\d,]+(?:\.\d+)?)"?/i,
-        /AED\s*<[^>]+>([\d,]+(?:\.\d+)?)/i,
-        />([\d,]{4,7}(?:\.\d+)?)\s*(?:AED|aed)/,
-        />\s*([\d,]{4,7})\s*</,
-      ];
-      let goldOzAed = 0;
-      for (const pat of goldPatterns) {
-        const m = html.match(pat);
-        if (m) {
-          const v = parseFloat(m[1].replace(/,/g, ""));
-          if (v > 5000 && v < 60000) { goldOzAed = v; break; } // sanity: gold oz in AED is ~10k-40k
-        }
-      }
-      if (goldOzAed > 0) {
-        const gAed = goldOzAed / 31.1035;
-        results["XAU_OZ"] = { bid: goldOzAed*0.999, ask: goldOzAed, updated: now };
-        results["XAU_G"]  = { bid: gAed*0.999,       ask: gAed,       updated: now };
-      }
-    } catch { /* skip gold */ }
+      const goldUrl = "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?interval=1d&range=5d";
+      const r = await fetch(proxy(goldUrl));
+      const w = await r.json();
+      const parsed = JSON.parse(w?.contents ?? "{}");
+      const p = parsed?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+      if (p > 0) goldOzAed = p * usdToAed;
+    } catch { /* skip */ }
+    // Fallback: try GC=F futures
+    if (!goldOzAed) {
+      try {
+        const r2 = await fetch(proxy("https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=5d"));
+        const w2 = await r2.json();
+        const parsed2 = JSON.parse(w2?.contents ?? "{}");
+        const p2 = parsed2?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+        if (p2 > 0) goldOzAed = p2 * usdToAed;
+      } catch { /* skip */ }
+    }
+    if (goldOzAed > 0) {
+      const gAed = goldOzAed / 31.1035;
+      results["XAU_OZ"] = { bid: goldOzAed * 0.999, ask: goldOzAed, updated: now };
+      results["XAU_G"]  = { bid: gAed * 0.999,       ask: gAed,       updated: now };
+    }
 
-    // Silver — scrape xag.today/silver-price-ounce-aed
+    // Silver — Yahoo Finance spot price XAGUSD=X (USD per troy oz)
+    let silverOzAed = 0;
     try {
-      const r = await fetch(proxy("https://xag.today/silver-price-ounce-aed/"));
-      const wrapper = await r.json();
-      const html: string = wrapper?.contents ?? "";
-      const silverPatterns = [
-        /id="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
-        /class="[^"]*price[^"]*"[^>]*>([\d,]+(?:\.\d+)?)/i,
-        /"price"\s*:\s*"?([\d,]+(?:\.\d+)?)"?/i,
-        /AED\s*<[^>]+>([\d,]+(?:\.\d+)?)/i,
-        />([\d,]{2,5}(?:\.\d+)?)\s*(?:AED|aed)/,
-        />\s*([\d,]{2,5}(?:\.\d+)?)\s*</,
-      ];
-      let silverOzAed = 0;
-      for (const pat of silverPatterns) {
-        const m = html.match(pat);
-        if (m) {
-          const v = parseFloat(m[1].replace(/,/g, ""));
-          if (v > 30 && v < 2000) { silverOzAed = v; break; } // sanity: silver oz in AED is ~100-600
-        }
-      }
-      if (silverOzAed > 0) {
-        const gAed = silverOzAed / 31.1035;
-        results["XAG_OZ"] = { bid: silverOzAed*0.999, ask: silverOzAed, updated: now };
-        results["XAG_G"]  = { bid: gAed*0.999,         ask: gAed,         updated: now };
-      }
-    } catch { /* skip silver */ }
+      const silverUrl = "https://query1.finance.yahoo.com/v8/finance/chart/XAGUSD=X?interval=1d&range=5d";
+      const r = await fetch(proxy(silverUrl));
+      const w = await r.json();
+      const parsed = JSON.parse(w?.contents ?? "{}");
+      const p = parsed?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+      if (p > 0) silverOzAed = p * usdToAed;
+    } catch { /* skip */ }
+    // Fallback: try SI=F futures
+    if (!silverOzAed) {
+      try {
+        const r2 = await fetch(proxy("https://query1.finance.yahoo.com/v8/finance/chart/SI=F?interval=1d&range=5d"));
+        const w2 = await r2.json();
+        const parsed2 = JSON.parse(w2?.contents ?? "{}");
+        const p2 = parsed2?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+        if (p2 > 0) silverOzAed = p2 * usdToAed;
+      } catch { /* skip */ }
+    }
+    if (silverOzAed > 0) {
+      const gAed = silverOzAed / 31.1035;
+      results["XAG_OZ"] = { bid: silverOzAed * 0.999, ask: silverOzAed, updated: now };
+      results["XAG_G"]  = { bid: gAed * 0.999,         ask: gAed,         updated: now };
+    }
 
     // Parkin (DFM) — fetch from parkin.ae/stock-price
     try {
@@ -291,8 +286,8 @@ export default function PortfolioPage() {
       if (updated) setItems(updated.map(dbToItem));
     }
 
-    if (Object.keys(results).length > 0) showToast(`Updated ${Object.keys(results).length} prices`);
-    else showToast("No prices loaded — try again");
+    if (Object.keys(results).length > 0) showToast(`Updated ${Object.keys(results).length} price${Object.keys(results).length > 1 ? "s" : ""}`);
+    else showToast("⚠ No prices — Yahoo Finance may be rate-limiting, try again in 30s");
   }
 
   async function addItem(){
