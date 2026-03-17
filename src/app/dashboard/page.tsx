@@ -4,11 +4,12 @@ import Link from "next/link";
 
 function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const isComingSoon = module.status === "coming-soon";
-  return (
-    <Link
-      href={isComingSoon ? "#" : module.href}
-      className={`module-card block rounded-2xl p-6 border transition-colors bg-[var(--card-bg)] border-[var(--card-border)] ${isComingSoon ? "cursor-default" : "cursor-pointer"}`}
-    >
+
+  const cardClass =
+    "module-card block rounded-2xl p-6 border transition-colors bg-[var(--card-bg)] border-[var(--card-border)]";
+
+  const content = (
+    <>
       <div className="flex items-start justify-between mb-4">
         <span className="text-2xl">{module.icon}</span>
         {isComingSoon && (
@@ -17,17 +18,42 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
           </span>
         )}
       </div>
-      <p className="font-semibold text-[var(--text-primary)] mb-1">{module.label}</p>
+
+      <p className="font-semibold text-[var(--text-primary)] mb-1">
+        {module.label}
+      </p>
       <p className="text-sm text-[var(--text-muted)]">{module.description}</p>
+
       {!isComingSoon && (
-        <div className="mt-4 h-0.5 w-8 rounded-full" style={{ background: module.color }} />
+        <div
+          className="mt-4 h-0.5 w-8 rounded-full"
+          style={{ background: module.color }}
+        />
       )}
+    </>
+  );
+
+  if (isComingSoon) {
+    return (
+      <div
+        className={`${cardClass} cursor-default opacity-80`}
+        aria-disabled="true"
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link href={module.href} className={`${cardClass} cursor-pointer`}>
+      {content}
     </Link>
   );
 }
 
 export default async function DashboardPage() {
   const supabase = createClient();
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -49,6 +75,7 @@ export default async function DashboardPage() {
   }
 
   const now = new Date();
+
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
@@ -150,14 +177,6 @@ export default async function DashboardPage() {
     const items = (itemRes.data ?? []) as PortfolioItem[];
     const stats = (statRes.data ?? []) as PortfolioStatRow[];
 
-    const fx: Record<string, number> = {
-      AED: 1,
-      USD: 3.67,
-      INR: 0.044,
-      GBP: 4.62,
-      EUR: 4.0,
-    };
-
     const statMap = new Map<string, number>();
 
     for (const row of stats) {
@@ -169,6 +188,7 @@ export default async function DashboardPage() {
 
       const absUnits = Math.abs(Number(row.units) || 0);
       const existing = statMap.get(row.item_id) ?? 0;
+
       statMap.set(row.item_id, tx === "buy" ? existing + absUnits : existing - absUnits);
     }
 
@@ -196,20 +216,31 @@ export default async function DashboardPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-10">
-        <h1 className="font-display text-3xl mb-1" style={{ color: "var(--text-primary)" }}>
+        <h1
+          className="font-display text-3xl mb-1"
+          style={{ color: "var(--text-primary)" }}
+        >
           {greeting}, <span className="text-accent italic">{firstName}.</span>
         </h1>
+
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          {dateLong} · <span style={{ color: "var(--text-primary)" }}>{timeNow}</span>
+          {dateLong} ·{" "}
+          <span style={{ color: "var(--text-primary)" }}>{timeNow}</span>
         </p>
 
         <div
           className="mt-5 rounded-2xl border overflow-hidden"
-          style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
+          style={{
+            background: "var(--card-bg)",
+            borderColor: "var(--card-border)",
+          }}
         >
           <div
             className="px-4 py-3 border-b"
-            style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
+            style={{
+              borderColor: "var(--card-border)",
+              background: "var(--main-bg2)",
+            }}
           >
             <span
               className="text-xs font-bold tracking-widest uppercase"
@@ -220,19 +251,35 @@ export default async function DashboardPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
-            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
-              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+            <div
+              className="p-4 border-b md:border-b-0 md:border-r"
+              style={{ borderColor: "var(--card-border)" }}
+            >
+              <div
+                className="text-[11px] font-bold tracking-widest uppercase mb-2"
+                style={{ color: "var(--text-muted)" }}
+              >
                 Today&apos;s work
               </div>
+
               {workToday.length > 0 ? (
                 <div className="flex flex-col gap-2">
                   {workToday.map((ev) => (
                     <div key={ev.id}>
-                      <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                        {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "") : ev.title}
+                      <div
+                        className="text-sm font-semibold"
+                        style={{ color: "var(--text-primary)" }}
+                      >
+                        {ev.title.startsWith("Work:")
+                          ? ev.title.replace("Work:", "")
+                          : ev.title}
                       </div>
+
                       {ev.work_start && ev.work_end && (
-                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                        <div
+                          className="text-xs"
+                          style={{ color: "var(--text-muted)" }}
+                        >
                           {fmt12(ev.work_start)} to {fmt12(ev.work_end)}
                         </div>
                       )}
@@ -246,20 +293,36 @@ export default async function DashboardPage() {
               )}
             </div>
 
-            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
-              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+            <div
+              className="p-4 border-b md:border-b-0 md:border-r"
+              style={{ borderColor: "var(--card-border)" }}
+            >
+              <div
+                className="text-[11px] font-bold tracking-widest uppercase mb-2"
+                style={{ color: "var(--text-muted)" }}
+              >
                 Events & portfolio
               </div>
+
               <div className="flex flex-col gap-2">
                 {otherToday.slice(0, 2).map((ev) => (
-                  <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>
+                  <div
+                    key={ev.id}
+                    className="text-sm"
+                    style={{ color: "var(--text-primary)" }}
+                  >
                     {ev.title}
                   </div>
                 ))}
 
                 {todayPortfolio.slice(0, 2).map((tx) => (
-                  <div key={tx.id} className="text-sm" style={{ color: "var(--text-primary)" }}>
-                    Portfolio: {tx.transaction_type === "sell" ? "Sold" : "Purchased"}{" "}
+                  <div
+                    key={tx.id}
+                    className="text-sm"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    Portfolio:{" "}
+                    {tx.transaction_type === "sell" ? "Sold" : "Purchased"}{" "}
                     {tx.portfolio_items?.symbol ?? "Asset"}
                   </div>
                 ))}
@@ -273,12 +336,24 @@ export default async function DashboardPage() {
             </div>
 
             <div className="p-4">
-              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+              <div
+                className="text-[11px] font-bold tracking-widest uppercase mb-2"
+                style={{ color: "var(--text-muted)" }}
+              >
                 Portfolio snapshot
               </div>
-              <div className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
-                AED {portfolioCurrentAed.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+
+              <div
+                className="text-2xl font-bold"
+                style={{ color: "var(--text-primary)" }}
+              >
+                AED{" "}
+                {portfolioCurrentAed.toLocaleString("en-AE", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </div>
+
               <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
                 Current portfolio value
               </div>
@@ -292,13 +367,16 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-3 mb-4">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-accent hub-pulse" />
-              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">Finance Hub</h2>
+              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">
+                Finance Hub
+              </h2>
             </div>
             <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
               These modules share a financial ledger
             </p>
           </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {financeModules.map((m) => (
               <ModuleCard key={m.id} module={m} />
@@ -310,11 +388,15 @@ export default async function DashboardPage() {
       {lifestyleModules.length > 0 && (
         <section className="mb-10">
           <div className="flex items-center gap-3 mb-4">
-            <h2 className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
+            <h2
+              className="text-xs font-bold tracking-widest uppercase"
+              style={{ color: "var(--text-muted)" }}
+            >
               Lifestyle
             </h2>
             <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
           </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {lifestyleModules.map((m) => (
               <ModuleCard key={m.id} module={m} />
