@@ -4,35 +4,37 @@ import { createContext, useContext, useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
 
-const ThemeContext = createContext<{
-  theme: Theme;
-  toggle: () => void;
-}>({ theme: "light", toggle: () => {} });
+const ThemeContext = createContext({
+  theme: "light" as Theme,
+  toggle: () => {},
+});
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("light");
-  const [mounted, setMounted] = useState(false);
 
+  // Load from localStorage
   useEffect(() => {
-    const stored = localStorage.getItem("mylife-theme") as Theme | null;
-    const preferred = window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-    const initial = stored ?? preferred;
+    const saved = localStorage.getItem("theme") as Theme | null;
+    const initial = saved || "light";
     setTheme(initial);
-    document.documentElement.classList.toggle("dark", initial === "dark");
-    setMounted(true);
   }, []);
 
-  const toggle = () => {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    localStorage.setItem("mylife-theme", next);
-    document.documentElement.classList.toggle("dark", next === "dark");
-  };
+  // Apply to HTML
+  useEffect(() => {
+    const root = document.documentElement;
 
-  // Prevent flash of wrong theme
-  if (!mounted) return null;
+    if (theme === "dark") {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  function toggle() {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  }
 
   return (
     <ThemeContext.Provider value={{ theme, toggle }}>
@@ -41,4 +43,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export const useTheme = () => useContext(ThemeContext);
+export function useTheme() {
+  return useContext(ThemeContext);
+}
