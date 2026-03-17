@@ -135,7 +135,7 @@ export default function SettingsPage() {
     let zones: string[] = [];
 
     try {
-      const intlWithSupported = Intl as Intl.DateTimeFormat & {
+      const intlWithSupported = Intl as unknown as {
         supportedValuesOf?: (key: string) => string[];
       };
 
@@ -431,7 +431,6 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Profile */}
       <div
         className="rounded-2xl border overflow-hidden mb-6"
         style={sectionStyle}
@@ -498,7 +497,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Password access */}
       <div
         className="rounded-2xl border overflow-hidden mb-6"
         style={sectionStyle}
@@ -608,7 +606,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Dashboard modules */}
       <div
         className="rounded-2xl border overflow-hidden mb-6"
         style={sectionStyle}
@@ -674,7 +671,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Timezone */}
       <div
         className="rounded-2xl border overflow-hidden mb-6"
         style={sectionStyle}
@@ -728,7 +724,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* About */}
       <div
         className="rounded-2xl border overflow-hidden mb-6"
         style={sectionStyle}
@@ -767,7 +762,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Sign out */}
       <div
         className="rounded-2xl border overflow-hidden"
         style={sectionStyle}
