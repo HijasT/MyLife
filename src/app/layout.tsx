@@ -21,8 +21,8 @@ const playfair = Playfair_Display({
 export const metadata: Metadata = {
   title: "MyLife — Personal Dashboard",
   description: "The Super App for your Every Day",
-  manifest: "/manifest.json",
   applicationName: "MyLife",
+  manifest: "/manifest.json",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "32x32", type: "image/x-icon" },
@@ -30,7 +30,9 @@ export const metadata: Metadata = {
       { url: "/icon-32.png", sizes: "32x32", type: "image/png" },
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
     ],
-    apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
   },
   appleWebApp: {
     capable: true,
@@ -47,9 +49,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html
       lang="en"
@@ -57,7 +59,7 @@ export default function RootLayout({
       className={`${dmSans.variable} ${playfair.variable}`}
     >
       <body
-        className="font-sans antialiased"
+        className="font-sans antialiased min-h-screen"
         style={{
           background: "var(--main-bg)",
           color: "var(--text-primary)",

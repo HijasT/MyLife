@@ -1,73 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  --sidebar-width: 240px;
+  --sidebar-w: 240px;
+  --main-bg: #F8F7F4;
+  --main-bg2: #EFEDE8;
+  --card-bg: #FFFFFF;
+  --card-border: #F0EDE8;
+  --text-primary: #1A1A1A;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --divider: #F0EDE8;
 }
 
-html,
-body {
-  min-height: 100%;
+.dark {
+  --main-bg: #111318;
+  --main-bg2: #1A1D24;
+  --card-bg: #1A1D24;
+  --card-border: #272B35;
+  --text-primary: #F0EEE8;
+  --text-secondary: #9BA3B2;
+  --text-muted: #5C6375;
+  --divider: #272B35;
 }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
 
 body {
   background: var(--main-bg);
   color: var(--text-primary);
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
-.page-enter {
-  animation: fadeUp 0.35s ease;
-}
+/* Scrollbars */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--main-bg2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--divider); }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: #2A2D36; }
 
+/* Page transition */
 @keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
+.page-enter { animation: fadeUp 0.25s ease forwards; }
 
-.hub-pulse {
-  animation: hubPulse 1.8s ease-in-out infinite;
-}
-
+/* Finance hub dot pulse */
 @keyframes hubPulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.85;
-  }
-  50% {
-    transform: scale(1.25);
-    opacity: 1;
-  }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 166, 35, 0.15); }
+  50%       { box-shadow: 0 0 0 6px rgba(245, 166, 35, 0); }
 }
+.hub-pulse { animation: hubPulse 3s ease-in-out infinite; }
 
-.module-card {
-  transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    background-color 0.18s ease;
-}
-
+/* Module card hover */
+.module-card { transition: transform 0.18s ease, box-shadow 0.18s ease; }
 .module-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--card-border));
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+.dark .module-card:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
 }
 
-.sidebar-scroll::-webkit-scrollbar {
-  width: 8px;
-}
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1CFC8; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #B8B5AC; }
 
-.sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* Sidebar scrollbar */
+.sidebar-scroll::-webkit-scrollbar-thumb { background: #2A2D36; }
 
-.sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+/* Smooth page transitions */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
+.page-enter { animation: fadeUp 0.25s ease forwards; }
 
-.sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+/* Finance hub glow */
+@keyframes hubPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 166, 35, 0.15); }
+  50%       { box-shadow: 0 0 0 6px rgba(245, 166, 35, 0); }
+}
+.hub-pulse { animation: hubPulse 3s ease-in-out infinite; }
+
+/* Module card hover */
+.module-card {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.module-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
 }
