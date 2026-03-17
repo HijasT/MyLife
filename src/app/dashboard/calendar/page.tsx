@@ -305,6 +305,20 @@ function displayTitle(ev: CalEvent) {
   return ev.title;
 }
 
+function getShiftNameFromEvent(ev: CalEvent): string {
+  const meta = getEventMeta(ev);
+  const legacyShift = legacyShiftNameFromTitle(ev.title);
+  const plainTitle = displayTitle(ev).trim();
+
+  if (meta.shiftName) return meta.shiftName;
+  if (legacyShift) return legacyShift;
+  if (ev.eventType === "work" && safeArrayIncludes(Object.keys(SHIFTS), plainTitle as ShiftKey)) {
+    return plainTitle;
+  }
+
+  return "Work";
+}
+
 function getShiftCategory(shiftName?: string): "Regular" | "Extra" | "Other" {
   if (!shiftName) return "Other";
   if (REGULAR_SHIFT_KEYS.includes(shiftName as ShiftKey)) return "Regular";
@@ -354,8 +368,6 @@ export default function CalendarPage() {
   const [addDateTo, setAddDateTo] = useState(getTodayInTz("UTC"));
   const [addNotes, setAddNotes] = useState("");
   const [addRecurType, setAddRecurType] = useState<RecurType>("none");
-  const [addAnnivType, setAddAnnivType] = useState("Birthday");
-  const [addAnnivName, setAddAnnivName] = useState("");
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [showFilterMenu, setShowFilterMenu] = useState(false);
@@ -505,8 +517,6 @@ export default function CalendarPage() {
     setAddDateTo(target);
     setAddNotes("");
     setAddRecurType("none");
-    setAddAnnivType("Birthday");
-    setAddAnnivName("");
   }
 
   function selectShift(s: ShiftKey) {
@@ -541,28 +551,15 @@ export default function CalendarPage() {
     setAddDateTo(ev.date);
     setAddNotes(plainNotes);
     setAddRecurType(
-      ev.isRecurring &&
-        (ev.recurType === "weekly" ||
-          ev.recurType === "monthly" ||
-          ev.recurType === "yearly")
+      ev.eventType === "work"
+        ? "none"
+        : ev.isRecurring &&
+          (ev.recurType === "weekly" ||
+            ev.recurType === "monthly" ||
+            ev.recurType === "yearly")
         ? (ev.recurType as RecurType)
         : "none"
     );
-
-    if (ev.eventType === "birthday") {
-      const title = displayTitle(ev);
-      const colonIndex = title.indexOf(":");
-      if (colonIndex > -1) {
-        setAddAnnivType(title.slice(0, colonIndex).trim() || "Birthday");
-        setAddAnnivName(title.slice(colonIndex + 1).trim() || "");
-      } else {
-        setAddAnnivType("Birthday");
-        setAddAnnivName(title);
-      }
-    } else {
-      setAddAnnivType("Birthday");
-      setAddAnnivName("");
-    }
 
     setShowAdd(true);
   }
@@ -573,16 +570,8 @@ export default function CalendarPage() {
     const isWork = addType === "work";
     const shift = SHIFTS[addShift];
     const noTime = shift.noTime;
-
-    const annivTitle =
-      addType === "birthday"
-        ? addTitle.trim() ||
-          (addAnnivName ? `${addAnnivType}: ${addAnnivName}` : addAnnivType)
-        : "";
-
-    const baseTitle =
-      addTitle.trim() ||
-      (isWork ? addShift : addType === "birthday" ? annivTitle : "");
+    const effectiveRecurType: RecurType = isWork ? "none" : addRecurType;
+    const baseTitle = addTitle.trim() || (isWork ? addShift : "");
 
     if (!baseTitle) {
       setError("Please enter a title.");
@@ -594,7 +583,7 @@ export default function CalendarPage() {
       return;
     }
 
-    if (addRecurType !== "none" && addDateFrom !== addDateTo) {
+    if (effectiveRecurType !== "none" && addDateFrom !== addDateTo) {
       setError("Recurring events must use a single date.");
       return;
     }
@@ -605,12 +594,12 @@ export default function CalendarPage() {
     try {
       if (!editingEvent) {
         const seriesId =
-          addRecurType !== "none" ? crypto.randomUUID() : undefined;
+          effectiveRecurType !== "none" ? crypto.randomUUID() : undefined;
 
         const occurrenceDates =
-          addRecurType === "none"
+          effectiveRecurType === "none"
             ? datesBetween(addDateFrom, addDateTo)
-            : buildOccurrences(addDateFrom, addRecurType);
+            : buildOccurrences(addDateFrom, effectiveRecurType);
 
         const color = isWork ? SHIFT_COLORS[addShift] : EVENT_COLORS[addType];
         const meta: EventMeta = {};
@@ -618,19 +607,20 @@ export default function CalendarPage() {
         if (seriesId) meta.seriesId = seriesId;
 
         const notesWithMeta = encodeMetaNotes(addNotes, meta);
+        const finalTitle = isWork ? `Work:${baseTitle}` : baseTitle;
 
         const rows = occurrenceDates.map((date) => ({
           user_id: userId,
           date,
-          title: baseTitle,
+          title: finalTitle,
           event_type: addType,
           source_module: "manual",
           work_start: isWork && !noTime ? addStart : null,
           work_end: isWork && !noTime ? addEnd : null,
           color,
           notes: notesWithMeta,
-          is_recurring: addRecurType !== "none",
-          recur_type: addRecurType !== "none" ? addRecurType : null,
+          is_recurring: effectiveRecurType !== "none",
+          recur_type: effectiveRecurType !== "none" ? effectiveRecurType : null,
         }));
 
         const { data, error } = await supabase
@@ -661,16 +651,17 @@ export default function CalendarPage() {
           shiftName: isWork ? addShift : undefined,
         };
         const notesWithMeta = encodeMetaNotes(addNotes, nextMeta);
+        const finalTitle = isWork ? `Work:${baseTitle}` : baseTitle;
 
         const updatePayload = {
-          title: baseTitle,
+          title: finalTitle,
           event_type: addType,
           work_start: isWork && !noTime ? addStart : null,
           work_end: isWork && !noTime ? addEnd : null,
           color,
           notes: notesWithMeta,
-          is_recurring: addRecurType !== "none",
-          recur_type: addRecurType !== "none" ? addRecurType : null,
+          is_recurring: effectiveRecurType !== "none",
+          recur_type: effectiveRecurType !== "none" ? effectiveRecurType : null,
         };
 
         let affectedIds: string[] = [];
@@ -904,8 +895,7 @@ export default function CalendarPage() {
       hours += workHours(e.workStart, e.workEnd);
       days.add(e.date);
 
-      const meta = getEventMeta(e);
-      const shiftName = meta.shiftName || legacyShiftNameFromTitle(e.title) || "Work";
+      const shiftName = getShiftNameFromEvent(e);
       shiftCounts[shiftName] = (shiftCounts[shiftName] ?? 0) + 1;
 
       const category = getShiftCategory(shiftName);
@@ -954,8 +944,7 @@ export default function CalendarPage() {
 
       work.forEach((e) => {
         hours += workHours(e.workStart, e.workEnd);
-        const shiftName =
-          getEventMeta(e).shiftName || legacyShiftNameFromTitle(e.title) || "Work";
+        const shiftName = getShiftNameFromEvent(e);
         weekShiftCounts[shiftName] = (weekShiftCounts[shiftName] ?? 0) + 1;
 
         const category = getShiftCategory(shiftName);
@@ -1643,7 +1632,7 @@ export default function CalendarPage() {
                         {displayTitle(ev)}
                         {ev.eventType === "work" &&
                           ev.workStart &&
-                          !SHIFTS[(getEventMeta(ev).shiftName || legacyShiftNameFromTitle(ev.title) || "Custom") as ShiftKey]?.noTime && (
+                          !SHIFTS[getShiftNameFromEvent(ev) as ShiftKey]?.noTime && (
                             <span style={{ color: V.faint, marginLeft: 4 }}>
                               {fmt12(ev.workStart)}–{fmt12(ev.workEnd)}
                             </span>
@@ -2009,7 +1998,7 @@ export default function CalendarPage() {
                       onClick={() => {
                         setAddType(t);
                         if (!editingEvent) {
-                          setAddRecurType(t === "birthday" ? "yearly" : "none");
+                          setAddRecurType(t === "work" ? "none" : t === "birthday" ? "yearly" : "none");
                         }
                       }}
                       style={{
@@ -2028,33 +2017,6 @@ export default function CalendarPage() {
                   ))}
                 </div>
               </div>
-
-              {addType === "birthday" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <label style={lbl}>
-                    Type
-                    <select
-                      style={inp}
-                      value={addAnnivType}
-                      onChange={(e) => setAddAnnivType(e.target.value)}
-                    >
-                      <option>Birthday</option>
-                      <option>Wedding</option>
-                      <option>Work</option>
-                      <option>Custom</option>
-                    </select>
-                  </label>
-                  <label style={lbl}>
-                    Name
-                    <input
-                      style={inp}
-                      value={addAnnivName}
-                      onChange={(e) => setAddAnnivName(e.target.value)}
-                      placeholder="e.g. John"
-                    />
-                  </label>
-                </div>
-              )}
 
               {addType === "work" && (
                 <div style={lbl}>
@@ -2125,45 +2087,45 @@ export default function CalendarPage() {
                   placeholder={
                     addType === "work"
                       ? addShift
-                      : addType === "birthday"
-                      ? `${addAnnivType} name`
                       : "Event title"
                   }
                 />
               </label>
 
-              <div style={lbl}>
-                Repeat
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {(["none", "weekly", "monthly", "yearly"] as RecurType[]).map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setAddRecurType(r)}
-                      disabled={!!editingEvent && editScope === "future"}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: 999,
-                        border: `1px solid ${addRecurType === r ? V.accent : V.border}`,
-                        background: addRecurType === r ? `${V.accent}20` : V.input,
-                        color: addRecurType === r ? V.accent : V.text,
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        opacity: editingEvent && editScope === "future" ? 0.7 : 1,
-                      }}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-                {editingEvent && editScope === "future" && (
-                  <div style={{ fontSize: 11, color: V.faint }}>
-                    Recurrence mode is locked while editing future entries.
+              {addType !== "work" && (
+                <div style={lbl}>
+                  Repeat
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {(["none", "weekly", "monthly", "yearly"] as RecurType[]).map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => setAddRecurType(r)}
+                        disabled={!!editingEvent && editScope === "future"}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 999,
+                          border: `1px solid ${addRecurType === r ? V.accent : V.border}`,
+                          background: addRecurType === r ? `${V.accent}20` : V.input,
+                          color: addRecurType === r ? V.accent : V.text,
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          opacity: editingEvent && editScope === "future" ? 0.7 : 1,
+                        }}
+                      >
+                        {r}
+                      </button>
+                    ))}
                   </div>
-                )}
-              </div>
+                  {editingEvent && editScope === "future" && (
+                    <div style={{ fontSize: 11, color: V.faint }}>
+                      Recurrence mode is locked while editing future entries.
+                    </div>
+                  )}
+                </div>
+              )}
 
-              {editingEvent && editingEvent.isRecurring && (
+              {editingEvent && editingEvent.isRecurring && addType !== "work" && (
                 <div style={lbl}>
                   Edit scope
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -2224,10 +2186,10 @@ export default function CalendarPage() {
                       value={addDateTo}
                       min={addDateFrom}
                       onChange={(e) => setAddDateTo(e.target.value)}
-                      disabled={addRecurType !== "none"}
+                      disabled={addType !== "work" && addRecurType !== "none"}
                     />
                   </label>
-                  {addDateFrom !== addDateTo && addRecurType === "none" && (
+                  {addDateFrom !== addDateTo && (addType === "work" || addRecurType === "none") && (
                     <div
                       style={{
                         gridColumn: "1/-1",
@@ -2242,7 +2204,7 @@ export default function CalendarPage() {
                       Will add {datesBetween(addDateFrom, addDateTo).length} entries
                     </div>
                   )}
-                  {addRecurType !== "none" && (
+                  {addType !== "work" && addRecurType !== "none" && (
                     <div
                       style={{
                         gridColumn: "1/-1",
@@ -2291,12 +2253,12 @@ export default function CalendarPage() {
                 {addSaving
                   ? "Saving…"
                   : editingEvent
-                  ? editScope === "future"
+                  ? addType !== "work" && editScope === "future"
                     ? "Save future events"
                     : "Save changes"
-                  : addDateFrom !== addDateTo && addRecurType === "none"
+                  : addDateFrom !== addDateTo && (addType === "work" || addRecurType === "none")
                   ? `Add ${datesBetween(addDateFrom, addDateTo).length} entries`
-                  : addRecurType !== "none"
+                  : addType !== "work" && addRecurType !== "none"
                   ? `Create ${addRecurType} series`
                   : "Save"}
               </button>
