@@ -80,13 +80,25 @@ const EVENT_COLORS: Record<EventType, string> = {
 
 const EVENT_LABELS: Record<EventType, string> = {
   work: "Work",
-  birthday: "Anniversary 🎂",
+  birthday: "Anniversary",
   event: "Event",
-  due_paid: "Due paid ✓",
+  due_paid: "Due paid",
   note: "Note",
 };
 
 const META_PREFIX = "__MLMETA__";
+
+const REGULAR_SHIFT_KEYS: ShiftKey[] = [
+  "Morning",
+  "Mid1",
+  "Mid2",
+  "Afternoon",
+  "F.Morning",
+  "F.Afternoon",
+  "Custom",
+];
+
+const EXTRA_SHIFT_KEYS: ShiftKey[] = ["Holiday Duty", "Overtime"];
 
 function encodeMetaNotes(userNotes: string, meta: EventMeta) {
   const payload = JSON.stringify(meta);
@@ -100,10 +112,8 @@ function parseMetaNotes(notes: string): { meta: EventMeta; plainNotes: string } 
   }
 
   const firstLineEnd = notes.indexOf("\n");
-  const metaLine =
-    firstLineEnd >= 0 ? notes.slice(0, firstLineEnd) : notes;
-  const plainNotes =
-    firstLineEnd >= 0 ? notes.slice(firstLineEnd + 1) : "";
+  const metaLine = firstLineEnd >= 0 ? notes.slice(0, firstLineEnd) : notes;
+  const plainNotes = firstLineEnd >= 0 ? notes.slice(firstLineEnd + 1) : "";
 
   try {
     const raw = metaLine.replace(META_PREFIX, "");
@@ -264,15 +274,7 @@ function fmt12(t?: string): string {
   return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-function getWeekNumber(date: string) {
-  const d = makeUtcDate(date);
-  return Math.ceil(d.getUTCDate() / 7);
-}
-
-function buildOccurrences(
-  startDate: string,
-  recurType: RecurType
-): string[] {
+function buildOccurrences(startDate: string, recurType: RecurType): string[] {
   if (recurType === "none") return [startDate];
 
   const out: string[] = [];
@@ -301,6 +303,13 @@ function legacyShiftNameFromTitle(title: string): string | undefined {
 function displayTitle(ev: CalEvent) {
   if (ev.title.startsWith("Work:")) return ev.title.replace(/^Work:/, "").trim();
   return ev.title;
+}
+
+function getShiftCategory(shiftName?: string): "Regular" | "Extra" | "Other" {
+  if (!shiftName) return "Other";
+  if (REGULAR_SHIFT_KEYS.includes(shiftName as ShiftKey)) return "Regular";
+  if (EXTRA_SHIFT_KEYS.includes(shiftName as ShiftKey)) return "Extra";
+  return "Other";
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -532,7 +541,10 @@ export default function CalendarPage() {
     setAddDateTo(ev.date);
     setAddNotes(plainNotes);
     setAddRecurType(
-      ev.isRecurring && (ev.recurType === "weekly" || ev.recurType === "monthly" || ev.recurType === "yearly")
+      ev.isRecurring &&
+        (ev.recurType === "weekly" ||
+          ev.recurType === "monthly" ||
+          ev.recurType === "yearly")
         ? (ev.recurType as RecurType)
         : "none"
     );
@@ -570,11 +582,7 @@ export default function CalendarPage() {
 
     const baseTitle =
       addTitle.trim() ||
-      (isWork
-        ? addShift
-        : addType === "birthday"
-        ? annivTitle
-        : "");
+      (isWork ? addShift : addType === "birthday" ? annivTitle : "");
 
     if (!baseTitle) {
       setError("Please enter a title.");
@@ -885,21 +893,25 @@ export default function CalendarPage() {
     const workEvs = events.filter(
       (e) => e.eventType === "work" && e.date.startsWith(month)
     );
+
     let hours = 0;
     const days = new Set<string>();
     const shiftCounts: Record<string, number> = {};
+    let regularCount = 0;
+    let extraCount = 0;
 
     for (const e of workEvs) {
       hours += workHours(e.workStart, e.workEnd);
       days.add(e.date);
+
       const meta = getEventMeta(e);
       const shiftName = meta.shiftName || legacyShiftNameFromTitle(e.title) || "Work";
       shiftCounts[shiftName] = (shiftCounts[shiftName] ?? 0) + 1;
-    }
 
-    const extraShifts = Object.entries(shiftCounts)
-      .filter(([s]) => ["Holiday Duty", "Overtime"].includes(s))
-      .reduce((t, [, c]) => t + c, 0);
+      const category = getShiftCategory(shiftName);
+      if (category === "Regular") regularCount += 1;
+      if (category === "Extra") extraCount += 1;
+    }
 
     const leaves = Object.entries(shiftCounts)
       .filter(([s]) => ["Day Off", "Paid Leave"].includes(s))
@@ -908,7 +920,8 @@ export default function CalendarPage() {
     return {
       days: days.size,
       hours: Math.round(hours * 10) / 10,
-      extra: extraShifts,
+      extra: extraCount,
+      regular: regularCount,
       leaves,
       shiftCounts,
     };
@@ -930,17 +943,34 @@ export default function CalendarPage() {
   const weekStats = useMemo(() => {
     let hours = 0;
     const days = new Set<string>();
+    const weekShiftCounts: Record<string, number> = {};
+    let regularCount = 0;
+    let extraCount = 0;
 
     for (const date of weekDates) {
       const dayEvs = eventsByDate.get(date) ?? filteredEvents.filter((e) => e.date === date);
       const work = dayEvs.filter((e) => e.eventType === "work");
       if (work.length > 0) days.add(date);
+
       work.forEach((e) => {
         hours += workHours(e.workStart, e.workEnd);
+        const shiftName =
+          getEventMeta(e).shiftName || legacyShiftNameFromTitle(e.title) || "Work";
+        weekShiftCounts[shiftName] = (weekShiftCounts[shiftName] ?? 0) + 1;
+
+        const category = getShiftCategory(shiftName);
+        if (category === "Regular") regularCount += 1;
+        if (category === "Extra") extraCount += 1;
       });
     }
 
-    return { days: days.size, hours: Math.round(hours * 10) / 10 };
+    return {
+      days: days.size,
+      hours: Math.round(hours * 10) / 10,
+      regular: regularCount,
+      extra: extraCount,
+      shiftCounts: weekShiftCounts,
+    };
   }, [weekDates, eventsByDate, filteredEvents]);
 
   const dayEvents = useMemo(() => {
@@ -1136,19 +1166,7 @@ export default function CalendarPage() {
               color: filterTypes.length > 0 ? V.accent : V.muted,
             }}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-            </svg>
-            {filterTypes.length > 0
-              ? `${filterTypes.length} filter${filterTypes.length > 1 ? "s" : ""}`
-              : "Filter"}
+            Filter
             <svg
               width="10"
               height="10"
@@ -1334,6 +1352,7 @@ export default function CalendarPage() {
         {[
           { label: "Work days", value: monthStats.days, color: "#3b82f6" },
           { label: "Work hours", value: `${monthStats.hours}h`, color: "#3b82f6" },
+          { label: "Regular shifts", value: monthStats.regular, color: "#3b82f6" },
           { label: "Extra shifts", value: monthStats.extra, color: "#ef4444" },
           { label: "Leaves", value: monthStats.leaves, color: "#22c55e" },
         ].map((s) => (
@@ -1402,13 +1421,6 @@ export default function CalendarPage() {
                 const wH = dayEvs
                   .filter((e) => e.eventType === "work")
                   .reduce((s, e) => s + workHours(e.workStart, e.workEnd), 0);
-
-                const typeSummary = {
-                  work: dayEvs.filter((e) => e.eventType === "work").length,
-                  birthday: dayEvs.filter((e) => e.eventType === "birthday").length,
-                  event: dayEvs.filter((e) => e.eventType === "event").length,
-                  note: dayEvs.filter((e) => e.eventType === "note").length,
-                };
 
                 return (
                   <div
@@ -1485,13 +1497,6 @@ export default function CalendarPage() {
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", gap: 4, marginBottom: 4, flexWrap: "wrap" }}>
-                      {typeSummary.work > 0 && <span title="Work">💼</span>}
-                      {typeSummary.birthday > 0 && <span title="Anniversary">🎂</span>}
-                      {typeSummary.event > 0 && <span title="Event">📌</span>}
-                      {typeSummary.note > 0 && <span title="Note">📝</span>}
-                    </div>
-
                     <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                       {dayEvs.slice(0, 2).map((ev) => (
                         <div
@@ -1551,6 +1556,8 @@ export default function CalendarPage() {
             {[
               { label: "Days worked", value: weekStats.days, color: "#3b82f6" },
               { label: "Hours", value: `${weekStats.hours}h`, color: "#3b82f6" },
+              { label: "Regular shifts", value: weekStats.regular, color: "#3b82f6" },
+              { label: "Extra shifts", value: weekStats.extra, color: "#ef4444" },
             ].map((s) => (
               <div
                 key={s.label}
@@ -1749,7 +1756,7 @@ export default function CalendarPage() {
 
                   {ev.eventType === "work" && ev.workStart && ev.workEnd && (
                     <div style={{ fontSize: 12, color: V.muted, marginTop: 2 }}>
-                      ⏰ {fmt12(ev.workStart)}–{fmt12(ev.workEnd)} ·{" "}
+                      {fmt12(ev.workStart)}–{fmt12(ev.workEnd)} ·{" "}
                       {workHours(ev.workStart, ev.workEnd).toFixed(1)}h
                     </div>
                   )}
@@ -1796,7 +1803,8 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {Object.keys(monthStats.shiftCounts).length > 0 && (
+      {((view === "month" && Object.keys(monthStats.shiftCounts).length > 0) ||
+        (view === "week" && Object.keys(weekStats.shiftCounts).length > 0)) && (
         <div
           style={{
             margin: "0 24px 24px",
@@ -1818,32 +1826,108 @@ export default function CalendarPage() {
               background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
             }}
           >
-            Shift breakdown — {fmtMonth(month, timezone)}
+            Shift breakdown — {view === "month" ? fmtMonth(month, timezone) : "This week"}
           </div>
-          <div style={{ padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: 10 }}>
-            {Object.entries(monthStats.shiftCounts)
-              .sort((a, b) => b[1] - a[1])
-              .map(([shift, count]) => {
-                const color = SHIFT_COLORS[shift as ShiftKey] ?? "#6b7280";
-                return (
-                  <div
-                    key={shift}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: 999,
-                      background: `${color}15`,
-                      border: `1px solid ${color}30`,
-                      display: "flex",
-                      gap: 6,
-                      alignItems: "center",
-                    }}
-                  >
-                    <span style={{ fontSize: 13, fontWeight: 700, color }}>{count}×</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: V.text }}>{shift}</span>
+
+          {(() => {
+            const sourceCounts = view === "month" ? monthStats.shiftCounts : weekStats.shiftCounts;
+            const regularTotal = view === "month" ? monthStats.regular : weekStats.regular;
+            const extraTotal = view === "month" ? monthStats.extra : weekStats.extra;
+
+            const regularEntries = Object.entries(sourceCounts)
+              .filter(([shift]) => getShiftCategory(shift) === "Regular")
+              .sort((a, b) => b[1] - a[1]);
+
+            const extraEntries = Object.entries(sourceCounts)
+              .filter(([shift]) => getShiftCategory(shift) === "Extra")
+              .sort((a, b) => b[1] - a[1]);
+
+            return (
+              <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+                {regularTotal > 0 && (
+                  <div>
+                    <div
+                      style={{
+                        marginBottom: 8,
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: "#3b82f6",
+                      }}
+                    >
+                      {regularTotal}x Regular
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      {regularEntries.map(([shift, count]) => {
+                        const color = SHIFT_COLORS[shift as ShiftKey] ?? "#6b7280";
+                        return (
+                          <div
+                            key={shift}
+                            style={{
+                              padding: "6px 14px",
+                              borderRadius: 999,
+                              background: `${color}15`,
+                              border: `1px solid ${color}30`,
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                            }}
+                          >
+                            <span style={{ fontSize: 13, fontWeight: 700, color }}>
+                              {count}x
+                            </span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: V.text }}>
+                              {shift}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                );
-              })}
-          </div>
+                )}
+
+                {extraTotal > 0 && (
+                  <div>
+                    <div
+                      style={{
+                        marginBottom: 8,
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: "#ef4444",
+                      }}
+                    >
+                      {extraTotal}x Extra
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      {extraEntries.map(([shift, count]) => {
+                        const color = SHIFT_COLORS[shift as ShiftKey] ?? "#6b7280";
+                        return (
+                          <div
+                            key={shift}
+                            style={{
+                              padding: "6px 14px",
+                              borderRadius: 999,
+                              background: `${color}15`,
+                              border: `1px solid ${color}30`,
+                              display: "flex",
+                              gap: 6,
+                              alignItems: "center",
+                            }}
+                          >
+                            <span style={{ fontSize: 13, fontWeight: 700, color }}>
+                              {count}x
+                            </span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: V.text }}>
+                              {shift}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2024,7 +2108,7 @@ export default function CalendarPage() {
 
                   {!SHIFTS[addShift].noTime && (
                     <div style={{ fontSize: 11, color: V.faint }}>
-                      ⏱ {workHours(addStart, addEnd).toFixed(1)} hours
+                      {workHours(addStart, addEnd).toFixed(1)} hours
                     </div>
                   )}
                 </div>
@@ -2205,9 +2289,7 @@ export default function CalendarPage() {
               </button>
               <button style={btnP} onClick={addOrUpdateEvent} disabled={addSaving}>
                 {addSaving
-                  ? editingEvent
-                    ? "Saving…"
-                    : "Saving…"
+                  ? "Saving…"
                   : editingEvent
                   ? editScope === "future"
                     ? "Save future events"
