@@ -9,13 +9,10 @@ type ShiftKey =
   | "Mid1"
   | "Mid2"
   | "Afternoon"
-  | "F.Morning"
-  | "F.Afternoon"
   | "Holiday Duty"
   | "Overtime"
   | "Day Off"
-  | "Paid Leave"
-  | "Custom";
+  | "Paid Leave";
 
 type RecurType = "none" | "weekly" | "monthly" | "yearly";
 type EditScope = "single" | "future";
@@ -47,13 +44,10 @@ const SHIFTS: Record<
   Mid1: { start: "09:00", end: "17:00", label: "Mid 1 (9–5)" },
   Mid2: { start: "10:00", end: "18:00", label: "Mid 2 (10–6)" },
   Afternoon: { start: "14:00", end: "22:00", label: "Afternoon (2–10)" },
-  "F.Morning": { start: "07:30", end: "12:00", label: "F.Morning (7:30–12)" },
-  "F.Afternoon": { start: "14:00", end: "19:00", label: "F.Afternoon (2–7)" },
   "Holiday Duty": { start: "07:00", end: "15:00", label: "Holiday Duty" },
   Overtime: { start: "15:00", end: "19:00", label: "Overtime" },
   "Day Off": { start: "", end: "", label: "Day Off", noTime: true },
   "Paid Leave": { start: "", end: "", label: "Paid Leave", noTime: true },
-  Custom: { start: "09:00", end: "17:00", label: "Custom" },
 };
 
 const SHIFT_COLORS: Record<ShiftKey, string> = {
@@ -61,13 +55,10 @@ const SHIFT_COLORS: Record<ShiftKey, string> = {
   Mid1: "#6366f1",
   Mid2: "#8b5cf6",
   Afternoon: "#f59e0b",
-  "F.Morning": "#06b6d4",
-  "F.Afternoon": "#0ea5e9",
   "Holiday Duty": "#ef4444",
   Overtime: "#f97316",
   "Day Off": "#9ca3af",
   "Paid Leave": "#22c55e",
-  Custom: "#3b82f6",
 };
 
 const EVENT_COLORS: Record<EventType, string> = {
@@ -93,9 +84,6 @@ const REGULAR_SHIFT_KEYS: ShiftKey[] = [
   "Mid1",
   "Mid2",
   "Afternoon",
-  "F.Morning",
-  "F.Afternoon",
-  "Custom",
 ];
 
 const EXTRA_SHIFT_KEYS: ShiftKey[] = ["Holiday Duty", "Overtime"];
@@ -526,7 +514,7 @@ export default function CalendarPage() {
       setAddStart(sh.start);
       setAddEnd(sh.end);
     }
-    if (addType === "work" && s !== "Custom" && !editingEvent) {
+    if (addType === "work" && !editingEvent) {
       setAddTitle(s);
     }
   }
@@ -535,10 +523,10 @@ export default function CalendarPage() {
     const meta = getEventMeta(ev);
     const plainNotes = getPlainNotes(ev);
     const legacyShift = legacyShiftNameFromTitle(ev.title);
-    const shiftName = meta.shiftName || legacyShift || "Custom";
+    const shiftName = meta.shiftName || legacyShift || "Morning";
     const safeShift = safeArrayIncludes(Object.keys(SHIFTS), shiftName as ShiftKey)
       ? (shiftName as ShiftKey)
-      : "Custom";
+      : "Morning";
 
     setEditingEvent(ev);
     setEditScope("single");
