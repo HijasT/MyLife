@@ -28,15 +28,18 @@ export default async function DashboardLayout({
     : [];
 
   return (
-    <div className="flex min-h-screen">
+    <div
+      className="flex min-h-screen"
+      style={{ ["--sidebar-width" as string]: "240px" }}
+    >
       <Sidebar userEmail={user.email ?? ""} hiddenModules={hiddenModules} />
 
       <main
         id="main-content"
-        className="flex-1 min-h-screen pt-14 lg:pt-0 transition-all duration-300"
+        className="flex-1 min-h-screen pt-14 lg:pt-0 transition-[margin-left] duration-300"
         style={{
           background: "var(--main-bg)",
-          marginLeft: "var(--sidebar-offset, 0px)",
+          marginLeft: "var(--sidebar-width)",
         }}
       >
         <div className="page-enter">{children}</div>

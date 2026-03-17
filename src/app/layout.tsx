@@ -1,9 +1,6 @@
-import { redirect } from "next/navigation";
 import type { Metadata, Viewport } from "next";
 import { DM_Sans, Playfair_Display } from "next/font/google";
-import { createClient } from "@/lib/supabase/server";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import Sidebar from "@/components/Sidebar";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -34,31 +31,11 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export const dynamic = "force-dynamic";
-
-export default async function DashboardLayout({
+export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("hidden_modules")
-    .eq("id", user.id)
-    .single();
-
-  const hiddenModules: string[] = Array.isArray(profile?.hidden_modules)
-    ? profile.hidden_modules
-    : [];
-
   return (
     <html
       lang="en"
@@ -72,29 +49,7 @@ export default async function DashboardLayout({
           color: "var(--text-primary)",
         }}
       >
-        <ThemeProvider>
-          <div
-            className="flex min-h-screen"
-            style={{ ["--sidebar-width" as string]: "240px" }}
-          >
-            {/* Sidebar */}
-            <Sidebar
-              userEmail={user.email ?? ""}
-              hiddenModules={hiddenModules}
-            />
-
-            {/* Main Content */}
-            <main
-              id="main-content"
-              className="flex-1 min-h-screen pt-14 lg:pt-0 transition-[margin-left] duration-300"
-              style={{
-                marginLeft: "var(--sidebar-width)",
-              }}
-            >
-              <div className="page-enter">{children}</div>
-            </main>
-          </div>
-        </ThemeProvider>
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );
