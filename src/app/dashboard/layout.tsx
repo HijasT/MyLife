@@ -36,14 +36,27 @@ export default async function DashboardLayout({
 
       <main
         id="main-content"
-        className="min-h-screen min-w-0 pt-14 lg:pt-0 transition-[margin-left,width] duration-300 ease-in-out"
+        className="min-h-screen min-w-0 pt-14 lg:pt-0"
         style={{
           background: "var(--main-bg)",
-          marginLeft: "var(--sidebar-width)",
-          width: "calc(100vw - var(--sidebar-width))",
         }}
       >
-        <div className="page-enter min-h-screen">{children}</div>
+        {/* Desktop: content should shift and resize with sidebar */}
+        <div
+          className="hidden lg:block"
+          style={{
+            marginLeft: "var(--sidebar-width)",
+            width: "calc(100% - var(--sidebar-width))",
+            transition: "margin-left 0.3s ease, width 0.3s ease",
+          }}
+        >
+          <div className="page-enter min-h-screen">{children}</div>
+        </div>
+
+        {/* Mobile: sidebar is overlay only, content stays full width */}
+        <div className="lg:hidden">
+          <div className="page-enter min-h-screen">{children}</div>
+        </div>
       </main>
     </div>
   );
