@@ -92,6 +92,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   const [item, setItem] = useState<DueItem | null>(null);
   const [entries, setEntries] = useState<DueEntry[]>([]);
   const [fxByMonth, setFxByMonth] = useState<Record<string, Record<string, number>>>({});
+  const [monthLocks, setMonthLocks] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
   const [isDark, setIsDark] = useState(false);
@@ -134,7 +135,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       const [itemRes, entriesRes, settingsRes] = await Promise.all([
         supabase.from("due_items").select("*").eq("id", params.id).eq("user_id", user.id).single(),
         supabase.from("due_entries").select("*").eq("due_item_id", params.id).eq("user_id", user.id).order("month", { ascending: false }),
-        supabase.from("due_month_settings").select("month,fx_rates").eq("user_id", user.id),
+        supabase.from("due_month_settings").select("month,fx_rates,is_locked").eq("user_id", user.id),
       ]);
 
       if (itemRes.data) {
@@ -259,6 +260,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   }
 
   async function updateStatus(entry: DueEntry, status: Status) {
+    if (monthLocks[entry.month] ) { showToast("That month is locked"); return; }
     if (!userId) return;
     const paidAt = status === "paid" ? entry.paidAt ?? nowDubai() : null;
     const { error } = await supabase.from("due_entries").update({ status, paid_at: paidAt }).eq("id", entry.id).eq("user_id", userId);
@@ -301,18 +303,25 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   }, [entries, item, fxByMonth, nativeCurrency]);
 
   const chart = useMemo(() => {
-    const visible = [...entries].sort((a, b) => a.month.localeCompare(b.month)).slice(-8);
-    const max = Math.max(...visible.map((e) => e.amount ?? 0), 1);
-    return visible.map((entry, index) => {
-      const prev = index > 0 ? visible[index - 1] : null;
-      const amount = entry.amount ?? 0;
-      return {
-        ...entry,
-        pct: (amount / max) * 100,
-        diffAbs: prev ? amount - (prev.amount ?? 0) : null,
-        diffPct: prev ? pctDiff(prev.amount ?? 0, amount) : null,
-      };
-    });
+    const visible = [...entries].sort((a, b) => a.month.localeCompare(b.month)).slice(-12);
+    const amounts = visible.map((entry) => entry.amount ?? 0);
+    const max = Math.max(...amounts, 1);
+    const avg = amounts.length ? amounts.reduce((sum, amount) => sum + amount, 0) / amounts.length : 0;
+    const avgPct = (avg / max) * 100;
+    return {
+      avg,
+      avgPct,
+      points: visible.map((entry, index) => {
+        const prev = index > 0 ? visible[index - 1] : null;
+        const amount = entry.amount ?? 0;
+        return {
+          ...entry,
+          pct: (amount / max) * 100,
+          diffAbs: prev ? amount - (prev.amount ?? 0) : null,
+          diffPct: prev ? pctDiff(prev.amount ?? 0, amount) : null,
+        };
+      }),
+    };
   }, [entries]);
 
   const V = {
@@ -403,22 +412,37 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
           </div>
         )}
 
-        {chart.length > 0 && (
+        {chart.points.length > 0 && (
           <div style={{ ...section, marginBottom: 20 }}>
             <div style={sHead}>Recent trend</div>
-            <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(72px,1fr))", gap: 10 }}>
-              {chart.map((point) => {
-                const tone = statusTone(point.status);
-                return (
-                  <div key={point.month} style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: V.faint, fontWeight: 700, marginBottom: 6 }}>{point.month.slice(5)}</div>
-                    <div style={{ height: 56, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-                      <div style={{ width: "70%", height: `${Math.max(point.pct, 5)}%`, minHeight: 4, borderRadius: 4, background: tone.fg, opacity: 0.85 }} />
+            <div style={{ padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: V.muted, marginBottom: 10 }}>Last {chart.points.length} month{chart.points.length > 1 ? "s" : ""} · Average {nativeCurrency} {chart.avg.toFixed(0)}</div>
+              <div style={{ position: "relative", height: 180, border: `1px solid ${V.border}`, borderRadius: 12, padding: "12px 8px 28px", overflow: "hidden" }}>
+                <svg width="100%" height="140" viewBox={`0 0 ${Math.max(chart.points.length, 1) * 44} 140`} preserveAspectRatio="none">
+                  <line x1="0" y1={140 - (chart.avgPct / 100) * 120} x2={Math.max(chart.points.length, 1) * 44} y2={140 - (chart.avgPct / 100) * 120} stroke="#F5A623" strokeDasharray="5 5" strokeWidth="2" opacity="0.95" />
+                  {chart.points.map((point, index) => {
+                    const x = index * 44 + 22;
+                    const h = Math.max((point.pct / 100) * 120, 4);
+                    const y = 140 - h;
+                    const tone = statusTone(point.status);
+                    return (
+                      <g key={point.month}>
+                        <rect x={x - 12} y={y} width="24" height={h} rx="6" fill={tone.fg} opacity="0.88" />
+                      </g>
+                    );
+                  })}
+                </svg>
+                <div style={{ position: "absolute", left: 12, right: 12, top: `${12 + (140 - (chart.avgPct / 100) * 120)}px`, borderTop: "1px dashed rgba(245,166,35,0.6)", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", right: 12, top: `${4 + (140 - (chart.avgPct / 100) * 120)}px`, fontSize: 10, fontWeight: 800, color: V.accent, background: V.card, padding: "0 4px" }}>AVG</div>
+                <div style={{ display: "grid", gridTemplateColumns: `repeat(${chart.points.length}, minmax(0,1fr))`, gap: 6, marginTop: 8 }}>
+                  {chart.points.map((point) => (
+                    <div key={point.month} style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 10, color: V.faint, fontWeight: 700 }}>{point.month.slice(5)}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700 }}>{point.currency} {(point.amount ?? 0).toFixed(0)}</div>
                     </div>
-                    <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6 }}>{point.currency} {(point.amount ?? 0).toFixed(0)}</div>
-                  </div>
-                );
-              })}
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -457,7 +481,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                       <select style={inp} value={editCurrency} onChange={(e) => setEditCurrency(e.target.value as Currency)}>
                         <option>AED</option><option>INR</option><option>USD</option>
                       </select>
-                      <select style={inp} value={editStatus} onChange={(e) => setEditStatus(e.target.value as Status)}>
+                      <select disabled={monthLocks[entry.month]} style={inp} value={editStatus} onChange={(e) => setEditStatus(e.target.value as Status)}>
                         <option value="pending">Pending</option>
                         <option value="paid">Paid</option>
                         <option value="skipped">Skipped</option>
