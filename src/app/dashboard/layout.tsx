@@ -6,18 +6,16 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   const supabase = createClient();
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    redirect("/login");
-  }
+  if (!user) redirect("/login");
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -31,17 +29,18 @@ export default async function DashboardLayout({
 
   return (
     <div
-      className="flex min-h-screen"
+      className="min-h-screen"
       style={{ ["--sidebar-width" as string]: "240px" }}
     >
       <Sidebar userEmail={user.email ?? ""} hiddenModules={hiddenModules} />
 
       <main
         id="main-content"
-        className="flex-1 min-h-screen min-w-0 pt-14 lg:pt-0 transition-[margin-left] duration-300"
+        className="min-h-screen min-w-0 pt-14 lg:pt-0 transition-[margin-left,width] duration-300 ease-in-out"
         style={{
           background: "var(--main-bg)",
           marginLeft: "var(--sidebar-width)",
+          width: "calc(100vw - var(--sidebar-width))",
         }}
       >
         <div className="page-enter min-h-screen">{children}</div>
