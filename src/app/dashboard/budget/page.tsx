@@ -39,12 +39,13 @@ type MonthSettings = {
   month: string;
   mainCurrency: Currency;
   note: string;
-  cashIn: Record<string, number>;
+  cashIn: Record<string, number | string>;
   fxRates: Record<string, number>;
   groups: string[];
   remittanceInr: number | null;
   remittanceRate: number | null;
-  remittancePaid: boolean;
+  remittanceStatus: Status;
+  isLocked: boolean;
 };
 
 type ThemeVars = {
@@ -143,6 +144,12 @@ function parseNum(v: string) {
   return Number.isFinite(n) ? n : null;
 }
 
+function remittanceStatusFromRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
+  const raw = row.cash_in?.__remittance_status;
+  if (raw === "pending" || raw === "paid" || raw === "skipped" || raw === "waived") return raw;
+  return row.remittance_paid ? "paid" : "pending";
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(r: any): DueItem {
   return {
@@ -191,7 +198,8 @@ export default function DueTrackerPage() {
     groups: DEFAULT_GROUPS,
     remittanceInr: null,
     remittanceRate: null,
-    remittancePaid: false,
+    remittanceStatus: "pending",
+    isLocked: false,
   });
   const [showAddItem, setShowAddItem] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -275,7 +283,8 @@ export default function DueTrackerPage() {
             groups: s.groups ?? DEFAULT_GROUPS,
             remittanceInr: s.remittance_inr ?? null,
             remittanceRate: s.remittance_rate ?? null,
-            remittancePaid: s.remittance_paid ?? false,
+            remittanceStatus: remittanceStatusFromRow(s),
+            isLocked: s.is_locked ?? false,
           }
         : {
             month: m,
@@ -286,7 +295,8 @@ export default function DueTrackerPage() {
             groups: DEFAULT_GROUPS,
             remittanceInr: null,
             remittanceRate: null,
-            remittancePaid: false,
+            remittanceStatus: "pending",
+    isLocked: false,
           },
     );
     markSynced();
@@ -349,6 +359,10 @@ export default function DueTrackerPage() {
   }
 
   async function updateEntryStatus(item: DueItem, status: Status) {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
     try {
       const entry = await ensureEntry(item);
       const paidAt = status === "paid" ? nowDubai() : null;
@@ -366,6 +380,10 @@ export default function DueTrackerPage() {
   }
 
   async function updateEntryField(item: DueItem, field: "amount" | "currency" | "note", value: number | string | null) {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
     try {
       const entry = await ensureEntry(item);
       const { error } = await supabase
@@ -382,17 +400,22 @@ export default function DueTrackerPage() {
 
   async function saveSettings() {
     if (!userId) return;
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
     const payload = {
       user_id: userId,
       month,
       main_currency: settings.mainCurrency,
       note: settings.note,
-      cash_in: settings.cashIn,
+      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus },
       fx_rates: settings.fxRates,
       groups: settings.groups,
       remittance_inr: settings.remittanceInr,
       remittance_rate: settings.remittanceRate,
-      remittance_paid: settings.remittancePaid,
+      remittance_paid: settings.remittanceStatus === "paid",
+      is_locked: settings.isLocked,
     };
     const { error } = await supabase.from("due_month_settings").upsert(payload, { onConflict: "user_id,month" });
     if (error) {
@@ -405,6 +428,10 @@ export default function DueTrackerPage() {
 
   async function saveRemittance() {
     if (!userId) return;
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
     const inr = settings.remittanceInr ?? 0;
     const rate = settings.remittanceRate ?? settings.fxRates.INR ?? 25.2;
     if (inr < 0) {
@@ -420,12 +447,13 @@ export default function DueTrackerPage() {
       month,
       main_currency: settings.mainCurrency,
       note: settings.note,
-      cash_in: settings.cashIn,
+      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus },
       fx_rates: settings.fxRates,
       groups: settings.groups,
       remittance_inr: inr,
       remittance_rate: rate,
-      remittance_paid: settings.remittancePaid,
+      remittance_paid: settings.remittanceStatus === "paid",
+      is_locked: settings.isLocked,
     }, { onConflict: "user_id,month" });
     if (error) {
       showToast(error.message);
@@ -436,6 +464,10 @@ export default function DueTrackerPage() {
   }
 
   async function addDueItem() {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
     if (!userId || !newItem.name.trim()) return;
     const payload = {
       user_id: userId,
@@ -459,6 +491,10 @@ export default function DueTrackerPage() {
   }
 
   async function toggleHide(item: DueItem) {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
     const { error } = await supabase.from("due_items").update({ is_hidden: !item.isHidden }).eq("id", item.id).eq("user_id", userId ?? "");
     if (error) {
       showToast(error.message);
@@ -469,6 +505,10 @@ export default function DueTrackerPage() {
   }
 
   async function rollForwardFixedItems() {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
     if (!userId) return;
     const sourceMonth = prevMonth(month);
     const fixedItems = items.filter((item) => item.isFixed);
@@ -512,7 +552,52 @@ export default function DueTrackerPage() {
     (showToast as unknown as { timer?: number }).timer = window.setTimeout(() => setToast(""), 2600);
   }
 
+  async function persistMonthSettings(next: Partial<MonthSettings>) {
+    if (!userId) return false;
+    const merged = { ...settings, ...next };
+    const { error } = await supabase.from("due_month_settings").upsert({
+      user_id: userId,
+      month,
+      main_currency: merged.mainCurrency,
+      note: merged.note,
+      cash_in: { ...merged.cashIn, __remittance_status: merged.remittanceStatus },
+      fx_rates: merged.fxRates,
+      groups: merged.groups,
+      remittance_inr: merged.remittanceInr,
+      remittance_rate: merged.remittanceRate,
+      remittance_paid: merged.remittanceStatus === "paid",
+      is_locked: merged.isLocked,
+    }, { onConflict: "user_id,month" });
+    if (error) {
+      showToast(error.message);
+      return false;
+    }
+    setSettings(merged);
+    return true;
+  }
+
+  async function toggleMonthLock(force?: boolean) {
+    if (!userId) return;
+    const nextLocked = typeof force === "boolean" ? force : !settings.isLocked;
+    const ok = await persistMonthSettings({ isLocked: nextLocked });
+    if (ok) showToast(nextLocked ? "Month locked" : "Month unlocked");
+  }
+
   const visibleItems = useMemo(() => (showHidden ? items : items.filter((item) => !item.isHidden)), [items, showHidden]);
+
+  const remittanceSettled = isSettled(settings.remittanceStatus);
+
+  const allVisibleSettled = useMemo(() => {
+    const dueSettled = visibleItems.every((item) => isSettled(getEntry(item.id)?.status ?? "pending"));
+    const needsRemittance = (settings.remittanceInr ?? 0) > 0;
+    return dueSettled && (!needsRemittance || remittanceSettled);
+  }, [visibleItems, entries, settings.remittanceInr, settings.remittanceStatus]);
+
+  useEffect(() => {
+    if (!userId || loading) return;
+    if (settings.isLocked || !allVisibleSettled) return;
+    void toggleMonthLock(true);
+  }, [allVisibleSettled, userId, loading]);
 
   const currentDay = Number(todayDubai().slice(8, 10));
 
@@ -598,10 +683,8 @@ export default function DueTrackerPage() {
 
     totalAed += remittanceAed;
     itemCount += remittanceInr > 0 ? 1 : 0;
-    if (settings.remittancePaid) {
-      settledCount += 1;
-      paidAed += remittanceAed;
-    }
+    if (isSettled(settings.remittanceStatus)) settledCount += remittanceInr > 0 ? 1 : 0;
+    if (isPaid(settings.remittanceStatus)) paidAed += remittanceAed;
 
     return {
       totalAed,
@@ -610,7 +693,7 @@ export default function DueTrackerPage() {
       settledCount,
       totalCount: itemCount,
     };
-  }, [items, entries, settings.fxRates, remittanceAed, remittanceInr, settings.remittancePaid]);
+  }, [items, entries, settings.fxRates, remittanceAed, remittanceInr, settings.remittanceStatus]);
 
   const lastMonthTotal = useMemo(() => {
     let total = 0;
@@ -650,12 +733,13 @@ export default function DueTrackerPage() {
       <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800 }}>Due <span style={{ color: V.accent, fontStyle: "italic" }}>Tracker</span></div>
-          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Now with actual statuses instead of paid-or-pretend.</div>
+          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Now with actual statuses instead of paid-or-pretend. Roll forward copies last month’s fixed dues into this month and resets them to pending.</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={btn} onClick={() => setShowHidden((v) => !v)}>{showHidden ? "Hide hidden" : "Show hidden"}</button>
           <button style={btn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          <button style={btn} onClick={() => void rollForwardFixedItems()}>↻ Roll forward</button>
+          <button style={btn} onClick={() => void rollForwardFixedItems()} title="Copies missing fixed dues from last month into this month, with amount, currency and note, but resets status to pending.">↻ Roll forward</button>
+          <button style={settings.isLocked ? btnP : btn} onClick={() => void toggleMonthLock(settings.isLocked ? false : true)}>{settings.isLocked ? "🔒 Unlock month" : "🔓 Lock month"}</button>
           <button style={btnP} onClick={() => setShowAddItem(true)}>+ Add due</button>
         </div>
       </div>
@@ -708,6 +792,12 @@ export default function DueTrackerPage() {
         </div>
       </div>
 
+      {settings.isLocked && (
+        <div style={{ margin: "10px 24px 0", padding: "9px 14px", background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, fontSize: 13 }}>
+          🔒 This month is locked. Use Unlock month to edit anything.
+        </div>
+      )}
+
       {settings.note && (
         <div style={{ margin: "10px 24px 0", padding: "9px 14px", background: "rgba(245,166,35,0.08)", border: "1px solid rgba(245,166,35,0.2)", borderRadius: 10, fontSize: 13 }}>
           📝 {settings.note}
@@ -739,7 +829,7 @@ export default function DueTrackerPage() {
 
           if (!isIndia && group === "UAE") {
             groupTotal += remittanceAed;
-            if (settings.remittancePaid) groupPaid += remittanceAed;
+            if (isPaid(settings.remittanceStatus)) groupPaid += remittanceAed;
           }
 
           const currLabel = isIndia ? "INR" : "AED";
@@ -762,19 +852,47 @@ export default function DueTrackerPage() {
               {!isCollapsed && !isIndia && group === "UAE" && (
                 <div style={{ padding: "12px 16px", borderBottom: `1px solid ${V.border}`, background: isDark ? "rgba(245,166,35,0.04)" : "rgba(245,166,35,0.02)" }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                    <input type="checkbox" checked={settings.remittancePaid} onChange={(e) => setSettings((p) => ({ ...p, remittancePaid: e.target.checked }))} />
+                    <select disabled={settings.isLocked} value={settings.remittanceStatus} onChange={(e) => setSettings((p) => ({ ...p, remittanceStatus: e.target.value as Status }))} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12 }}>
+                      <option value="pending">Pending</option>
+                      <option value="paid">Paid</option>
+                      <option value="skipped">Skipped</option>
+                      <option value="waived">Waived</option>
+                    </select>
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 14, fontWeight: 700, color: settings.remittancePaid ? V.faint : V.text, textDecoration: settings.remittancePaid ? "line-through" : "none" }}>
+                        <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 14, fontWeight: 700, color: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? V.faint : V.text, textDecoration: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? "line-through" : "none" }}>
                           Remittance
                         </button>
+                        <select
+                          disabled={settings.isLocked}
+                          value={settings.remittanceStatus}
+                          onChange={(e) => {
+                            const nextStatus = e.target.value as Status;
+                            setSettings((p) => ({ ...p, remittanceStatus: nextStatus }));
+                            void persistMonthSettings({ remittanceStatus: nextStatus });
+                          }}
+                          style={{
+                            ...inp,
+                            padding: "4px 8px",
+                            fontSize: 11,
+                            minWidth: 110,
+                            background: statusTone(settings.remittanceStatus).bg,
+                            color: statusTone(settings.remittanceStatus).fg,
+                            opacity: settings.isLocked ? 0.6 : 1,
+                          }}
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="paid">Paid</option>
+                          <option value="skipped">Skipped</option>
+                          <option value="waived">Waived</option>
+                        </select>
                         <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: V.accent }}>Manual</span>
                       </div>
                       {remittanceEditMode && (
                         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <input type="number" style={{ ...inp, width: 120, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceInr ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceInr: parseNum(e.target.value) }))} placeholder="INR amount" />
+                          <input disabled={settings.isLocked} type="number" style={{ ...inp, width: 120, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceInr ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceInr: parseNum(e.target.value) }))} placeholder="INR amount" />
                           <span style={{ fontSize: 11, color: V.faint }}>÷</span>
-                          <input type="number" step="0.01" style={{ ...inp, width: 90, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceRate ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceRate: parseNum(e.target.value) }))} placeholder="Rate" />
+                          <input disabled={settings.isLocked} type="number" step="0.01" style={{ ...inp, width: 90, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceRate ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceRate: parseNum(e.target.value) }))} placeholder="Rate" />
                           <span style={{ fontSize: 11, color: V.faint }}>AED {remittanceAed.toFixed(0)}</span>
                         </div>
                       )}
@@ -783,9 +901,9 @@ export default function DueTrackerPage() {
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: remittanceAed > 0 ? V.accent : V.faint }}>AED {remittanceAed.toFixed(0)}</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: remittanceAed > 0 ? V.accent : V.faint, textDecoration: settings.remittanceStatus === "waived" ? "line-through" : "none" }}>AED {remittanceAed.toFixed(0)}</span>
                       <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>History</button>
-                      <button onClick={() => void (remittanceEditMode ? saveRemittance() : Promise.resolve(setRemittanceEditMode(true)))} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: remittanceEditMode ? V.accent : V.muted }}>{remittanceEditMode ? "Save" : "Edit"}</button>
+                      <button disabled={settings.isLocked} onClick={() => void (remittanceEditMode ? saveRemittance() : Promise.resolve(setRemittanceEditMode(true)))} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: remittanceEditMode ? V.accent : V.muted, opacity: settings.isLocked ? 0.6 : 1 }}>{remittanceEditMode ? "Save" : "Edit"}</button>
                     </div>
                   </div>
                 </div>
@@ -801,7 +919,7 @@ export default function DueTrackerPage() {
                 return (
                   <div key={item.id} style={{ padding: "11px 16px", borderBottom: `1px solid ${V.border}`, opacity: item.isHidden ? 0.45 : 1 }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      <select value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12 }}>
+                      <select disabled={settings.isLocked} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked ? 0.6 : 1 }}>
                         <option value="pending">Pending</option>
                         <option value="paid">Paid</option>
                         <option value="skipped">Skipped</option>

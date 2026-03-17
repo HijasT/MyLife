@@ -35,6 +35,11 @@ function fmtMonth(m: string) {
   return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-AE", { month: "long", year: "numeric" });
 }
 
+function fmtMonthShort(m: string) {
+  const [y, mo] = m.split("-");
+  return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-AE", { month: "short" });
+}
+
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-AE", {
@@ -437,7 +442,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                 <div style={{ display: "grid", gridTemplateColumns: `repeat(${chart.points.length}, minmax(0,1fr))`, gap: 6, marginTop: 8 }}>
                   {chart.points.map((point) => (
                     <div key={point.month} style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 10, color: V.faint, fontWeight: 700 }}>{point.month.slice(5)}</div>
+                      <div style={{ fontSize: 10, color: V.faint, fontWeight: 700 }}>{fmtMonthShort(point.month)}</div>
                       <div style={{ fontSize: 11, fontWeight: 700 }}>{point.currency} {(point.amount ?? 0).toFixed(0)}</div>
                     </div>
                   ))}
