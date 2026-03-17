@@ -2,45 +2,13 @@ import { createClient } from "@/lib/supabase/server";
 import { MODULES } from "@/lib/modules";
 import Link from "next/link";
 
-function ordinal(n: number) {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
-}
-
-function weatherEmoji(code: number | null, hr: number): string {
-  if (code === null) return "";
-  const isNight = hr < 6 || hr >= 19;
-  if (code === 0) return isNight ? "🌙" : "☀️";
-  if (code <= 2) return isNight ? "🌙" : "🌤️";
-  if (code <= 3) return "⛅";
-  if (code <= 49) return "🌫️";
-  if (code <= 69) return "🌧️";
-  if (code <= 79) return "🌨️";
-  if (code <= 99) return "⛈️";
-  return "🌤️";
-}
-
-function getWeatherCoordsForTimezone(timezone: string): { latitude: number; longitude: number } | null {
-  const map: Record<string, { latitude: number; longitude: number }> = {
-    "Asia/Dubai": { latitude: 25.2048, longitude: 55.2708 },
-    "Asia/Kolkata": { latitude: 19.076, longitude: 72.8777 },
-    "Europe/London": { latitude: 51.5072, longitude: -0.1276 },
-    "America/New_York": { latitude: 40.7128, longitude: -74.006 },
-    "America/Los_Angeles": { latitude: 34.0522, longitude: -118.2437 },
-    "Asia/Singapore": { latitude: 1.3521, longitude: 103.8198 },
-    "Asia/Tokyo": { latitude: 35.6762, longitude: 139.6503 },
-    "Australia/Sydney": { latitude: -33.8688, longitude: 151.2093 },
-  };
-
-  return map[timezone] ?? null;
-}
-
 function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const isComingSoon = module.status === "coming-soon";
-
-  const content = (
-    <>
+  return (
+    <Link
+      href={isComingSoon ? "#" : module.href}
+      className={`module-card block rounded-2xl p-6 border transition-colors bg-[var(--card-bg)] border-[var(--card-border)] ${isComingSoon ? "cursor-default" : "cursor-pointer"}`}
+    >
       <div className="flex items-start justify-between mb-4">
         <span className="text-2xl">{module.icon}</span>
         {isComingSoon && (
@@ -54,23 +22,6 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
       {!isComingSoon && (
         <div className="mt-4 h-0.5 w-8 rounded-full" style={{ background: module.color }} />
       )}
-    </>
-  );
-
-  if (isComingSoon) {
-    return (
-      <div className="module-card block rounded-2xl p-6 border bg-[var(--card-bg)] border-[var(--card-border)] opacity-80 cursor-default">
-        {content}
-      </div>
-    );
-  }
-
-  return (
-    <Link
-      href={module.href}
-      className="module-card block rounded-2xl p-6 border transition-colors bg-[var(--card-bg)] border-[var(--card-border)] cursor-pointer"
-    >
-      {content}
     </Link>
   );
 }
@@ -83,7 +34,7 @@ export default async function DashboardPage() {
 
   let displayName = "";
   let hiddenModules: string[] = [];
-  let tz = "UTC";
+  let timezone = "UTC";
 
   if (user) {
     const { data: profile } = await supabase
@@ -93,65 +44,47 @@ export default async function DashboardPage() {
       .single();
 
     displayName = profile?.display_name ?? "";
-    hiddenModules = Array.isArray(profile?.hidden_modules) ? profile.hidden_modules : [];
-    tz = profile?.timezone || "UTC";
+    hiddenModules = profile?.hidden_modules ?? [];
+    timezone = profile?.timezone ?? "UTC";
   }
 
   const now = new Date();
-  const todayLocal = now.toLocaleDateString("en-CA", { timeZone: tz });
-  const timeLocal = now.toLocaleTimeString("en-AE", {
-    timeZone: tz,
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(now)
+    .replace(/\//g, "-");
+
+  const timeNow = now.toLocaleTimeString("en-AE", {
+    timeZone: timezone,
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
   });
+
   const dateLong = now.toLocaleDateString("en-AE", {
-    timeZone: tz,
+    timeZone: timezone,
     weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
   });
 
-  const hour = parseInt(
-    now.toLocaleString("en-US", {
-      timeZone: tz,
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
       hour: "numeric",
       hour12: false,
-    }),
-    10
+    }).format(now)
   );
 
   const greeting =
     hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-  const firstName =
-    displayName?.trim() ||
-    user?.email?.split("@")[0]?.replace(/[._-]+/g, " ") ||
-    "there";
-
-  let localTemp: number | null = null;
-  let weatherCode: number | null = null;
-
-  const weatherCoords = getWeatherCoordsForTimezone(tz);
-  if (weatherCoords) {
-    try {
-      const wRes = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=${weatherCoords.latitude}&longitude=${weatherCoords.longitude}&current=temperature_2m,weather_code&timezone=${encodeURIComponent(
-          tz
-        )}`,
-        { next: { revalidate: 1800 } }
-      );
-
-      if (wRes.ok) {
-        const wData = await wRes.json();
-        localTemp = wData?.current?.temperature_2m ?? null;
-        weatherCode = wData?.current?.weather_code ?? null;
-      }
-    } catch {
-      // skip weather
-    }
-  }
+  const firstName = displayName || user?.email?.split("@")[0] || "there";
 
   type CalEvent = {
     id: string;
@@ -162,89 +95,90 @@ export default async function DashboardPage() {
     color?: string;
   };
 
-  let todayEvents: CalEvent[] = [];
-  if (user) {
-    const { data } = await supabase
-      .from("calendar_events")
-      .select("id,title,event_type,work_start,work_end,color")
-      .eq("user_id", user.id)
-      .eq("date", todayLocal)
-      .order("work_start", { ascending: true });
-
-    todayEvents = (data ?? []) as CalEvent[];
-  }
-
-  const currentMonth = todayLocal.slice(0, 7);
-
-  type DueItem = {
+  type PortfolioPurchase = {
     id: string;
-    name: string;
-    due_date_day: number | null;
+    purchased_at: string;
+    transaction_type: string | null;
+    portfolio_items?: { symbol?: string; name?: string } | null;
   };
 
-  type DueEntry = {
-    due_item_id: string;
-    status: string;
-    amount: number | null;
+  type PortfolioItem = {
+    id: string;
+    current_price: number | null;
   };
 
-  let pendingDues: { name: string; dueDay: number | null }[] = [];
+  type PortfolioStatRow = {
+    item_id: string;
+    units: number;
+    total_paid: number;
+    currency: string;
+    transaction_type: string | null;
+  };
+
+  let todayEvents: CalEvent[] = [];
+  let todayPortfolio: PortfolioPurchase[] = [];
+  let portfolioCurrentAed = 0;
+
   if (user) {
-    const [itemsRes, entriesRes] = await Promise.all([
+    const [calendarRes, portfolioRes, itemRes, statRes] = await Promise.all([
       supabase
-        .from("due_items")
-        .select("id,name,due_date_day")
+        .from("calendar_events")
+        .select("id,title,event_type,work_start,work_end,color")
         .eq("user_id", user.id)
-        .eq("is_hidden", false),
+        .eq("date", today)
+        .order("work_start", { ascending: true }),
       supabase
-        .from("due_entries")
-        .select("due_item_id,status,amount")
+        .from("portfolio_purchases")
+        .select("id,purchased_at,transaction_type,portfolio_items(symbol,name)")
         .eq("user_id", user.id)
-        .eq("month", currentMonth),
+        .gte("purchased_at", `${today}T00:00:00`)
+        .lte("purchased_at", `${today}T23:59:59`)
+        .order("purchased_at", { ascending: false }),
+      supabase
+        .from("portfolio_items")
+        .select("id,current_price")
+        .eq("user_id", user.id),
+      supabase
+        .from("portfolio_purchases")
+        .select("item_id,units,total_paid,currency,transaction_type")
+        .eq("user_id", user.id),
     ]);
 
-    const items = (itemsRes.data ?? []) as DueItem[];
-    const entries = (entriesRes.data ?? []) as DueEntry[];
-    const entryMap = new Map(entries.map((e) => [e.due_item_id, e]));
+    todayEvents = (calendarRes.data ?? []) as CalEvent[];
+    todayPortfolio = (portfolioRes.data ?? []) as PortfolioPurchase[];
 
-    pendingDues = items
-      .filter((item) => {
-        const entry = entryMap.get(item.id);
-        if (entry?.status === "paid") return false;
-        if (entry?.amount === 0) return false;
-        return true;
-      })
-      .map((item) => ({ name: item.name, dueDay: item.due_date_day }));
+    const items = (itemRes.data ?? []) as PortfolioItem[];
+    const stats = (statRes.data ?? []) as PortfolioStatRow[];
+
+    const fx: Record<string, number> = {
+      AED: 1,
+      USD: 3.67,
+      INR: 0.044,
+      GBP: 4.62,
+      EUR: 4.0,
+    };
+
+    const statMap = new Map<string, number>();
+
+    for (const row of stats) {
+      const tx =
+        row.transaction_type ??
+        ((Number(row.units) || 0) < 0 || (Number(row.total_paid) || 0) < 0
+          ? "sell"
+          : "buy");
+
+      const absUnits = Math.abs(Number(row.units) || 0);
+      const existing = statMap.get(row.item_id) ?? 0;
+      statMap.set(row.item_id, tx === "buy" ? existing + absUnits : existing - absUnits);
+    }
+
+    for (const item of items) {
+      const units = Math.max(0, statMap.get(item.id) ?? 0);
+      portfolioCurrentAed += (item.current_price ?? 0) * units;
+    }
   }
 
-  const workEvents = todayEvents.filter((e) => e.event_type === "work");
-  const annivEvents = todayEvents.filter((e) => e.event_type === "birthday");
-  const otherEvents = todayEvents.filter(
-    (e) => !["work", "birthday", "due_paid"].includes(e.event_type)
-  );
-
-  const MAX_WORK = 3;
-  const MAX_ANNIV = 2;
-  const MAX_DUES = 5;
-  const MAX_OTHER = 3;
-
-  const visibleWorkEvents = workEvents.slice(0, MAX_WORK);
-  const visibleAnnivEvents = annivEvents.slice(0, MAX_ANNIV);
-  const visiblePendingDues = pendingDues.slice(0, MAX_DUES);
-  const visibleOtherEvents = otherEvents.slice(0, MAX_OTHER);
-
-  const moreWorkCount = Math.max(0, workEvents.length - MAX_WORK);
-  const moreAnnivCount = Math.max(0, annivEvents.length - MAX_ANNIV);
-  const moreDueCount = Math.max(0, pendingDues.length - MAX_DUES);
-  const moreOtherCount = Math.max(0, otherEvents.length - MAX_OTHER);
-
-  const hasAgenda =
-    workEvents.length > 0 ||
-    annivEvents.length > 0 ||
-    pendingDues.length > 0 ||
-    otherEvents.length > 0;
-
-  function fmt12(t?: string): string {
+  function fmt12(t?: string) {
     if (!t) return "";
     const [h, m] = t.split(":").map(Number);
     const ampm = h >= 12 ? "PM" : "AM";
@@ -252,12 +186,8 @@ export default async function DashboardPage() {
     return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
   }
 
-  function workLabel(ev: CalEvent): string {
-    if (ev.work_start && ev.work_end) {
-      return `${ev.title} · ${fmt12(ev.work_start)}–${fmt12(ev.work_end)}`;
-    }
-    return ev.title;
-  }
+  const workToday = todayEvents.filter((e) => e.event_type === "work");
+  const otherToday = todayEvents.filter((e) => e.event_type !== "work");
 
   const visibleModules = MODULES.filter((m) => !hiddenModules.includes(m.id));
   const financeModules = visibleModules.filter((m) => m.group === "finance");
@@ -269,182 +199,92 @@ export default async function DashboardPage() {
         <h1 className="font-display text-3xl mb-1" style={{ color: "var(--text-primary)" }}>
           {greeting}, <span className="text-accent italic">{firstName}.</span>
         </h1>
-
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          {dateLong} · <span style={{ color: "var(--text-primary)" }}>{timeLocal}</span>
-          {localTemp !== null && (
-            <span style={{ color: "var(--text-muted)" }}>
-              {" "}· {weatherEmoji(weatherCode, hour)}{" "}
-              <span style={{ color: "var(--text-primary)" }}>
-                {localTemp.toFixed(0)}°C
-              </span>
-            </span>
-          )}
+          {dateLong} · <span style={{ color: "var(--text-primary)" }}>{timeNow}</span>
         </p>
 
-        {hasAgenda && (
+        <div
+          className="mt-5 rounded-2xl border overflow-hidden"
+          style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
+        >
           <div
-            className="mt-5 rounded-2xl border overflow-hidden"
-            style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
+            className="px-4 py-3 border-b"
+            style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
           >
-            <div
-              className="px-4 py-3 border-b flex items-center gap-2"
-              style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
+            <span
+              className="text-xs font-bold tracking-widest uppercase"
+              style={{ color: "var(--text-muted)" }}
             >
-              <span className="text-sm">📋</span>
-              <span
-                className="text-xs font-bold tracking-widest uppercase"
-                style={{ color: "var(--text-muted)" }}
-              >
-                Today&apos;s agenda
-              </span>
+              Daily snapshot
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Today&apos;s work
+              </div>
+              {workToday.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {workToday.map((ev) => (
+                    <div key={ev.id}>
+                      <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                        {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "") : ev.title}
+                      </div>
+                      {ev.work_start && ev.work_end && (
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                          {fmt12(ev.work_start)} to {fmt12(ev.work_end)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                  No work logged today
+                </div>
+              )}
             </div>
 
-            <div className="divide-y" style={{ borderColor: "var(--card-border)" }}>
-              {visibleWorkEvents.map((ev) => (
-                <Link
-                  key={ev.id}
-                  href="/dashboard/calendar"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ background: "#3b82f6" }}
-                  />
-                  <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                    {workLabel(ev)}
-                  </span>
-                  <span className="text-xs ml-auto" style={{ color: "var(--text-muted)" }}>
-                    Work
-                  </span>
-                </Link>
-              ))}
-
-              {moreWorkCount > 0 && (
-                <Link
-                  href="/dashboard/calendar"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0 opacity-30"
-                    style={{ background: "#3b82f6" }}
-                  />
-                  <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    +{moreWorkCount} more work item{moreWorkCount > 1 ? "s" : ""}
-                  </span>
-                </Link>
-              )}
-
-              {visibleAnnivEvents.map((ev) => (
-                <Link
-                  key={ev.id}
-                  href="/dashboard/calendar"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ background: "#ec4899" }}
-                  />
-                  <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Events & portfolio
+              </div>
+              <div className="flex flex-col gap-2">
+                {otherToday.slice(0, 2).map((ev) => (
+                  <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>
                     {ev.title}
-                  </span>
-                  <span className="text-xs ml-auto" style={{ color: "#ec4899" }}>
-                    Anniversary 🎂
-                  </span>
-                </Link>
-              ))}
+                  </div>
+                ))}
 
-              {moreAnnivCount > 0 && (
-                <Link
-                  href="/dashboard/calendar"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0 opacity-30"
-                    style={{ background: "#ec4899" }}
-                  />
-                  <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    +{moreAnnivCount} more anniversary item{moreAnnivCount > 1 ? "s" : ""}
-                  </span>
-                </Link>
-              )}
+                {todayPortfolio.slice(0, 2).map((tx) => (
+                  <div key={tx.id} className="text-sm" style={{ color: "var(--text-primary)" }}>
+                    Portfolio: {tx.transaction_type === "sell" ? "Sold" : "Purchased"}{" "}
+                    {tx.portfolio_items?.symbol ?? "Asset"}
+                  </div>
+                ))}
 
-              {visiblePendingDues.map((due) => (
-                <Link
-                  key={`${due.name}-${due.dueDay ?? "na"}`}
-                  href="/dashboard/budget"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ background: "#F5A623" }}
-                  />
-                  <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                    {due.name}
-                  </span>
-                  <span className="text-xs ml-auto" style={{ color: "#F5A623" }}>
-                    Due{due.dueDay ? ` ${ordinal(due.dueDay)}` : ""}
-                  </span>
-                </Link>
-              ))}
+                {otherToday.length === 0 && todayPortfolio.length === 0 && (
+                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>
+                    Quiet day so far
+                  </div>
+                )}
+              </div>
+            </div>
 
-              {moreDueCount > 0 && (
-                <Link
-                  href="/dashboard/budget"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0 opacity-30"
-                    style={{ background: "#F5A623" }}
-                  />
-                  <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    +{moreDueCount} more pending due{moreDueCount > 1 ? "s" : ""}
-                  </span>
-                </Link>
-              )}
-
-              {visibleOtherEvents.map((ev) => (
-                <Link
-                  key={ev.id}
-                  href="/dashboard/calendar"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ background: ev.color ?? "#8b5cf6" }}
-                  />
-                  <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                    {ev.title}
-                  </span>
-                  <span className="text-xs ml-auto" style={{ color: "var(--text-muted)" }}>
-                    Event
-                  </span>
-                </Link>
-              ))}
-
-              {moreOtherCount > 0 && (
-                <Link
-                  href="/dashboard/calendar"
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--main-bg2)] transition-colors no-underline"
-                >
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0 opacity-30"
-                    style={{ background: "#8b5cf6" }}
-                  />
-                  <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    +{moreOtherCount} more event{moreOtherCount > 1 ? "s" : ""}
-                  </span>
-                </Link>
-              )}
+            <div className="p-4">
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Portfolio snapshot
+              </div>
+              <div className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
+                AED {portfolioCurrentAed.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+                Current portfolio value
+              </div>
             </div>
           </div>
-        )}
-
-        {!hasAgenda && (
-          <p className="mt-4 text-sm" style={{ color: "var(--text-muted)" }}>
-            Nothing scheduled today — enjoy the calm.
-          </p>
-        )}
+        </div>
       </div>
 
       {financeModules.length > 0 && (
@@ -452,9 +292,7 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-3 mb-4">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-accent hub-pulse" />
-              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">
-                Finance Hub
-              </h2>
+              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">Finance Hub</h2>
             </div>
             <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
@@ -472,10 +310,7 @@ export default async function DashboardPage() {
       {lifestyleModules.length > 0 && (
         <section className="mb-10">
           <div className="flex items-center gap-3 mb-4">
-            <h2
-              className="text-xs font-bold tracking-widest uppercase"
-              style={{ color: "var(--text-muted)" }}
-            >
+            <h2 className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
               Lifestyle
             </h2>
             <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />

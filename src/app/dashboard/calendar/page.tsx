@@ -22,6 +22,11 @@ type EventMeta = {
   shiftName?: string;
 };
 
+type PortfolioCalendarEntry = CalEvent & {
+  sourceModule: "portfolio";
+  derivedKind: "portfolio";
+};
+
 type CalEvent = {
   id: string;
   date: string;
@@ -85,6 +90,27 @@ function encodeMetaNotes(userNotes: string, meta: EventMeta) {
   const payload = JSON.stringify(meta);
   const cleanNotes = userNotes.trim();
   return `${META_PREFIX}${payload}\n${cleanNotes}`;
+}
+
+function getCalendarPriority(ev: CalEvent | PortfolioCalendarEntry) {
+  if ("derivedKind" in ev && ev.derivedKind === "portfolio") return 5;
+  if (ev.eventType === "work") return 1;
+  if (ev.eventType === "event") return 2;
+  if (ev.eventType === "due_paid") return 3;
+  return 4;
+}
+
+function sortCalendarEntries<T extends CalEvent | PortfolioCalendarEntry>(list: T[]) {
+  return [...list].sort((a, b) => {
+    const p = getCalendarPriority(a) - getCalendarPriority(b);
+    if (p !== 0) return p;
+
+    if (a.workStart && b.workStart) return a.workStart.localeCompare(b.workStart);
+    if (a.workStart && !b.workStart) return -1;
+    if (!a.workStart && b.workStart) return 1;
+
+    return a.title.localeCompare(b.title);
+  });
 }
 
 function parseMetaNotes(notes: string): { meta: EventMeta; plainNotes: string } {
@@ -451,47 +477,83 @@ export default function CalendarPage() {
   }, [selectedDate]);
 
   async function loadEvents(uid: string, m: string) {
-    setError("");
-    try {
-      const [y, mo] = m.split("-").map(Number);
-      const start = `${y}-${String(mo).padStart(2, "0")}-01`;
-      const end = `${y}-${String(mo).padStart(2, "0")}-${String(
-        daysInMonth(y, mo)
-      ).padStart(2, "0")}`;
+  setError("");
 
-      const [{ data: d1, error: e1 }, { data: d2, error: e2 }] =
-        await Promise.all([
-          supabase
-            .from("calendar_events")
-            .select("*")
-            .eq("user_id", uid)
-            .gte("date", start)
-            .lte("date", end)
-            .order("date"),
-          supabase
-            .from("calendar_events")
-            .select("*")
-            .eq("user_id", uid)
-            .eq("is_recurring", true),
-        ]);
+  try {
+    const [y, mo] = m.split("-").map(Number);
+    const start = `${y}-${String(mo).padStart(2, "0")}-01`;
+    const end = `${y}-${String(mo).padStart(2, "0")}-${String(
+      daysInMonth(y, mo)
+    ).padStart(2, "0")}`;
 
-      if (e1 || e2) {
-        setError("Failed to load events.");
-        return;
-      }
+    const [
+      { data: d1, error: e1 },
+      { data: d2, error: e2 },
+      { data: txs, error: txErr },
+    ] = await Promise.all([
+      supabase
+        .from("calendar_events")
+        .select("*")
+        .eq("user_id", uid)
+        .gte("date", start)
+        .lte("date", end)
+        .order("date"),
+      supabase
+        .from("calendar_events")
+        .select("*")
+        .eq("user_id", uid)
+        .eq("is_recurring", true),
+      supabase
+        .from("portfolio_purchases")
+        .select("id,purchased_at,transaction_type,currency,total_paid,portfolio_items(symbol,name)")
+        .eq("user_id", uid)
+        .gte("purchased_at", `${start}T00:00:00`)
+        .lte("purchased_at", `${end}T23:59:59`)
+        .order("purchased_at", { ascending: true }),
+    ]);
 
-      const all = [
-        ...(d1 ?? []),
-        ...(d2 ?? []).filter(
-          (r: { id: string }) => !(d1 ?? []).some((x: { id: string }) => x.id === r.id)
-        ),
-      ];
-
-      setEvents(all.map(dbToEvent));
-    } catch {
-      setError("Failed to load events.");
+    if (e1 || e2 || txErr) {
+      setError("Failed to load calendar entries.");
+      return;
     }
+
+    const baseEvents = [
+      ...(d1 ?? []),
+      ...(d2 ?? []).filter(
+        (r: { id: string }) => !(d1 ?? []).some((x: { id: string }) => x.id === r.id)
+      ),
+    ].map(dbToEvent);
+
+    const portfolioEvents: PortfolioCalendarEntry[] = (txs ?? []).map((tx: any) => {
+      const symbol = tx.portfolio_items?.symbol ?? "Asset";
+      const action = tx.transaction_type === "sell" ? "Sold" : "Purchased";
+      const amount = Math.abs(Number(tx.total_paid) || 0);
+      const date = String(tx.purchased_at).slice(0, 10);
+
+      return {
+        id: `portfolio-${tx.id}`,
+        date,
+        title: `Portfolio: ${action} ${symbol}`,
+        eventType: "note",
+        sourceModule: "portfolio",
+        derivedKind: "portfolio",
+        workStart: undefined,
+        workEnd: undefined,
+        color: "#9ca3af",
+        notes: `${tx.currency ?? "AED"} ${amount.toLocaleString("en-AE", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`,
+        isRecurring: false,
+        recurType: undefined,
+      };
+    });
+
+    setEvents([...baseEvents, ...portfolioEvents]);
+  } catch {
+    setError("Failed to load calendar entries.");
   }
+}
 
   async function changeMonth(m: string) {
     setMonth(m);
@@ -818,30 +880,42 @@ export default function CalendarPage() {
   }, [events, filterTypes, searchQuery]);
 
   const eventsByDate = useMemo(() => {
-    const map = new Map<string, CalEvent[]>();
+  const map = new Map<string, (CalEvent | PortfolioCalendarEntry)[]>();
 
-    for (const ev of filteredEvents) {
-      let date = ev.date;
+  for (const ev of filteredEvents) {
+    let date = ev.date;
 
-      if (ev.isRecurring && ev.recurType === "monthly" && !getEventMeta(ev).seriesId) {
-        const { d } = parseYmd(ev.date);
-        date = formatYmd(year, mo, d);
-        if (!isValidYmd(date)) continue;
-      }
-
-      if (ev.isRecurring && ev.recurType === "yearly" && !getEventMeta(ev).seriesId) {
-        const { m, d } = parseYmd(ev.date);
-        date = formatYmd(year, m, d);
-        if (!isValidYmd(date)) continue;
-      }
-
-      if (!date.startsWith(month)) continue;
-      if (!map.has(date)) map.set(date, []);
-      map.get(date)!.push(ev);
+    if (
+      ev.isRecurring &&
+      ev.recurType === "monthly" &&
+      !getEventMeta(ev).seriesId
+    ) {
+      const { d } = parseYmd(ev.date);
+      date = formatYmd(year, mo, d);
+      if (!isValidYmd(date)) continue;
     }
 
-    return map;
-  }, [filteredEvents, month, year, mo]);
+    if (
+      ev.isRecurring &&
+      ev.recurType === "yearly" &&
+      !getEventMeta(ev).seriesId
+    ) {
+      const { m, d } = parseYmd(ev.date);
+      date = formatYmd(year, m, d);
+      if (!isValidYmd(date)) continue;
+    }
+
+    if (!date.startsWith(month)) continue;
+    if (!map.has(date)) map.set(date, []);
+    map.get(date)!.push(ev);
+  }
+
+  for (const [key, value] of map.entries()) {
+    map.set(key, sortCalendarEntries(value));
+  }
+
+  return map;
+}, [filteredEvents, month, year, mo]);
 
   const monthStats = useMemo(() => {
     const workEvs = events.filter(
@@ -1711,7 +1785,7 @@ export default function CalendarPage() {
                   )}
                 </div>
 
-                {ev.sourceModule === "manual" && (
+                {ev.sourceModule === "manual" && !("derivedKind" in ev) && (
                   <div style={{ display: "flex", gap: 6 }}>
                     <button
                       onClick={() => openEditEvent(ev)}
