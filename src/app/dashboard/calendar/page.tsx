@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-type EventType = "work" | "birthday" | "event" | "due_paid" | "note";
+type EventType = "work" | "event" | "due_paid" | "note";
 type ShiftKey =
   | "Morning"
   | "Mid1"
@@ -63,7 +63,6 @@ const SHIFT_COLORS: Record<ShiftKey, string> = {
 
 const EVENT_COLORS: Record<EventType, string> = {
   work: "#3b82f6",
-  birthday: "#ec4899",
   event: "#8b5cf6",
   due_paid: "#16a34a",
   note: "#6b7280",
@@ -71,7 +70,6 @@ const EVENT_COLORS: Record<EventType, string> = {
 
 const EVENT_LABELS: Record<EventType, string> = {
   work: "Work",
-  birthday: "Anniversary",
   event: "Event",
   due_paid: "Due paid",
   note: "Note",
@@ -79,14 +77,9 @@ const EVENT_LABELS: Record<EventType, string> = {
 
 const META_PREFIX = "__MLMETA__";
 
-const REGULAR_SHIFT_KEYS: ShiftKey[] = [
-  "Morning",
-  "Mid1",
-  "Mid2",
-  "Afternoon",
-];
-
+const REGULAR_SHIFT_KEYS: ShiftKey[] = ["Morning", "Mid1", "Mid2", "Afternoon"];
 const EXTRA_SHIFT_KEYS: ShiftKey[] = ["Holiday Duty", "Overtime"];
+const LEAVE_SHIFT_KEYS: ShiftKey[] = ["Day Off", "Paid Leave"];
 
 function encodeMetaNotes(userNotes: string, meta: EventMeta) {
   const payload = JSON.stringify(meta);
@@ -249,9 +242,18 @@ function nextMonth(m: string) {
 
 function workHours(s?: string, e?: string) {
   if (!s || !e) return 0;
+
   const [sh, sm] = s.split(":").map(Number);
   const [eh, em] = e.split(":").map(Number);
-  return Math.max(0, eh + em / 60 - (sh + sm / 60));
+
+  const start = sh + sm / 60;
+  let end = eh + em / 60;
+
+  if (end <= start) {
+    end += 24;
+  }
+
+  return Math.max(0, end - start);
 }
 
 function fmt12(t?: string): string {
@@ -307,27 +309,31 @@ function getShiftNameFromEvent(ev: CalEvent): string {
   return "Work";
 }
 
-function getShiftCategory(shiftName?: string): "Regular" | "Extra" | "Other" {
+function getShiftCategory(shiftName?: string): "Regular" | "Extra" | "Leave" | "Other" {
   if (!shiftName) return "Other";
   if (REGULAR_SHIFT_KEYS.includes(shiftName as ShiftKey)) return "Regular";
   if (EXTRA_SHIFT_KEYS.includes(shiftName as ShiftKey)) return "Extra";
+  if (LEAVE_SHIFT_KEYS.includes(shiftName as ShiftKey)) return "Leave";
   return "Other";
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dbToEvent = (r: any): CalEvent => ({
-  id: r.id,
-  date: r.date,
-  title: r.title,
-  eventType: r.event_type as EventType,
-  sourceModule: r.source_module ?? "manual",
-  workStart: r.work_start ?? undefined,
-  workEnd: r.work_end ?? undefined,
-  color: r.color ?? "#F5A623",
-  notes: r.notes ?? "",
-  isRecurring: r.is_recurring ?? false,
-  recurType: r.recur_type ?? undefined,
-});
+const dbToEvent = (r: any): CalEvent => {
+  const rawType = r.event_type === "birthday" ? "event" : r.event_type;
+  return {
+    id: r.id,
+    date: r.date,
+    title: r.title,
+    eventType: (rawType ?? "event") as EventType,
+    sourceModule: r.source_module ?? "manual",
+    workStart: r.work_start ?? undefined,
+    workEnd: r.work_end ?? undefined,
+    color: r.color ?? "#F5A623",
+    notes: r.notes ?? "",
+    isRecurring: r.is_recurring ?? false,
+    recurType: r.recur_type ?? undefined,
+  };
+};
 
 export default function CalendarPage() {
   const supabase = createClient();
@@ -763,37 +769,6 @@ export default function CalendarPage() {
         }
       }
 
-      if (ev.isRecurring && ev.recurType === "yearly") {
-        const futureIds = events
-          .filter(
-            (e) =>
-              e.title === ev.title &&
-              e.eventType === ev.eventType &&
-              e.date >= todayStr
-          )
-          .map((e) => e.id);
-
-        if (futureIds.length > 0) {
-          const { error } = await supabase
-            .from("calendar_events")
-            .delete()
-            .in("id", futureIds);
-
-          if (error) {
-            setError("Failed to delete future recurring events.");
-            return;
-          }
-
-          setEvents((p) => p.filter((e) => !futureIds.includes(e.id)));
-          showToast(
-            `Deleted ${futureIds.length} future entr${
-              futureIds.length === 1 ? "y" : "ies"
-            } — past entries kept`
-          );
-          return;
-        }
-      }
-
       const { error } = await supabase
         .from("calendar_events")
         .delete()
@@ -874,29 +849,34 @@ export default function CalendarPage() {
     );
 
     let hours = 0;
-    const days = new Set<string>();
+    const workedDays = new Set<string>();
     const shiftCounts: Record<string, number> = {};
     let regularCount = 0;
     let extraCount = 0;
 
     for (const e of workEvs) {
       hours += workHours(e.workStart, e.workEnd);
-      days.add(e.date);
 
       const shiftName = getShiftNameFromEvent(e);
       shiftCounts[shiftName] = (shiftCounts[shiftName] ?? 0) + 1;
 
       const category = getShiftCategory(shiftName);
-      if (category === "Regular") regularCount += 1;
-      if (category === "Extra") extraCount += 1;
+      if (category === "Regular") {
+        regularCount += 1;
+        workedDays.add(e.date);
+      }
+      if (category === "Extra") {
+        extraCount += 1;
+        workedDays.add(e.date);
+      }
     }
 
     const leaves = Object.entries(shiftCounts)
-      .filter(([s]) => ["Day Off", "Paid Leave"].includes(s))
+      .filter(([s]) => LEAVE_SHIFT_KEYS.includes(s as ShiftKey))
       .reduce((t, [, c]) => t + c, 0);
 
     return {
-      days: days.size,
+      days: workedDays.size,
       hours: Math.round(hours * 10) / 10,
       extra: extraCount,
       regular: regularCount,
@@ -920,7 +900,7 @@ export default function CalendarPage() {
 
   const weekStats = useMemo(() => {
     let hours = 0;
-    const days = new Set<string>();
+    const workedDays = new Set<string>();
     const weekShiftCounts: Record<string, number> = {};
     let regularCount = 0;
     let extraCount = 0;
@@ -928,7 +908,6 @@ export default function CalendarPage() {
     for (const date of weekDates) {
       const dayEvs = eventsByDate.get(date) ?? filteredEvents.filter((e) => e.date === date);
       const work = dayEvs.filter((e) => e.eventType === "work");
-      if (work.length > 0) days.add(date);
 
       work.forEach((e) => {
         hours += workHours(e.workStart, e.workEnd);
@@ -936,13 +915,19 @@ export default function CalendarPage() {
         weekShiftCounts[shiftName] = (weekShiftCounts[shiftName] ?? 0) + 1;
 
         const category = getShiftCategory(shiftName);
-        if (category === "Regular") regularCount += 1;
-        if (category === "Extra") extraCount += 1;
+        if (category === "Regular") {
+          regularCount += 1;
+          workedDays.add(date);
+        }
+        if (category === "Extra") {
+          extraCount += 1;
+          workedDays.add(date);
+        }
       });
     }
 
     return {
-      days: days.size,
+      days: workedDays.size,
       hours: Math.round(hours * 10) / 10,
       regular: regularCount,
       extra: extraCount,
@@ -1174,7 +1159,6 @@ export default function CalendarPage() {
               {(
                 [
                   ["work", "Work", "#3b82f6"],
-                  ["birthday", "Anniversary", "#ec4899"],
                   ["event", "Events", "#8b5cf6"],
                   ["due_paid", "Due Tracker", "#16a34a"],
                   ["note", "Notes", "#6b7280"],
@@ -1262,14 +1246,12 @@ export default function CalendarPage() {
           filterTypes.map((t) => {
             const labels: Record<string, string> = {
               work: "Work",
-              birthday: "Anniversary",
               event: "Events",
               due_paid: "Due Tracker",
               note: "Notes",
             };
             const colors: Record<string, string> = {
               work: "#3b82f6",
-              birthday: "#ec4899",
               event: "#8b5cf6",
               due_paid: "#16a34a",
               note: "#6b7280",
@@ -1442,36 +1424,20 @@ export default function CalendarPage() {
                         {day}
                       </span>
 
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-end" }}>
-                        {wH > 0 && (
-                          <span
-                            style={{
-                              fontSize: 9,
-                              fontWeight: 700,
-                              padding: "1px 4px",
-                              borderRadius: 999,
-                              background: "rgba(59,130,246,0.15)",
-                              color: "#3b82f6",
-                            }}
-                          >
-                            {wH.toFixed(0)}h
-                          </span>
-                        )}
-                        {dayEvs.length > 0 && (
-                          <span
-                            style={{
-                              fontSize: 9,
-                              fontWeight: 700,
-                              padding: "1px 5px",
-                              borderRadius: 999,
-                              background: "rgba(107,114,128,0.15)",
-                              color: V.faint,
-                            }}
-                          >
-                            {dayEvs.length}
-                          </span>
-                        )}
-                      </div>
+                      {wH > 0 && (
+                        <span
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            padding: "1px 4px",
+                            borderRadius: 999,
+                            background: "rgba(59,130,246,0.15)",
+                            color: "#3b82f6",
+                          }}
+                        >
+                          {wH.toFixed(0)}h
+                        </span>
+                      )}
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
@@ -1980,13 +1946,13 @@ export default function CalendarPage() {
               <div style={lbl}>
                 Type
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {(["work", "event", "birthday", "note"] as EventType[]).map((t) => (
+                  {(["work", "event", "note"] as EventType[]).map((t) => (
                     <button
                       key={t}
                       onClick={() => {
                         setAddType(t);
                         if (!editingEvent) {
-                          setAddRecurType(t === "work" ? "none" : t === "birthday" ? "yearly" : "none");
+                          setAddRecurType(t === "work" ? "none" : "none");
                         }
                       }}
                       style={{
@@ -2072,11 +2038,7 @@ export default function CalendarPage() {
                   style={{ ...inp, width: "100%", boxSizing: "border-box" as const }}
                   value={addTitle}
                   onChange={(e) => setAddTitle(e.target.value)}
-                  placeholder={
-                    addType === "work"
-                      ? addShift
-                      : "Event title"
-                  }
+                  placeholder={addType === "work" ? addShift : "Event title"}
                 />
               </label>
 
@@ -2139,76 +2101,61 @@ export default function CalendarPage() {
                 </div>
               )}
 
-              {addType === "birthday" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <label style={lbl}>
-                  Date
+                  From
                   <input
                     type="date"
                     style={inp}
                     value={addDateFrom}
                     onChange={(e) => {
                       setAddDateFrom(e.target.value);
-                      setAddDateTo(e.target.value);
+                      if (e.target.value > addDateTo) setAddDateTo(e.target.value);
                     }}
                   />
                 </label>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <label style={lbl}>
-                    From
-                    <input
-                      type="date"
-                      style={inp}
-                      value={addDateFrom}
-                      onChange={(e) => {
-                        setAddDateFrom(e.target.value);
-                        if (e.target.value > addDateTo) setAddDateTo(e.target.value);
-                      }}
-                    />
-                  </label>
-                  <label style={lbl}>
-                    To
-                    <input
-                      type="date"
-                      style={inp}
-                      value={addDateTo}
-                      min={addDateFrom}
-                      onChange={(e) => setAddDateTo(e.target.value)}
-                      disabled={addType !== "work" && addRecurType !== "none"}
-                    />
-                  </label>
-                  {addDateFrom !== addDateTo && (addType === "work" || addRecurType === "none") && (
-                    <div
-                      style={{
-                        gridColumn: "1/-1",
-                        fontSize: 12,
-                        color: "#3b82f6",
-                        fontWeight: 600,
-                        padding: "6px 10px",
-                        background: "rgba(59,130,246,0.08)",
-                        borderRadius: 8,
-                      }}
-                    >
-                      Will add {datesBetween(addDateFrom, addDateTo).length} entries
-                    </div>
-                  )}
-                  {addType !== "work" && addRecurType !== "none" && (
-                    <div
-                      style={{
-                        gridColumn: "1/-1",
-                        fontSize: 12,
-                        color: V.faint,
-                        fontWeight: 600,
-                        padding: "6px 10px",
-                        background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
-                        borderRadius: 8,
-                      }}
-                    >
-                      Recurring events use a single start date and generate future entries automatically.
-                    </div>
-                  )}
-                </div>
-              )}
+                <label style={lbl}>
+                  To
+                  <input
+                    type="date"
+                    style={inp}
+                    value={addDateTo}
+                    min={addDateFrom}
+                    onChange={(e) => setAddDateTo(e.target.value)}
+                    disabled={addType !== "work" && addRecurType !== "none"}
+                  />
+                </label>
+                {addDateFrom !== addDateTo && (addType === "work" || addRecurType === "none") && (
+                  <div
+                    style={{
+                      gridColumn: "1/-1",
+                      fontSize: 12,
+                      color: "#3b82f6",
+                      fontWeight: 600,
+                      padding: "6px 10px",
+                      background: "rgba(59,130,246,0.08)",
+                      borderRadius: 8,
+                    }}
+                  >
+                    Will add {datesBetween(addDateFrom, addDateTo).length} entries
+                  </div>
+                )}
+                {addType !== "work" && addRecurType !== "none" && (
+                  <div
+                    style={{
+                      gridColumn: "1/-1",
+                      fontSize: 12,
+                      color: V.faint,
+                      fontWeight: 600,
+                      padding: "6px 10px",
+                      background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                      borderRadius: 8,
+                    }}
+                  >
+                    Recurring events use a single start date and generate future entries automatically.
+                  </div>
+                )}
+              </div>
 
               <label style={lbl}>
                 Notes (optional)
@@ -2278,3 +2225,4 @@ export default function CalendarPage() {
     </div>
   );
 }
+
