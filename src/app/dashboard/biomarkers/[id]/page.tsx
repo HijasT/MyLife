@@ -1,295 +1,311 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type BiomarkerTest = {
-  id:string; groupName:string; name:string; method:string;
-  refRange:string; refMin:number|null; refMax:number|null; unit:string;
+  id: string;
+  groupName: string;
+  name: string;
+  method: string;
+  refRange: string;
+  refMin: number | null;
+  refMax: number | null;
+  unit: string;
+  sortOrder: number;
 };
+
 type BiomarkerResult = {
-  id:string; testDate:string; valueNum:number|null; valueText:string; notes:string;
+  id: string;
+  testId: string;
+  testDate: string;
+  valueNum: number | null;
+  valueText: string;
+  notes: string;
 };
-type BodyMetric = {
-  id:string; measuredAt:string; weightKg:number|null; heightCm:number|null;
-  bmi:number|null; bodyFatPct:number|null; visceralFatL:number|null; skeletalMuscleKg:number|null;
-};
 
-const BODY_FIELDS = [
-  { key:"weightKg",       label:"Weight",          unit:"kg",  min:null as number|null,  max:null as number|null  },
-  { key:"bmi",            label:"BMI",              unit:"",   min:18.5, max:24.9 },
-  { key:"bodyFatPct",     label:"Body Fat",         unit:"%",  min:10,   max:20   },
-  { key:"visceralFatL",   label:"Visceral Fat",     unit:"L",  min:0,    max:1.5  },
-  { key:"skeletalMuscleKg",label:"Skeletal Muscle", unit:"kg", min:29,   max:50   },
-  { key:"heightCm",       label:"Height",           unit:"cm", min:null, max:null },
-];
+type MarkerStatus = "low" | "normal" | "high" | "no-range" | "text" | "missing";
 
-function fmtDate(d:string) { return new Date(d).toLocaleDateString("en-AE",{day:"2-digit",month:"short",year:"numeric"}); }
-function isOOR(v:number|null,min:number|null,max:number|null) { if(v===null)return false; if(min!==null&&v<min)return true; if(max!==null&&v>max)return true; return false; }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const dbToTest = (r: any): BiomarkerTest => ({ id: r.id, groupName: r.group_name, name: r.name, method: r.method ?? "", refRange: r.ref_range ?? "", refMin: r.ref_min ?? null, refMax: r.ref_max ?? null, unit: r.unit ?? "", sortOrder: r.sort_order ?? 0 });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const dbToResult = (r: any): BiomarkerResult => ({ id: r.id, testId: r.test_id, testDate: r.test_date, valueNum: r.value_num ?? null, valueText: r.value_text ?? "", notes: r.notes ?? "" });
 
-// Simple SVG sparkline chart with reference range shading
-function SparkChart({ results, refMin, refMax, unit }: { results:{date:string;val:number}[]; refMin:number|null; refMax:number|null; unit:string }) {
-  if (results.length < 2) return null;
-  const vals = results.map(r=>r.val);
-  const allVals = [...vals, refMin??vals[0], refMax??vals[0]].filter(x=>x!==null) as number[];
-  const minV = Math.min(...allVals) * 0.95;
-  const maxV = Math.max(...allVals) * 1.05;
-  const W=500, H=140, PAD=40;
-  const xScale = (i:number) => PAD + (i/(results.length-1))*(W-PAD*2);
-  const yScale = (v:number) => H - PAD - ((v-minV)/(maxV-minV))*(H-PAD*2);
+function fmtDate(dateStr: string) {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-AE", { day: "2-digit", month: "short", year: "numeric" });
+}
+function fmtShort(dateStr: string) {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-AE", { day: "2-digit", month: "short" });
+}
+function markerStatus(result: BiomarkerResult | undefined, test: BiomarkerTest): MarkerStatus {
+  if (!result) return "missing";
+  if (result.valueNum == null) return result.valueText ? "text" : "missing";
+  if (test.refMin == null && test.refMax == null) return "no-range";
+  if (test.refMin != null && result.valueNum < test.refMin) return "low";
+  if (test.refMax != null && result.valueNum > test.refMax) return "high";
+  return "normal";
+}
+function statusTone(status: MarkerStatus) {
+  switch (status) {
+    case "low": return { bg: "rgba(59,130,246,0.12)", fg: "#2563eb", label: "Low" };
+    case "high": return { bg: "rgba(239,68,68,0.12)", fg: "#dc2626", label: "High" };
+    case "normal": return { bg: "rgba(16,185,129,0.12)", fg: "#059669", label: "Normal" };
+    case "no-range": return { bg: "rgba(245,158,11,0.12)", fg: "#d97706", label: "No range" };
+    case "text": return { bg: "rgba(99,102,241,0.12)", fg: "#4f46e5", label: "Text" };
+    default: return { bg: "rgba(107,114,128,0.12)", fg: "#6b7280", label: "Missing" };
+  }
+}
+function deltaPct(prev: number | null, curr: number | null) {
+  if (prev == null || curr == null) return { delta: null, pct: null };
+  const delta = Number((curr - prev).toFixed(2));
+  if (prev === 0) return { delta, pct: null };
+  return { delta, pct: Number((((curr - prev) / prev) * 100).toFixed(1)) };
+}
+function compareTone(value: number | null) {
+  if (value == null || value === 0) return "#6b7280";
+  return value > 0 ? "#dc2626" : "#059669";
+}
 
-  const pts = results.map((r,i)=>({ x:xScale(i), y:yScale(r.val), val:r.val, date:r.date, oor:isOOR(r.val,refMin,refMax) }));
-  const linePath = pts.map((p,i)=>`${i===0?"M":"L"}${p.x},${p.y}`).join(" ");
-
-  const refTop    = refMax !== null ? yScale(refMax) : PAD;
-  const refBottom = refMin !== null ? yScale(refMin) : H-PAD;
-
+function TrendChart({ points, refMin, refMax }: { points: { x: string; y: number }[]; refMin: number | null; refMax: number | null }) {
+  const W = 720;
+  const H = 240;
+  if (!points.length) return <div style={{ fontSize: 13, color: "#6b7280" }}>No numeric results to chart yet.</div>;
+  const values = points.map((p) => p.y);
+  const minV = Math.min(...values, ...(refMin != null ? [refMin] : []), ...(refMax != null ? [refMax] : []));
+  const maxV = Math.max(...values, ...(refMin != null ? [refMin] : []), ...(refMax != null ? [refMax] : []));
+  const span = Math.max(maxV - minV, 1);
+  const padX = 34;
+  const padY = 18;
+  const innerW = W - padX * 2;
+  const innerH = H - padY * 2;
+  const pts = points.map((p, i) => ({ x: padX + (i / Math.max(points.length - 1, 1)) * innerW, y: padY + innerH - ((p.y - minV) / span) * innerH, label: p.x, value: p.y }));
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  const avgY = padY + innerH - ((avg - minV) / span) * innerH;
+  const bandY1 = refMax == null ? null : padY + innerH - ((refMax - minV) / span) * innerH;
+  const bandY2 = refMin == null ? null : padY + innerH - ((refMin - minV) / span) * innerH;
+  const bandTop = bandY1 != null && bandY2 != null ? Math.min(bandY1, bandY2) : null;
+  const bandHeight = bandY1 != null && bandY2 != null ? Math.abs(bandY1 - bandY2) : null;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%", height:"auto" }}>
-      {/* Reference range shading */}
-      <rect x={PAD} y={Math.min(refTop,refBottom)} width={W-PAD*2} height={Math.abs(refBottom-refTop)} fill="rgba(16,185,129,0.12)" />
-      {/* Reference lines */}
-      {refMax!==null&&<line x1={PAD} x2={W-PAD} y1={yScale(refMax)} y2={yScale(refMax)} stroke="#10b981" strokeWidth="1" strokeDasharray="4 4" opacity="0.6"/>}
-      {refMin!==null&&<line x1={PAD} x2={W-PAD} y1={yScale(refMin)} y2={yScale(refMin)} stroke="#10b981" strokeWidth="1" strokeDasharray="4 4" opacity="0.6"/>}
-      {/* Line */}
-      <path d={linePath} fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-      {/* Points */}
-      {pts.map((p,i)=>(
-        <g key={i}>
-          <circle cx={p.x} cy={p.y} r="5" fill={p.oor?"#ef4444":"#6366f1"} />
-          <text x={p.x} y={p.y-10} textAnchor="middle" fontSize="11" fill={p.oor?"#ef4444":"#9ca3af"}>{p.val}{unit}</text>
-          <text x={p.x} y={H-8} textAnchor="middle" fontSize="9" fill="#6b7280">{new Date(p.date).toLocaleDateString("en-AE",{month:"short",year:"2-digit"})}</text>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 260 }}>
+      {bandTop != null && bandHeight != null && <rect x={padX} y={bandTop} width={innerW} height={bandHeight} fill="rgba(16,185,129,0.08)" />}
+      <line x1={padX} x2={W - padX} y1={avgY} y2={avgY} stroke="#f59e0b" strokeDasharray="7 5" strokeWidth="2" />
+      <polyline fill="none" stroke="#10b981" strokeWidth="3" points={pts.map((p) => `${p.x},${p.y}`).join(" ")} />
+      {pts.map((p) => (
+        <g key={`${p.label}-${p.value}`}>
+          <circle cx={p.x} cy={p.y} r="4" fill="#10b981" />
+          <text x={p.x} y={H - 4} textAnchor="middle" fontSize="10" fill="#6b7280">{fmtShort(p.label)}</text>
         </g>
       ))}
-      {/* Ref labels */}
-      {refMax!==null&&<text x={W-PAD+4} y={yScale(refMax)+4} fontSize="10" fill="#10b981">{refMax}</text>}
-      {refMin!==null&&<text x={W-PAD+4} y={yScale(refMin)+4} fontSize="10" fill="#10b981">{refMin}</text>}
+      <text x={W - padX} y={avgY - 6} textAnchor="end" fontSize="11" fill="#d97706">Avg {avg.toFixed(2)}</text>
     </svg>
   );
 }
 
 export default function BiomarkerDetailPage({ params }: { params: { id: string } }) {
-  const supabase = createClient();
-  const router = useRouter();
-  const isBody = params.id === "body";
-  const [test, setTest] = useState<BiomarkerTest|null>(null);
+  const client = createClient();
+  const [test, setTest] = useState<BiomarkerTest | null>(null);
   const [results, setResults] = useState<BiomarkerResult[]>([]);
-  const [bodyMetrics, setBodyMetrics] = useState<BodyMetric[]>([]);
+  const [allTests, setAllTests] = useState<BiomarkerTest[]>([]);
+  const [allResults, setAllResults] = useState<BiomarkerResult[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editTest, setEditTest] = useState(false);
-  const [editFields, setEditFields] = useState({ method:"", refRange:"", refMin:"", refMax:"", unit:"", groupName:"" });
-  const [allGroups, setAllGroups] = useState<string[]>([]);
-  const [newGroupName, setNewGroupName] = useState("");
+  const [editMode, setEditMode] = useState(false);
   const [toast, setToast] = useState("");
-  const [userId, setUserId] = useState<string|null>(null);
-
+  const [compareTestId, setCompareTestId] = useState("");
+  const [editFields, setEditFields] = useState({ method: "", refMin: "", refMax: "", refRange: "", unit: "", groupName: "" });
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const V = { bg: isDark ? "#0d0f14" : "#f9f8f5", card: isDark ? "#16191f" : "#ffffff", border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)", text: isDark ? "#f0ede8" : "#1a1a1a", muted: isDark ? "#9ba3b2" : "#6b7280", faint: isDark ? "#6b7280" : "#9ca3af", input: isDark ? "#1e2130" : "#f7f7f8", accent: "#10b981" };
+  const btn = { padding: "8px 14px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 700 } as const;
+  const btnP = { ...btn, background: V.accent, color: "#fff", border: "none" } as const;
+  const input = { padding: "9px 12px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
+  const section = { background: V.card, border: `1px solid ${V.border}`, borderRadius: 16 } as const;
+
+  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(""), 2500); }
 
   useEffect(() => {
     async function load() {
-      const { data:{ user } } = await supabase.auth.getUser();
-      if (!user) { router.push("/login"); return; }
-      setUserId(user.id);
-      if (isBody) {
-        const { data } = await supabase.from("body_metrics").select("*").eq("user_id",user.id).order("measured_at");
-        setBodyMetrics((data??[]).map(r => ({ id:r.id, measuredAt:r.measured_at, weightKg:r.weight_kg??null, heightCm:r.height_cm??null, bmi:r.bmi??null, bodyFatPct:r.body_fat_pct??null, visceralFatL:r.visceral_fat_l??null, skeletalMuscleKg:r.skeletal_muscle_kg??null })));
-      } else {
-        const [tr, rr] = await Promise.all([
-          supabase.from("biomarker_tests").select("*").eq("id",params.id).single(),
-          supabase.from("biomarker_results").select("*").eq("test_id",params.id).order("test_date"),
-        ]);
-        if (tr.data) {
-          const t = tr.data;
-          setTest({ id:t.id, groupName:t.group_name, name:t.name, method:t.method??"", refRange:t.ref_range??"", refMin:t.ref_min??null, refMax:t.ref_max??null, unit:t.unit??"" });
-          setEditFields({ method:t.method??"", refRange:t.ref_range??"", refMin:t.ref_min?.toString()??"", refMax:t.ref_max?.toString()??"", unit:t.unit??"", groupName:t.group_name??"" });
-        }
-        setResults((rr.data??[]).map(r => ({ id:r.id, testDate:r.test_date, valueNum:r.value_num??null, valueText:r.value_text??"", notes:r.notes??"" })));
+      const { data: { user } } = await client.auth.getUser();
+      if (!user) {
+        setLoading(false);
+        return;
       }
-      // Load all unique groups
-      const { data: gData } = await supabase.from("biomarker_tests").select("group_name").eq("user_id", user.id);
-      const uniqueGroups = [...new Set((gData??[]).map((r:{group_name:string})=>r.group_name))].sort();
-      setAllGroups(uniqueGroups);
-
+      const [tRes, rRes, allTRes, allRRes] = await Promise.all([
+        client.from("biomarker_tests").select("*").eq("id", params.id).single(),
+        client.from("biomarker_results").select("*").eq("test_id", params.id).eq("user_id", user.id).order("test_date", { ascending: true }),
+        client.from("biomarker_tests").select("*").eq("user_id", user.id).order("name"),
+        client.from("biomarker_results").select("*").eq("user_id", user.id).order("test_date", { ascending: true }),
+      ]);
+      if (tRes.data) {
+        const mapped = dbToTest(tRes.data);
+        setTest(mapped);
+        setEditFields({ method: mapped.method, refMin: mapped.refMin?.toString() ?? "", refMax: mapped.refMax?.toString() ?? "", refRange: mapped.refRange, unit: mapped.unit, groupName: mapped.groupName });
+      }
+      setResults((rRes.data ?? []).map(dbToResult));
+      setAllTests((allTRes.data ?? []).map(dbToTest));
+      setAllResults((allRRes.data ?? []).map(dbToResult));
       setLoading(false);
     }
     load();
-  }, [params.id]);
+  }, [client, params.id]);
 
-  async function saveTestEdit() {
+  const latest = results.at(-1);
+  const previous = results.length > 1 ? results[results.length - 2] : undefined;
+  const status = test ? markerStatus(latest, test) : "missing";
+  const tone = statusTone(status);
+  const d = deltaPct(previous?.valueNum ?? null, latest?.valueNum ?? null);
+  const numericPoints = results.filter((r) => r.valueNum != null).map((r) => ({ x: r.testDate, y: r.valueNum as number }));
+  const mixedMode = results.some((r) => r.valueNum == null && r.valueText);
+  const overdueDays = latest ? Math.floor((Date.now() - new Date(`${latest.testDate}T00:00:00`).getTime()) / 86400000) : null;
+
+  const compareSeries = useMemo(() => {
+    if (!compareTestId || !test) return { rows: [] as { date: string; a: number; b: number }[], r: null as number | null };
+    const left = new Map(results.filter((x) => x.valueNum != null).map((x) => [x.testDate, x.valueNum as number]));
+    const right = allResults.filter((x) => x.testId === compareTestId && x.valueNum != null && left.has(x.testDate)).map((x) => ({ date: x.testDate, a: left.get(x.testDate) as number, b: x.valueNum as number }));
+    if (right.length < 2) return { rows: right, r: null };
+    const avgA = right.reduce((s, p) => s + p.a, 0) / right.length;
+    const avgB = right.reduce((s, p) => s + p.b, 0) / right.length;
+    const num = right.reduce((s, p) => s + (p.a - avgA) * (p.b - avgB), 0);
+    const denA = Math.sqrt(right.reduce((s, p) => s + (p.a - avgA) ** 2, 0));
+    const denB = Math.sqrt(right.reduce((s, p) => s + (p.b - avgB) ** 2, 0));
+    return { rows: right, r: denA && denB ? Number((num / (denA * denB)).toFixed(2)) : null };
+  }, [compareTestId, results, allResults, test]);
+
+  async function saveEdit() {
     if (!test) return;
-    const rMin = editFields.refMin ? parseFloat(editFields.refMin) : null;
-    const rMax = editFields.refMax ? parseFloat(editFields.refMax) : null;
-    await supabase.from("biomarker_tests").update({ method:editFields.method, ref_range:editFields.refRange, ref_min:rMin, ref_max:rMax, unit:editFields.unit, group_name:editFields.groupName }).eq("id",test.id);
-    setTest(p => p ? {...p,...editFields,refMin:rMin,refMax:rMax,groupName:editFields.groupName} : p);
-    setEditTest(false); showToast("Updated");
+    const payload = {
+      method: editFields.method || null,
+      ref_min: editFields.refMin === "" ? null : Number(editFields.refMin),
+      ref_max: editFields.refMax === "" ? null : Number(editFields.refMax),
+      ref_range: editFields.refRange || null,
+      unit: editFields.unit || null,
+      group_name: editFields.groupName || test.groupName,
+    };
+    const { data, error } = await client.from("biomarker_tests").update(payload).eq("id", test.id).select("*").single();
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    if (data) {
+      const mapped = dbToTest(data);
+      setTest(mapped);
+      setEditMode(false);
+      showToast("Definition updated");
+    }
   }
 
-  function showToast(msg:string){setToast(msg);setTimeout(()=>setToast(""),2500);}
-
-  const chartData = useMemo(() => {
-    return results.filter(r=>r.valueNum!==null).map(r=>({ date:r.testDate, val:r.valueNum! }));
-  },[results]);
-
-  const V = { bg:isDark?"#0d0f14":"#f9f8f5", card:isDark?"#16191f":"#ffffff", border:isDark?"rgba(255,255,255,0.07)":"rgba(0,0,0,0.07)", text:isDark?"#f0ede8":"#1a1a1a", muted:isDark?"#9ba3b2":"#6b7280", faint:isDark?"#5c6375":"#9ca3af", input:isDark?"#1e2130":"#f9fafb", accent:"#10b981" };
-  const btn = { padding:"7px 13px", borderRadius:9, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:12, fontWeight:600 } as const;
-  const btnP = { ...btn, background:V.accent, border:"none", color:"#fff", fontWeight:700 } as const;
-  const inp = { padding:"8px 12px", borderRadius:8, border:`1px solid ${V.border}`, background:V.input, color:V.text, fontSize:13, outline:"none" } as const;
-  const section = { background:V.card, border:`1px solid ${V.border}`, borderRadius:14, overflow:"hidden" as const, marginBottom:16 };
-  const sHead = { padding:"11px 16px", borderBottom:`1px solid ${V.border}`, fontSize:11, fontWeight:800, textTransform:"uppercase" as const, letterSpacing:"0.1em", color:V.faint, background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)" };
-
-  if (loading) return <div style={{minHeight:"60vh",display:"flex",alignItems:"center",justifyContent:"center",background:V.bg}}><div style={{width:28,height:28,border:`2.5px solid ${V.accent}`,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.7s linear infinite"}}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
-
-  // ── BODY METRICS detail page ──
-  if (isBody) {
-    return (
-      <div style={{minHeight:"100vh",background:V.bg,color:V.text,fontFamily:"system-ui,sans-serif"}}>
-        <div style={{position:"sticky",top:0,zIndex:20,background:isDark?"rgba(13,15,20,0.9)":"rgba(249,248,245,0.9)",backdropFilter:"blur(12px)",borderBottom:`1px solid ${V.border}`,padding:"12px 24px",display:"flex",alignItems:"center",gap:12}}>
-          <Link href="/dashboard/biomarkers" style={{display:"flex",alignItems:"center",gap:8,color:V.muted,textDecoration:"none",fontWeight:600,fontSize:13}}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-            BioMarkers
-          </Link>
-          <span style={{fontSize:16,fontWeight:800}}>Body Metrics History</span>
-        </div>
-        <div style={{maxWidth:860,margin:"0 auto",padding:"24px 20px"}}>
-          {BODY_FIELDS.map(field => {
-            const pts = bodyMetrics
-              .filter(m => (m as unknown as Record<string,unknown>)[field.key] !== null)
-              .map(m => ({ date:m.measuredAt, val:(m as unknown as Record<string,number>)[field.key] }));
-            if (!pts.length) return null;
-            return (
-              <div key={field.key} style={{...section,marginBottom:20}}>
-                <div style={{...sHead,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span>{field.label} {field.unit&&`(${field.unit})`}</span>
-                  {field.min&&<span>Normal: {field.min}–{field.max} {field.unit}</span>}
-                </div>
-                <div style={{padding:"16px"}}>
-                  <SparkChart results={pts} refMin={field.min} refMax={field.max} unit={field.unit} />
-                  <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:12}}>
-                    {[...pts].reverse().map((p,i)=>( 
-                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",background:isDark?"rgba(255,255,255,0.03)":"rgba(0,0,0,0.02)",borderRadius:8}}>
-                        <span style={{fontSize:13,color:V.muted}}>{fmtDate(p.date)}</span>
-                        <span style={{fontSize:14,fontWeight:700,color:isOOR(p.val,field.min,field.max)?"#ef4444":"#10b981"}}>{p.val} {field.unit}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  if (!test) return <div style={{padding:40,background:V.bg,minHeight:"100vh",color:V.muted}}>Not found. <Link href="/dashboard/biomarkers" style={{color:V.accent}}>Back</Link></div>;
-
-  const latestResult = results[results.length-1];
-  const latestVal = latestResult?.valueNum ?? null;
-  const isOorLatest = isOOR(latestVal, test.refMin, test.refMax);
+  if (loading) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: V.bg, color: V.muted }}>Loading marker…</div>;
+  if (!test) return <div style={{ minHeight: "100vh", background: V.bg, color: V.muted, padding: 24 }}>Marker not found. <Link href="/dashboard/biomarkers">Back</Link></div>;
 
   return (
-    <div style={{minHeight:"100vh",background:V.bg,color:V.text,fontFamily:"system-ui,sans-serif"}}>
-      <div style={{position:"sticky",top:0,zIndex:20,background:isDark?"rgba(13,15,20,0.9)":"rgba(249,248,245,0.9)",backdropFilter:"blur(12px)",borderBottom:`1px solid ${V.border}`,padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-        <Link href="/dashboard/biomarkers" style={{display:"flex",alignItems:"center",gap:8,color:V.muted,textDecoration:"none",fontWeight:600,fontSize:13}}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          BioMarkers
-        </Link>
-        <button style={btn} onClick={()=>setEditTest(v=>!v)}>{editTest?"✓ Done":"Edit"}</button>
+    <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: isDark ? "rgba(13,15,20,0.9)" : "rgba(249,248,245,0.9)", backdropFilter: "blur(12px)", borderBottom: `1px solid ${V.border}`, padding: "14px 24px", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <Link href="/dashboard/biomarkers" style={{ color: V.muted, textDecoration: "none", fontSize: 13, fontWeight: 700 }}>← BioMarkers</Link>
+          <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{test.name}</div>
+          <div style={{ fontSize: 12, color: V.muted }}>{test.groupName}</div>
+        </div>
+        <button style={editMode ? btn : btnP} onClick={() => editMode ? saveEdit() : setEditMode(true)}>{editMode ? "Save" : "Edit definition"}</button>
       </div>
 
-      <div style={{maxWidth:800,margin:"0 auto",padding:"24px 20px"}}>
-        {/* Header */}
-        <div style={{marginBottom:20}}>
-          <span style={{fontSize:11,fontWeight:700,color:V.accent,textTransform:"uppercase",letterSpacing:"0.1em"}}>{test.groupName}</span>
-          <h1 style={{fontSize:24,fontWeight:800,margin:"4px 0 8px"}}>{test.name}</h1>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {test.method&&<span style={{fontSize:12,color:V.faint}}>Method: {test.method}</span>}
-            <span style={{fontSize:12,fontWeight:700,padding:"3px 10px",borderRadius:999,background:"rgba(16,185,129,0.1)",color:V.accent}}>Ref: {test.refRange} {test.unit}</span>
+      <div style={{ maxWidth: 1080, margin: "0 auto", padding: 20, display: "grid", gap: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>Latest value</div>
+            <div style={{ fontSize: 34, fontWeight: 900, marginTop: 6 }}>{latest?.valueNum ?? latest?.valueText || "—"}</div>
+            <div style={{ fontSize: 12, color: V.muted }}>{test.unit || "Text marker"} · {latest ? fmtDate(latest.testDate) : "No result yet"}</div>
+          </div>
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>Range status</div>
+            <div style={{ display: "inline-flex", marginTop: 12, padding: "6px 12px", borderRadius: 999, background: tone.bg, color: tone.fg, fontWeight: 900, fontSize: 12 }}>{tone.label}</div>
+            <div style={{ fontSize: 12, color: V.muted, marginTop: 10 }}>Reference: {test.refRange || "Not configured"}</div>
+          </div>
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>Change vs previous</div>
+            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 8, color: compareTone(d.delta) }}>{d.delta == null ? "—" : `${d.delta > 0 ? "+" : ""}${d.delta}`}</div>
+            <div style={{ fontSize: 12, color: V.muted }}>{d.pct == null ? "No comparable previous value" : `${d.pct > 0 ? "+" : ""}${d.pct}%`}</div>
+          </div>
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>Recency</div>
+            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 8, color: overdueDays != null && overdueDays > 180 ? "#dc2626" : V.text }}>{overdueDays == null ? "No result" : `${overdueDays} days`}</div>
+            <div style={{ fontSize: 12, color: V.muted }}>{overdueDays != null && overdueDays > 180 ? "Probably time for a retest" : "Still reasonably fresh"}</div>
           </div>
         </div>
 
-        {/* Latest value */}
-        {latestResult && (
-          <div style={{background:V.card,border:`1px solid ${isOorLatest?"rgba(239,68,68,0.4)":"rgba(16,185,129,0.3)"}`,borderRadius:14,padding:"16px 20px",marginBottom:20,display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
+        {editMode && (
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 800, color: V.faint, letterSpacing: "0.08em", marginBottom: 10 }}>Definition editor</div>
+            <div style={{ padding: 10, borderRadius: 12, background: isDark ? "rgba(245,158,11,0.08)" : "rgba(245,158,11,0.08)", color: "#b45309", fontSize: 12, marginBottom: 12 }}>
+              Changing method, unit, or reference ranges can make old results look different without the body changing. Very modern problem. Edit carefully.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Method</span><input style={input} value={editFields.method} onChange={(e) => setEditFields((p) => ({ ...p, method: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Unit</span><input style={input} value={editFields.unit} onChange={(e) => setEditFields((p) => ({ ...p, unit: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Group</span><input style={input} value={editFields.groupName} onChange={(e) => setEditFields((p) => ({ ...p, groupName: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref min</span><input style={input} type="number" value={editFields.refMin} onChange={(e) => setEditFields((p) => ({ ...p, refMin: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref max</span><input style={input} type="number" value={editFields.refMax} onChange={(e) => setEditFields((p) => ({ ...p, refMax: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Range label</span><input style={input} value={editFields.refRange} onChange={(e) => setEditFields((p) => ({ ...p, refRange: e.target.value }))} /></label>
+            </div>
+          </div>
+        )}
+
+        <div style={{ ...section, padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
             <div>
-              <div style={{fontSize:10,fontWeight:700,color:V.faint,textTransform:"uppercase",marginBottom:4}}>Latest ({fmtDate(latestResult.testDate)})</div>
-              <div style={{fontSize:32,fontWeight:800,color:isOorLatest?"#ef4444":"#10b981"}}>{latestVal ?? latestResult.valueText}<span style={{fontSize:14,fontWeight:500,marginLeft:4}}>{test.unit}</span></div>
-              {isOorLatest&&<div style={{fontSize:12,color:"#ef4444",fontWeight:600,marginTop:2}}>⚠ Outside reference range ({test.refRange})</div>}
+              <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 800, color: V.faint, letterSpacing: "0.08em" }}>Trend</div>
+              <div style={{ fontSize: 12, color: V.muted }}>{numericPoints.length} numeric points{mixedMode ? " · text results excluded from chart" : ""}</div>
             </div>
+            {mixedMode && <div style={{ padding: "5px 10px", borderRadius: 999, background: "rgba(99,102,241,0.12)", color: "#4f46e5", fontSize: 11, fontWeight: 800 }}>Mixed numeric/text history</div>}
           </div>
-        )}
+          <TrendChart points={numericPoints} refMin={test.refMin} refMax={test.refMax} />
+        </div>
 
-        {/* Edit panel */}
-        {editTest && (
-          <div style={{...section,marginBottom:20}}>
-            <div style={sHead}>Edit test details</div>
-            <div style={{padding:16,display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-              <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em",gridColumn:"1/-1"}}>
-                Method <input style={inp} value={editFields.method} onChange={e=>setEditFields(p=>({...p,method:e.target.value}))} />
-              </label>
-              <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em"}}>
-                Ref Min <input style={inp} type="number" step="0.01" value={editFields.refMin} onChange={e=>setEditFields(p=>({...p,refMin:e.target.value}))} />
-              </label>
-              <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em"}}>
-                Ref Max <input style={inp} type="number" step="0.01" value={editFields.refMax} onChange={e=>setEditFields(p=>({...p,refMax:e.target.value}))} />
-              </label>
-              <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em"}}>
-                Unit <input style={inp} value={editFields.unit} onChange={e=>setEditFields(p=>({...p,unit:e.target.value}))} />
-              </label>
-              <label style={{display:"flex",flexDirection:"column",gap:5,fontSize:12,fontWeight:700,color:V.faint,textTransform:"uppercase",letterSpacing:"0.06em"}}>
-                Group
-                <select style={inp} value={editFields.groupName} onChange={e=>setEditFields(p=>({...p,groupName:e.target.value}))}>
-                  {allGroups.map(g=><option key={g} value={g}>{g}</option>)}
-                  <option value="__new__">+ Add new group…</option>
-                </select>
-                {editFields.groupName==="__new__"&&(
-                  <div style={{display:"flex",gap:6,marginTop:4}}>
-                    <input style={{...inp,flex:1}} value={newGroupName} onChange={e=>setNewGroupName(e.target.value)} placeholder="New group name" />
-                    <button style={{...btnP,padding:"6px 12px",fontSize:12}} onClick={()=>{if(newGroupName.trim()&&!allGroups.includes(newGroupName.trim())){setAllGroups(p=>[...p,newGroupName.trim()].sort());setEditFields(p=>({...p,groupName:newGroupName.trim()}));setNewGroupName("")}}}>Add</button>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 0.9fr", gap: 18 }}>
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 800, color: V.faint, letterSpacing: "0.08em", marginBottom: 12 }}>Result history</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {[...results].reverse().map((row, idx, arr) => {
+                const prev = idx > 0 ? arr[idx - 1] : undefined;
+                const s = markerStatus(row, test);
+                const t = statusTone(s);
+                const dp = deltaPct(prev?.valueNum ?? null, row.valueNum ?? null);
+                return (
+                  <div key={row.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "0.9fr 0.9fr 0.8fr 0.8fr", gap: 10, alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 800 }}>{fmtDate(row.testDate)}</div>
+                      {row.notes && <div style={{ fontSize: 11, color: V.muted }}>{row.notes}</div>}
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 900 }}>{row.valueNum ?? row.valueText || "—"}</div>
+                    <div style={{ padding: "4px 8px", borderRadius: 999, background: t.bg, color: t.fg, fontSize: 11, fontWeight: 800, width: "fit-content" }}>{t.label}</div>
+                    <div style={{ fontSize: 12, color: compareTone(dp.delta), fontWeight: 800 }}>{dp.delta == null ? "—" : `${dp.delta > 0 ? "+" : ""}${dp.delta}${dp.pct != null ? ` (${dp.pct > 0 ? "+" : ""}${dp.pct}%)` : row.valueNum != null && prev?.valueNum === 0 ? " (New)" : ""}`}</div>
                   </div>
-                )}
-              </label>
-            </div>
-            <div style={{padding:"0 16px 16px",display:"flex",justifyContent:"flex-end",gap:8}}>
-              <button style={btn} onClick={()=>setEditTest(false)}>Cancel</button>
-              <button style={btnP} onClick={saveTestEdit}>Save</button>
+                );
+              })}
             </div>
           </div>
-        )}
 
-        {/* Chart */}
-        {chartData.length >= 2 && (
-          <div style={section}>
-            <div style={sHead}>Trend ({results.length} results)</div>
-            <div style={{padding:"16px 20px"}}>
-              <SparkChart results={chartData} refMin={test.refMin} refMax={test.refMax} unit={test.unit} />
-            </div>
-          </div>
-        )}
-
-        {/* Results table */}
-        <div style={section}>
-          <div style={sHead}>All results</div>
-          {results.length===0&&<div style={{padding:"20px 16px",textAlign:"center",color:V.faint,fontSize:13}}>No results yet</div>}
-          {[...results].reverse().map(r=>{
-            const v=r.valueNum??r.valueText;
-            const oor=isOOR(r.valueNum,test.refMin,test.refMax);
-            return (
-              <div key={r.id} style={{padding:"11px 16px",borderBottom:`1px solid ${V.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-                <div style={{fontSize:14,fontWeight:600,color:V.muted}}>{fmtDate(r.testDate)}</div>
-                <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                  <span style={{fontSize:16,fontWeight:800,color:oor?"#ef4444":"#10b981"}}>{v} <span style={{fontSize:12,fontWeight:500,color:V.faint}}>{test.unit}</span></span>
-                  {oor&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:999,background:"rgba(239,68,68,0.1)",color:"#ef4444"}}>⚠ Out of range</span>}
-                </div>
-                {r.notes&&<div style={{fontSize:11,color:V.faint,fontStyle:"italic"}}>{r.notes}</div>}
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 800, color: V.faint, letterSpacing: "0.08em", marginBottom: 12 }}>Correlation compare</div>
+            <div style={{ display: "grid", gap: 10 }}>
+              <select style={input} value={compareTestId} onChange={(e) => setCompareTestId(e.target.value)}>
+                <option value="">Select another marker</option>
+                {allTests.filter((x) => x.id !== test.id).map((other) => <option key={other.id} value={other.id}>{other.name}</option>)}
+              </select>
+              <div style={{ fontSize: 13, color: V.muted }}>Shared numeric dates: <strong style={{ color: V.text }}>{compareSeries.rows.length}</strong>{compareSeries.r != null ? <> · Approx r = <strong style={{ color: compareTone(compareSeries.r) }}>{compareSeries.r}</strong></> : null}</div>
+              <div style={{ display: "grid", gap: 6 }}>
+                {compareSeries.rows.slice(-10).map((row) => (
+                  <div key={row.date} style={{ display: "grid", gridTemplateColumns: "0.8fr 1fr 1fr", gap: 10, padding: 8, background: V.input, borderRadius: 10 }}>
+                    <div style={{ fontSize: 12, color: V.muted }}>{fmtShort(row.date)}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800 }}>{row.a}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800 }}>{row.b}</div>
+                  </div>
+                ))}
               </div>
-            );
-          })}
+            </div>
+          </div>
         </div>
       </div>
-      {toast&&<div style={{position:"fixed",bottom:20,right:16,background:isDark?"#0d2b1e":"#f0fdf4",color:"#10b981",border:"1px solid rgba(16,185,129,0.3)",padding:"12px 18px",borderRadius:12,fontSize:13,fontWeight:700,boxShadow:"0 8px 24px rgba(0,0,0,0.2)",zIndex:200}}>{toast}</div>}
+
+      {toast && <div style={{ position: "fixed", right: 16, bottom: 16, padding: "10px 14px", borderRadius: 12, background: isDark ? "#16352a" : "#ecfdf5", color: "#10b981", border: "1px solid rgba(16,185,129,0.25)", fontSize: 13, fontWeight: 800 }}>{toast}</div>}
     </div>
   );
 }
