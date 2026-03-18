@@ -812,7 +812,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           </div>
         </div>
 
-        </div>
       </div>
 
       {showPhoto && (
