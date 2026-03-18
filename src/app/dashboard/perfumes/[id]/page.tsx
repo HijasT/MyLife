@@ -184,6 +184,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [isEdit, setIsEdit] = useState(false);
   const [toast, setToast] = useState("");
   const [showPhoto, setShowPhoto] = useState(false);
+  const [newNoteTag, setNewNoteTag] = useState("");
   const [showAddBottle, setShowAddBottle] = useState(false);
   const [showWearModal, setShowWearModal] = useState(false);
   const [brandView, setBrandView] = useState(false);
@@ -723,7 +724,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
             <div><span style={labelStyle}>Occasion</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{Array.from(new Set([...OCCASION_OPTIONS, ...item.occasionTags])).map((opt) => <button key={opt} onClick={() => toggleOccasion(opt)} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.occasionTags.includes(opt) ? V.accent : V.inputBg, color: item.occasionTags.includes(opt) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{opt}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.occasionTags.length ? item.occasionTags.map((o) => <span key={o} style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: "#d97706", fontSize: 12, fontWeight: 700 }}>{o}</span>) : <span style={valueStyle}>—</span>}</div>}</div>
             <div><span style={labelStyle}>Similar / clone</span>{isEdit ? <input style={inputStyle} value={item.cloneSimilar} onChange={(e) => update({ cloneSimilar: e.target.value })} placeholder="Manual entry only" /> : <div style={valueStyle}>{item.cloneSimilar || "—"}</div>}</div>
-            <div><span style={labelStyle}>Note tags</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{globalNotes.map((tag) => <button key={tag} onClick={() => update({ notesTags: item.notesTags.includes(tag) ? item.notesTags.filter((x) => x !== tag) : [...item.notesTags, tag] })} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.notesTags.includes(tag) ? V.accent : V.inputBg, color: item.notesTags.includes(tag) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{tag}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.notesTags.length ? item.notesTags.map((n) => <Tag key={n} label={n} />) : <span style={valueStyle}>—</span>}</div>}</div>
+            <div><span style={labelStyle}>Note tags</span>{isEdit ? <div style={{ display: "grid", gap: 10 }}><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.notesTags.length ? item.notesTags.map((tag) => <button key={tag} onClick={() => update({ notesTags: item.notesTags.filter((x) => x !== tag) })} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: V.accent, color: "#fff", fontSize: 12, fontWeight: 700 }}>#{tag} ×</button>) : <span style={valueStyle}>No tags selected</span>}</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{globalNotes.filter((tag) => !item.notesTags.includes(tag)).map((tag) => <button key={tag} onClick={() => update({ notesTags: [...item.notesTags, tag] })} style={{ padding: "8px 10px", borderRadius: 10, border: `1px solid ${V.border}`, cursor: "pointer", background: V.inputBg, color: V.text, fontSize: 12, fontWeight: 700 }}>+ {tag}</button>)}</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><input style={{ ...inputStyle, flex: 1, minWidth: 180 }} value={newNoteTag} onChange={(e) => setNewNoteTag(e.target.value)} placeholder="Add new tag" /><button style={btnStyle} onClick={() => { const tag = newNoteTag.trim(); if (!tag || item.notesTags.includes(tag)) return; update({ notesTags: [...item.notesTags, tag] }); setGlobalNotes((prev) => prev.includes(tag) ? prev : [...prev, tag].sort()); setNewNoteTag(""); }}>Add tag</button></div></div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.notesTags.length ? item.notesTags.map((n) => <Tag key={n} label={n} />) : <span style={valueStyle}>—</span>}</div>}</div>
             <div><span style={labelStyle}>Weather</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{(["Cold", "Neutral", "Hot"] as const).map((w) => <button key={w} onClick={() => update({ weatherTags: item.weatherTags.includes(w) ? item.weatherTags.filter((x) => x !== w) : [...item.weatherTags, w] as ("Cold"|"Neutral"|"Hot")[] })} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.weatherTags.includes(w) ? V.accent : V.inputBg, color: item.weatherTags.includes(w) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{w}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.weatherTags.length ? item.weatherTags.map((w) => <Tag key={w} label={w} />) : <span style={valueStyle}>—</span>}</div>}</div>
             {item.status === "wishlist" && <div><span style={labelStyle}>Wishlist priority</span>{isEdit ? <select style={inputStyle} value={item.purchasePriority || "Medium"} onChange={(e) => update({ purchasePriority: e.target.value })}><option>Low</option><option>Medium</option><option>High</option><option>Must buy</option></select> : <div style={valueStyle}>{item.purchasePriority || "Medium"}</div>}</div>}
           </div>
@@ -749,15 +750,14 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
             {!wearLogs.length && <div style={{ fontSize: 13, color: V.muted }}>No wear logs yet.</div>}
           </div>
 
+        </div>
 
-      
         <div style={sectionStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 16, fontWeight: 800 }}>Bottle & purchase</div>
               </div>
             <div style={{ display: "flex", gap: 8 }}>
-              {editingBottleId && <button style={btnStyle} onClick={() => setEditingBottleId(null)}>Stop editing</button>}
               <button style={primaryBtnStyle} onClick={() => setShowAddBottle(true)}>+ Add bottle</button>
             </div>
           </div>
@@ -796,10 +796,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
                       {!editing ? (
                         <button style={btnStyle} onClick={() => openBottleEdit(bottle)}>Edit</button>
                       ) : (
-                        <>
-                          <button style={primaryBtnStyle} onClick={() => saveBottleEdit(bottle)}>Save</button>
-                          <button style={btnStyle} onClick={() => setEditingBottleId(null)}>Cancel</button>
-                        </>
+<button style={primaryBtnStyle} onClick={() => saveBottleEdit(bottle)}>Save</button>
                       )}
                       {bottle.status === "Wardrobe" ? (
                         <button style={btnStyle} onClick={() => { setArchiveTarget({ bottleId: bottle.id, purchaseId: purchase?.id }); setArchiveReason("emptied"); setArchiveComment(""); }}>Archive</button>
@@ -820,10 +817,19 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
 
       {showPhoto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "grid", placeItems: "center", padding: 16 }}>
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 16, padding: 22, width: "min(520px,100%)" }}>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>Change photo</div>
-            <input type="file" accept="image/*" style={{ fontSize: 13, color: V.muted, width: "100%" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); }} />
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button style={btnStyle} onClick={() => setShowPhoto(false)}>Cancel</button></div>
+          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(560px,100%)", overflow: "hidden", boxShadow: isDark ? "0 24px 60px rgba(0,0,0,0.45)" : "0 24px 60px rgba(15,23,42,0.12)" }}>
+            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}` }}>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>Change photo</div>
+            </div>
+            <div style={{ padding: 20, display: "grid", gap: 14 }}>
+              <div style={{ border: `1px dashed ${V.border}`, borderRadius: 14, padding: 18, background: V.inputBg }}>
+                <div style={{ fontSize: 13, color: V.muted, marginBottom: 10 }}>Upload a square or portrait image for the bottle.</div>
+                <input type="file" accept="image/*" style={{ fontSize: 13, color: V.muted, width: "100%" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button style={btnStyle} onClick={() => setShowPhoto(false)}>Close</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
