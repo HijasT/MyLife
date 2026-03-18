@@ -8,9 +8,9 @@ import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 
 type BottleType = "Bottle" | "Decant" | "Sample";
-type BottleStatus = "Wardrobe" | "Emptied" | "Sold" | "Gifted";
+type BottleStatus = "Wardrobe" | "Archive";
 type GenderScale = 0 | 1 | 2 | 3 | 4;
-type ArchiveReason = "Sold" | "Emptied" | "Gifted";
+type ArchiveReason = "sold" | "emptied" | "gifted";
 
 type Bottle = {
   id: string;
@@ -216,6 +216,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [archiveReason, setArchiveReason] = useState<ArchiveReason>("Emptied");
   const [archiveComment, setArchiveComment] = useState("");
   const [removeTarget, setRemoveTarget] = useState<{ bottleId: string; purchaseId?: string } | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<{ bottleId: string } | null>(null);
   const [newBottle, setNewBottle] = useState({
     bottleType: "Bottle" as BottleType,
     sizeMl: "100",
@@ -323,7 +324,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     const db: Record<string, unknown> = {};
     if (partial.bottleType !== undefined) db.bottle_type = partial.bottleType === "Bottle" ? "Full bottle" : partial.bottleType;
     if (partial.bottleSizeMl !== undefined) db.bottle_size_ml = partial.bottleSizeMl;
-    if (partial.status !== undefined) db.status = partial.status === "Wardrobe" ? "In collection" : partial.status;
+    if (partial.status !== undefined) db.status = partial.status;
     const { error } = await supabase.from("perfume_bottles").update(db).eq("id", bottleId);
     if (error) showToast(error.message);
   }
@@ -361,11 +362,48 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
 
   async function confirmArchiveBottle() {
     if (!archiveTarget) return;
-    await updateBottle(archiveTarget.bottleId, { status: archiveReason });
+    const { error } = await supabase
+      .from("perfume_bottles")
+      .update({
+        status: "Archive",
+        archive_reason: archiveReason,
+        archive_comment: archiveComment.trim() || null,
+        archived_at: nowDubai(),
+      })
+      .eq("id", archiveTarget.bottleId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    setItem((prev) =>
+      prev ? { ...prev, bottles: prev.bottles.map((b) => (b.id === archiveTarget.bottleId ? { ...b, status: "Archive" } : b)) } : prev,
+    );
     setArchiveTarget(null);
-    const commentNote = archiveComment.trim();
     setArchiveComment("");
-    showToast(commentNote ? `Bottle archived as ${archiveReason}. Comment kept only in this session.` : `Bottle archived as ${archiveReason}`);
+    showToast(`Bottle archived as ${archiveReason}`);
+  }
+
+  async function restoreBottleToWardrobe() {
+    if (!restoreTarget) return;
+    const { error } = await supabase
+      .from("perfume_bottles")
+      .update({
+        status: "Wardrobe",
+        archive_reason: null,
+        archive_comment: null,
+        archived_at: null,
+        resale_price_aed: null,
+      })
+      .eq("id", restoreTarget.bottleId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    setItem((prev) =>
+      prev ? { ...prev, bottles: prev.bottles.map((b) => (b.id === restoreTarget.bottleId ? { ...b, status: "Wardrobe" } : b)) } : prev,
+    );
+    setRestoreTarget(null);
+    showToast("Bottle moved to wardrobe");
   }
 
   async function uploadPhoto(file: File) {
@@ -411,8 +449,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         user_id: userId,
         bottle_size_ml: size,
         bottle_type: newBottle.bottleType === "Bottle" ? "Full bottle" : newBottle.bottleType,
-        status: "In collection",
-        usage: null,
+        status: "Wardrobe",
       })
       .select("*")
       .single();
@@ -673,8 +710,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
             <button
               style={{ ...btnStyle, width: "100%", marginTop: 10 }}
               onClick={() => {
-                const searchUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(`${item.brand} ${item.model} perfume`)}`;
-                setPhotoInput(item.imageUrl || searchUrl);
+                setPhotoInput(item.imageUrl || "");
                 setPhotoPreviewUrl(isProbablyImageUrl(item.imageUrl || "") ? item.imageUrl : "");
                 setPhotoMode("url");
                 setShowPhoto(true);
@@ -714,10 +750,63 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         </div>
 
         <div style={sectionStyle}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>Attributes</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+            <div><span style={labelStyle}>Occasion</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{OCCASION_OPTIONS.map((opt) => <button key={opt} onClick={() => toggleOccasion(opt)} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.occasionTags.includes(opt) ? V.accent : V.inputBg, color: item.occasionTags.includes(opt) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{opt}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.occasionTags.length ? item.occasionTags.map((o) => <span key={o} style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: "#d97706", fontSize: 12, fontWeight: 700 }}>{o}</span>) : <span style={valueStyle}>—</span>}</div>}</div>
+            <div><span style={labelStyle}>Similar / clone</span>{isEdit ? <input style={inputStyle} value={item.cloneSimilar} onChange={(e) => update({ cloneSimilar: e.target.value })} placeholder="Manual entry only" /> : <div style={valueStyle}>{item.cloneSimilar || "—"}</div>}</div>
+            {item.status === "wishlist" && <div><span style={labelStyle}>Wishlist priority</span>{isEdit ? <select style={inputStyle} value={item.purchasePriority || "Medium"} onChange={(e) => update({ purchasePriority: e.target.value })}><option>Low</option><option>Medium</option><option>High</option><option>Must buy</option></select> : <div style={valueStyle}>{item.purchasePriority || "Medium"}</div>}</div>}
+          </div>
+
+          <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>Note tags</div>
+                <button style={btnStyle} onClick={() => setNoteManager(true)}>Manage</button>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {item.notesTags.length ? item.notesTags.map((n) => <Tag key={n} label={n} />) : <span style={valueStyle}>—</span>}
+              </div>
+            </div>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>Weather</div>
+                <button style={btnStyle} onClick={() => setWeatherManager(true)}>Manage</button>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {item.weatherTags.length ? item.weatherTags.map((w) => <Tag key={w} label={w} />) : <span style={valueStyle}>—</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={sectionStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800 }}>Wear log</div>
+              <div style={{ fontSize: 12, color: V.muted }}>Your actual usage history. Far more useful than pretending memory is enough.</div>
+            </div>
+            <button style={primaryBtnStyle} onClick={() => setShowWearModal(true)}>+ Log a wear</button>
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {wearLogs.slice(0, 8).map((w) => (
+              <div key={w.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, background: V.inputBg }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{w.wornOn}</div>
+                  <div style={{ fontSize: 12, color: V.muted }}>{w.sprays} sprays · {w.weatherTag || "—"} · {w.performance || "—"}</div>
+                </div>
+                <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{w.occasion || "No occasion"}{w.compliment ? " · Compliment" : ""}</div>
+              </div>
+            ))}
+            {!wearLogs.length && <div style={{ fontSize: 13, color: V.muted }}>No wear logs yet.</div>}
+          </div>
+
+
+      
+        <div style={sectionStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 16, fontWeight: 800 }}>Bottle & purchase</div>
-              <div style={{ fontSize: 12, color: V.muted }}>Read only by default. Edit a bottle only when you actually want to change something, like civilized people.</div>
+              <div style={{ fontSize: 12, color: V.muted }}>Read only by default. Edit a bottle only when you actually want to change something, because chaos is not a workflow.</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               {editingBottleId && <button style={btnStyle} onClick={() => setEditingBottleId(null)}>Stop editing</button>}
@@ -735,7 +824,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-                        <span style={{ fontSize: 12, fontWeight: 800, padding: "4px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: "#d97706" }}>{bottle.status}</span>
+                        <span style={{ fontSize: 12, fontWeight: 800, padding: "4px 10px", borderRadius: 999, background: bottle.status === "Wardrobe" ? "rgba(245,166,35,0.12)" : "rgba(107,114,128,0.12)", color: bottle.status === "Wardrobe" ? "#d97706" : "#6b7280" }}>{bottle.status}</span>
                         {!editing ? (
                           <span style={{ fontSize: 14, fontWeight: 700 }}>{bottle.bottleType} · {bottle.bottleSizeMl} ml</span>
                         ) : (
@@ -764,8 +853,11 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
                           <button style={btnStyle} onClick={() => setEditingBottleId(null)}>Cancel</button>
                         </>
                       )}
-                      <button style={btnStyle} onClick={() => updateBottle(bottle.id, { status: "Wardrobe" })}>Wardrobe</button>
-                      <button style={btnStyle} onClick={() => { setArchiveTarget({ bottleId: bottle.id, purchaseId: purchase?.id }); setArchiveReason("Emptied"); setArchiveComment(""); }}>Archive</button>
+                      {bottle.status === "Wardrobe" ? (
+                        <button style={btnStyle} onClick={() => { setArchiveTarget({ bottleId: bottle.id, purchaseId: purchase?.id }); setArchiveReason("emptied"); setArchiveComment(""); }}>Archive</button>
+                      ) : (
+                        <button style={btnStyle} onClick={() => setRestoreTarget({ bottleId: bottle.id })}>Wardrobe</button>
+                      )}
                       <button style={dangerBtnStyle} onClick={() => setRemoveTarget({ bottleId: bottle.id, purchaseId: purchase?.id })}>Remove</button>
                     </div>
                   </div>
@@ -775,60 +867,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           </div>
         </div>
 
-        <div style={sectionStyle}>
-          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>Attributes</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
-            <div><span style={labelStyle}>Occasion</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{OCCASION_OPTIONS.map((opt) => <button key={opt} onClick={() => toggleOccasion(opt)} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.occasionTags.includes(opt) ? V.accent : V.inputBg, color: item.occasionTags.includes(opt) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{opt}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.occasionTags.length ? item.occasionTags.map((o) => <span key={o} style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: "#d97706", fontSize: 12, fontWeight: 700 }}>{o}</span>) : <span style={valueStyle}>—</span>}</div>}</div>
-            <div><span style={labelStyle}>Similar / clone</span>{isEdit ? <input style={inputStyle} value={item.cloneSimilar} onChange={(e) => update({ cloneSimilar: e.target.value })} placeholder="Manual entry only" /> : <div style={valueStyle}>{item.cloneSimilar || "—"}</div>}</div>
-            <div><span style={labelStyle}>Wishlist priority</span>{item.status === "wishlist" ? (isEdit ? <select style={inputStyle} value={item.purchasePriority || "Medium"} onChange={(e) => update({ purchasePriority: e.target.value })}><option>Low</option><option>Medium</option><option>High</option><option>Must buy</option></select> : <div style={valueStyle}>{item.purchasePriority || "Medium"}</div>) : <div style={valueStyle}>—</div>}</div>
-          </div>
-        </div>
-
-        <div style={sectionStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 16, fontWeight: 800 }}>Note tags</div>
-            <button style={btnStyle} onClick={() => setNoteManager(true)}>Manage</button>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {globalNotes.map((n) => {
-              const on = item.notesTags.includes(n);
-              return (
-                <button key={n} onClick={() => update({ notesTags: on ? item.notesTags.filter((x) => x !== n) : [...item.notesTags, n] })} style={{ padding: "6px 10px", borderRadius: 999, border: "none", cursor: "pointer", background: on ? V.accent : V.inputBg, color: on ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>
-                  {n}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={sectionStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 16, fontWeight: 800 }}>Weather</div>
-            <button style={btnStyle} onClick={() => setWeatherManager(true)}>Manage</button>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.weatherTags.length ? item.weatherTags.map((w) => <span key={w} style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: "#d97706", fontSize: 12, fontWeight: 700 }}>{w}</span>) : <span style={valueStyle}>—</span>}</div>
-        </div>
-
-        <div style={sectionStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 800 }}>Wear log</div>
-              <div style={{ fontSize: 12, color: V.muted }}>Your actual usage history. Far more useful than pretending memory is enough.</div>
-            </div>
-            <button style={primaryBtnStyle} onClick={() => setShowWearModal(true)}>+ Log a wear</button>
-          </div>
-          <div style={{ display: "grid", gap: 10 }}>
-            {wearLogs.slice(0, 8).map((w) => (
-              <div key={w.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, background: V.inputBg }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{w.wornOn}</div>
-                  <div style={{ fontSize: 12, color: V.muted }}>{w.sprays} sprays · {w.weatherTag || "—"} · {w.performance || "—"}</div>
-                </div>
-                <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{w.occasion || "No occasion"}{w.compliment ? " · Compliment" : ""}</div>
-              </div>
-            ))}
-            {!wearLogs.length && <div style={{ fontSize: 13, color: V.muted }}>No wear logs yet.</div>}
-          </div>
         </div>
       </div>
 
@@ -873,10 +911,9 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
               </div>
             ) : (
               <div>
-                <span style={labelStyle}>Search or direct image URL</span>
-                <input style={inputStyle} value={photoInput} onChange={(e) => setPhotoInput(e.target.value)} placeholder="https://…" />
+                <span style={labelStyle}>Direct image URL</span>
+                <input style={inputStyle} value={photoInput} onChange={(e) => { const v = e.target.value; setPhotoInput(v); setPhotoPreviewUrl(isProbablyImageUrl(v) ? v : ""); }} placeholder="Direct image URL" />
                 <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                  <button style={btnStyle} onClick={() => window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(`${item.brand} ${item.model} perfume`)}`, "_blank")}>Search</button>
                   <button style={btnStyle} onClick={() => { if (isProbablyImageUrl(photoInput.trim())) { setPhotoPreviewUrl(photoInput.trim()); } else { setPhotoPreviewUrl(""); showToast("Paste a direct image URL to preview it"); } }}>Preview</button>
                 </div>
                 {photoPreviewUrl && <div style={{ marginTop: 12 }}><img src={photoPreviewUrl} alt="Preview" style={{ width: "100%", maxHeight: 280, objectFit: "contain", borderRadius: 12, border: `1px solid ${V.border}`, background: V.inputBg }} /></div>}
@@ -941,7 +978,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, padding: 20, width: "min(520px,100%)" }}>
             <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>Archive bottle</div>
             <div style={{ display: "grid", gap: 12 }}>
-              <label><span style={labelStyle}>Reason</span><select style={inputStyle} value={archiveReason} onChange={(e) => setArchiveReason(e.target.value as ArchiveReason)}><option>Sold</option><option>Emptied</option><option>Gifted</option></select></label>
+              <label><span style={labelStyle}>Reason</span><select style={inputStyle} value={archiveReason} onChange={(e) => setArchiveReason(e.target.value as ArchiveReason)}><option value="sold">Sold</option><option value="emptied">Emptied</option><option value="gifted">Gifted</option></select></label>
               <label><span style={labelStyle}>Comment</span><textarea style={{ ...inputStyle, minHeight: 90, resize: "vertical" as const }} value={archiveComment} onChange={(e) => setArchiveComment(e.target.value)} placeholder="Optional comment" /></label>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}><button style={btnStyle} onClick={() => setArchiveTarget(null)}>Cancel</button><button style={primaryBtnStyle} onClick={confirmArchiveBottle}>Save</button></div>
@@ -959,11 +996,21 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         </div>
       )}
 
+      {restoreTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 110, display: "grid", placeItems: "center", padding: 16 }}>
+          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, padding: 20, width: "min(460px,100%)" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>Move bottle to wardrobe?</div>
+            <div style={{ fontSize: 13, color: V.muted, marginBottom: 14 }}>This will restore the bottle to wardrobe and clear its archive metadata.</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}><button style={btnStyle} onClick={() => setRestoreTarget(null)}>Cancel</button><button style={primaryBtnStyle} onClick={restoreBottleToWardrobe}>Confirm</button></div>
+          </div>
+        </div>
+      )}
+
       {brandView && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 120, display: "grid", placeItems: "center", padding: 16 }} onClick={() => setBrandView(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,100%)", background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}><div><div style={{ fontSize: 20, fontWeight: 800 }}>{item.brand}</div><div style={{ fontSize: 12, color: V.muted }}>Brand page with your lineup and priorities.</div></div><button style={btnStyle} onClick={() => setBrandView(false)}>Close</button></div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>{sameBrandItems.map((s) => <button key={s.id} onClick={() => router.push(`/dashboard/perfumes/${s.id}`)} style={{ textAlign: "left", border: `1px solid ${V.border}`, background: V.inputBg, borderRadius: 12, padding: 12, cursor: "pointer" }}><div style={{ fontSize: 14, fontWeight: 800 }}>{s.model}</div><div style={{ fontSize: 12, color: V.muted }}>{s.status} · {s.purchasePriority || "Medium"}</div></button>)}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>{sameBrandItems.map((s) => <button key={s.id} onClick={() => router.push(`/dashboard/perfumes/${s.id}`)} style={{ textAlign: "left", border: `1px solid ${V.border}`, background: V.inputBg, borderRadius: 12, padding: 12, cursor: "pointer" }}><div style={{ fontSize: 14, fontWeight: 800 }}>{s.model}</div><div style={{ fontSize: 12, color: V.muted }}>{s.status}{s.status === "wishlist" ? ` · ${s.purchasePriority || "Medium"}` : ""}</div></button>)}</div>
           </div>
         </div>
       )}
