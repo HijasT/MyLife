@@ -213,7 +213,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [editingBottleId, setEditingBottleId] = useState<string | null>(null);
   const [bottleDrafts, setBottleDrafts] = useState<Record<string, BottleDraft>>({});
   const [archiveTarget, setArchiveTarget] = useState<{ bottleId: string; purchaseId?: string } | null>(null);
-  const [archiveReason, setArchiveReason] = useState<ArchiveReason>("Emptied");
+  const [archiveReason, setArchiveReason] = useState<ArchiveReason>("emptied");
   const [archiveComment, setArchiveComment] = useState("");
   const [removeTarget, setRemoveTarget] = useState<{ bottleId: string; purchaseId?: string } | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<{ bottleId: string } | null>(null);
