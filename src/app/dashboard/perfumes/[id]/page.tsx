@@ -26,7 +26,6 @@ type Purchase = {
   ml: number;
   price: number;
   shopName: string;
-  shopLink?: string;
 };
 
 type WearLog = {
@@ -67,7 +66,7 @@ type BottleDraft = {
   shopCombined: string;
 };
 
-const OCCASION_OPTIONS = ["Casual", "Formal", "Party", "Date", "Travel"] as const;
+const OCCASION_OPTIONS = ["Casual", "Formal", "Party", "Date", "Travel", "Gym"] as const;
 const LONGEVITY_OPTIONS = ["Poor", "Weak", "Average", "Good", "Excellent"] as const;
 const PROJECTION_OPTIONS = ["Soft", "Moderate", "Strong", "Loud"] as const;
 const PERFORMANCE_OPTIONS = ["Poor", "Okay", "Good", "Excellent"] as const;
@@ -91,24 +90,8 @@ function normalizeName(v: string) {
   return v.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function joinShop(shopName?: string, shopLink?: string) {
-  const name = (shopName || "").trim();
-  const link = (shopLink || "").trim();
-  if (name && link) return `${name} | ${link}`;
-  return name || link || "";
-}
-
-function parseShopCombined(v: string) {
-  const raw = v.trim();
-  if (!raw) return { shopName: "Unknown", shopLink: null as string | null };
-  const parts = raw.split("|").map((x) => x.trim()).filter(Boolean);
-  if (parts.length >= 2) return { shopName: parts[0], shopLink: parts.slice(1).join(" | ") || null };
-  if (/^https?:\/\//i.test(raw)) return { shopName: "Unknown", shopLink: raw };
-  return { shopName: raw, shopLink: null as string | null };
-}
-
-function isProbablyImageUrl(v: string) {
-  return /^https?:\/\//i.test(v) && /(\.png|\.jpg|\.jpeg|\.webp|\.avif|\.gif)(\?.*)?$/i.test(v);
+function joinShop(shopName?: string) {
+  return (shopName || "").trim();
 }
 
 function useDarkMode() {
@@ -198,14 +181,8 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [wearLogs, setWearLogs] = useState<WearLog[]>([]);
   const [globalNotes, setGlobalNotes] = useState<string[]>([]);
-  const [noteInput, setNoteInput] = useState("");
   const [isEdit, setIsEdit] = useState(false);
-  const [noteManager, setNoteManager] = useState(false);
-  const [weatherManager, setWeatherManager] = useState(false);
   const [toast, setToast] = useState("");
-  const [photoMode, setPhotoMode] = useState<"url" | "upload">("url");
-  const [photoInput, setPhotoInput] = useState("");
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
   const [showPhoto, setShowPhoto] = useState(false);
   const [showAddBottle, setShowAddBottle] = useState(false);
   const [showWearModal, setShowWearModal] = useState(false);
@@ -265,7 +242,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
             ml: p.ml ?? 0,
             price: p.price ?? 0,
             shopName: p.shop_name ?? "Unknown",
-            shopLink: p.shop_link ?? undefined,
           })),
         );
       }
@@ -336,7 +312,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     if (partial.ml !== undefined) db.ml = partial.ml;
     if (partial.price !== undefined) db.price = partial.price;
     if (partial.shopName !== undefined) db.shop_name = partial.shopName;
-    if (partial.shopLink !== undefined) db.shop_link = partial.shopLink || null;
     const { error } = await supabase.from("perfume_purchases").update(db).eq("id", purchaseId);
     if (error) showToast(error.message);
   }
@@ -441,7 +416,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
       return;
     }
     const size = parseFloat(newBottle.sizeMl) || 100;
-    const parsedShop = parseShopCombined(newBottle.shopCombined);
+    const shopName = newBottle.shopCombined.trim() || "Unknown";
     const { data: bd, error: bottleErr } = await supabase
       .from("perfume_bottles")
       .insert({
@@ -467,8 +442,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         ml: size,
         price,
         currency: "AED",
-        shop_name: parsedShop.shopName,
-        shop_link: parsedShop.shopLink,
+        shop_name: shopName,
       })
       .select("*")
       .single();
@@ -636,7 +610,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         sizeMl: String(bottle.bottleSizeMl ?? 0),
         price: String(purchase?.price ?? ""),
         date: purchase?.date ?? nowDubai().slice(0, 10),
-        shopCombined: joinShop(purchase?.shopName, purchase?.shopLink),
+        shopCombined: joinShop(purchase?.shopName),
       },
     }));
     setEditingBottleId(bottle.id);
@@ -648,15 +622,14 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     const purchase = bottlePurchaseFor(bottle.id);
     const size = safeNum(draft.sizeMl, bottle.bottleSizeMl);
     const price = safeNum(draft.price, purchase?.price ?? 0);
-    const parsedShop = parseShopCombined(draft.shopCombined);
+    const shopName = draft.shopCombined.trim() || "Unknown";
     await updateBottle(bottle.id, { bottleType: draft.bottleType, bottleSizeMl: size });
     if (purchase) {
       await updatePurchase(purchase.id, {
         ml: size,
         price,
         date: draft.date,
-        shopName: parsedShop.shopName,
-        shopLink: parsedShop.shopLink ?? undefined,
+        shopName: shopName,
       });
     }
     setEditingBottleId(null);
@@ -710,9 +683,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
             <button
               style={{ ...btnStyle, width: "100%", marginTop: 10 }}
               onClick={() => {
-                setPhotoInput(item.imageUrl || "");
-                setPhotoPreviewUrl(isProbablyImageUrl(item.imageUrl || "") ? item.imageUrl : "");
-                setPhotoMode("url");
                 setShowPhoto(true);
               }}
             >
@@ -752,30 +722,11 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         <div style={sectionStyle}>
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>Attributes</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
-            <div><span style={labelStyle}>Occasion</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{OCCASION_OPTIONS.map((opt) => <button key={opt} onClick={() => toggleOccasion(opt)} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.occasionTags.includes(opt) ? V.accent : V.inputBg, color: item.occasionTags.includes(opt) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{opt}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.occasionTags.length ? item.occasionTags.map((o) => <span key={o} style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: "#d97706", fontSize: 12, fontWeight: 700 }}>{o}</span>) : <span style={valueStyle}>—</span>}</div>}</div>
+            <div><span style={labelStyle}>Occasion</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{Array.from(new Set([...OCCASION_OPTIONS, ...item.occasionTags])).map((opt) => <button key={opt} onClick={() => toggleOccasion(opt)} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.occasionTags.includes(opt) ? V.accent : V.inputBg, color: item.occasionTags.includes(opt) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{opt}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.occasionTags.length ? item.occasionTags.map((o) => <span key={o} style={{ padding: "4px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: "#d97706", fontSize: 12, fontWeight: 700 }}>{o}</span>) : <span style={valueStyle}>—</span>}</div>}</div>
             <div><span style={labelStyle}>Similar / clone</span>{isEdit ? <input style={inputStyle} value={item.cloneSimilar} onChange={(e) => update({ cloneSimilar: e.target.value })} placeholder="Manual entry only" /> : <div style={valueStyle}>{item.cloneSimilar || "—"}</div>}</div>
+            <div><span style={labelStyle}>Note tags</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{globalNotes.map((tag) => <button key={tag} onClick={() => update({ notesTags: item.notesTags.includes(tag) ? item.notesTags.filter((x) => x !== tag) : [...item.notesTags, tag] })} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.notesTags.includes(tag) ? V.accent : V.inputBg, color: item.notesTags.includes(tag) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{tag}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.notesTags.length ? item.notesTags.map((n) => <Tag key={n} label={n} />) : <span style={valueStyle}>—</span>}</div>}</div>
+            <div><span style={labelStyle}>Weather</span>{isEdit ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{(["Cold", "Neutral", "Hot"] as const).map((w) => <button key={w} onClick={() => update({ weatherTags: item.weatherTags.includes(w) ? item.weatherTags.filter((x) => x !== w) : [...item.weatherTags, w] as ("Cold"|"Neutral"|"Hot")[] })} style={{ padding: "8px 10px", borderRadius: 10, border: "none", cursor: "pointer", background: item.weatherTags.includes(w) ? V.accent : V.inputBg, color: item.weatherTags.includes(w) ? "#fff" : V.text, fontSize: 12, fontWeight: 700 }}>{w}</button>)}</div> : <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{item.weatherTags.length ? item.weatherTags.map((w) => <Tag key={w} label={w} />) : <span style={valueStyle}>—</span>}</div>}</div>
             {item.status === "wishlist" && <div><span style={labelStyle}>Wishlist priority</span>{isEdit ? <select style={inputStyle} value={item.purchasePriority || "Medium"} onChange={(e) => update({ purchasePriority: e.target.value })}><option>Low</option><option>Medium</option><option>High</option><option>Must buy</option></select> : <div style={valueStyle}>{item.purchasePriority || "Medium"}</div>}</div>}
-          </div>
-
-          <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>Note tags</div>
-                <button style={btnStyle} onClick={() => setNoteManager(true)}>Manage</button>
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {item.notesTags.length ? item.notesTags.map((n) => <Tag key={n} label={n} />) : <span style={valueStyle}>—</span>}
-              </div>
-            </div>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>Weather</div>
-                <button style={btnStyle} onClick={() => setWeatherManager(true)}>Manage</button>
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {item.weatherTags.length ? item.weatherTags.map((w) => <Tag key={w} label={w} />) : <span style={valueStyle}>—</span>}
-              </div>
-            </div>
           </div>
         </div>
 
@@ -783,8 +734,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 16, fontWeight: 800 }}>Wear log</div>
-              <div style={{ fontSize: 12, color: V.muted }}>Your actual usage history. Far more useful than pretending memory is enough.</div>
-            </div>
+              </div>
             <button style={primaryBtnStyle} onClick={() => setShowWearModal(true)}>+ Log a wear</button>
           </div>
           <div style={{ display: "grid", gap: 10 }}>
@@ -806,8 +756,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 16, fontWeight: 800 }}>Bottle & purchase</div>
-              <div style={{ fontSize: 12, color: V.muted }}>Read only by default. Edit a bottle only when you actually want to change something, because chaos is not a workflow.</div>
-            </div>
+              </div>
             <div style={{ display: "flex", gap: 8 }}>
               {editingBottleId && <button style={btnStyle} onClick={() => setEditingBottleId(null)}>Stop editing</button>}
               <button style={primaryBtnStyle} onClick={() => setShowAddBottle(true)}>+ Add bottle</button>
@@ -841,7 +790,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
                         <div><span style={labelStyle}>Price</span>{editing ? <input style={inputStyle} type="number" value={draft.price} onChange={(e) => setBottleDrafts((prev) => ({ ...prev, [bottle.id]: { ...prev[bottle.id], price: e.target.value } }))} /> : <div style={valueStyle}>{purchase ? fmtMoney(purchase.price) : "—"}</div>}</div>
                         <div><span style={labelStyle}>Purchase date</span>{editing ? <input style={inputStyle} type="date" value={draft.date} onChange={(e) => setBottleDrafts((prev) => ({ ...prev, [bottle.id]: { ...prev[bottle.id], date: e.target.value } }))} /> : <div style={valueStyle}>{purchase?.date || "—"}</div>}</div>
-                        <div style={{ gridColumn: "1/-1" }}><span style={labelStyle}>Shop / link</span>{editing ? <input style={inputStyle} value={draft.shopCombined} onChange={(e) => setBottleDrafts((prev) => ({ ...prev, [bottle.id]: { ...prev[bottle.id], shopCombined: e.target.value } }))} placeholder="Shop name | https://link" /> : <div style={valueStyle}>{purchase?.shopLink ? <a href={purchase.shopLink} target="_blank" rel="noreferrer" style={{ color: V.text }}>{joinShop(purchase.shopName, purchase.shopLink)}</a> : (purchase ? joinShop(purchase.shopName, purchase.shopLink) : "—")}</div>}</div>
+                        <div style={{ gridColumn: "1/-1" }}><span style={labelStyle}>Shop</span>{editing ? <input style={inputStyle} value={draft.shopCombined} onChange={(e) => setBottleDrafts((prev) => ({ ...prev, [bottle.id]: { ...prev[bottle.id], shopCombined: e.target.value } }))} placeholder="Shop name" /> : <div style={valueStyle}>{purchase ? joinShop(purchase.shopName) : "—"}</div>}</div>
                       </div>
                     </div>
                     <div style={{ display: "grid", gap: 8, minWidth: 128 }}>
@@ -870,59 +819,12 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         </div>
       </div>
 
-      {noteManager && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "grid", placeItems: "center", padding: 16 }}>
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 16, padding: 22, width: "min(500px,100%)" }}>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>Manage note tags</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input style={inputStyle} value={noteInput} onChange={(e) => setNoteInput(e.target.value)} placeholder="New tag…" />
-              <button style={primaryBtnStyle} onClick={() => { const v = noteInput.trim(); if (v && !globalNotes.includes(v)) { setGlobalNotes((p) => [...p, v].sort()); setNoteInput(""); showToast("Tag added"); } }}>Add</button>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}><button style={primaryBtnStyle} onClick={() => setNoteManager(false)}>Done</button></div>
-          </div>
-        </div>
-      )}
-
-      {weatherManager && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "grid", placeItems: "center", padding: 16 }}>
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 16, padding: 22, width: "min(400px,100%)" }}>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>Weather</div>
-            <div style={{ display: "flex", gap: 10 }}>{(["Cold", "Neutral", "Hot"] as const).map((w) => <button key={w} onClick={() => update({ weatherTags: item.weatherTags.includes(w) ? item.weatherTags.filter((x) => x !== w) : [...item.weatherTags, w] as ("Cold"|"Neutral"|"Hot")[] })} style={{ flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", border: "none", background: item.weatherTags.includes(w) ? V.accent : V.inputBg, color: item.weatherTags.includes(w) ? "#fff" : V.text }}>{w}</button>)}</div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}><button style={primaryBtnStyle} onClick={() => setWeatherManager(false)}>Done</button></div>
-          </div>
-        </div>
-      )}
-
       {showPhoto && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "grid", placeItems: "center", padding: 16 }}>
           <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 16, padding: 22, width: "min(520px,100%)" }}>
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>Change photo</div>
-            <div style={{ display: "flex", gap: 0, marginBottom: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${V.border}` }}>
-              {(["upload", "url"] as const).map((m) => (
-                <button key={m} onClick={() => setPhotoMode(m)} style={{ flex: 1, padding: "9px", fontSize: 13, fontWeight: 700, cursor: "pointer", border: "none", background: photoMode === m ? V.accent : V.inputBg, color: photoMode === m ? "#fff" : V.muted }}>
-                  {m === "upload" ? "📱 Upload" : "🔗 URL"}
-                </button>
-              ))}
-            </div>
-            {photoMode === "upload" ? (
-              <div>
-                <input type="file" accept="image/*" style={{ fontSize: 13, color: V.muted, width: "100%" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); }} />
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button style={btnStyle} onClick={() => setShowPhoto(false)}>Cancel</button></div>
-              </div>
-            ) : (
-              <div>
-                <span style={labelStyle}>Direct image URL</span>
-                <input style={inputStyle} value={photoInput} onChange={(e) => { const v = e.target.value; setPhotoInput(v); setPhotoPreviewUrl(isProbablyImageUrl(v) ? v : ""); }} placeholder="Direct image URL" />
-                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                  <button style={btnStyle} onClick={() => { if (isProbablyImageUrl(photoInput.trim())) { setPhotoPreviewUrl(photoInput.trim()); } else { setPhotoPreviewUrl(""); showToast("Paste a direct image URL to preview it"); } }}>Preview</button>
-                </div>
-                {photoPreviewUrl && <div style={{ marginTop: 12 }}><img src={photoPreviewUrl} alt="Preview" style={{ width: "100%", maxHeight: 280, objectFit: "contain", borderRadius: 12, border: `1px solid ${V.border}`, background: V.inputBg }} /></div>}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-                  <button style={btnStyle} onClick={() => { setPhotoPreviewUrl(""); setShowPhoto(false); }}>Cancel</button>
-                  <button style={primaryBtnStyle} disabled={!photoPreviewUrl} onClick={async () => { await update({ imageUrl: photoPreviewUrl.trim() }); setShowPhoto(false); setPhotoPreviewUrl(""); showToast("Photo updated"); }}>Save</button>
-                </div>
-              </div>
-            )}
+            <input type="file" accept="image/*" style={{ fontSize: 13, color: V.muted, width: "100%" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); }} />
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button style={btnStyle} onClick={() => setShowPhoto(false)}>Cancel</button></div>
           </div>
         </div>
       )}
@@ -939,7 +841,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
               <label><span style={labelStyle}>Size (ml)</span><input style={inputStyle} value={newBottle.sizeMl} onChange={(e) => setNewBottle((p) => ({ ...p, sizeMl: e.target.value }))} /></label>
               <label><span style={labelStyle}>Bottle price (AED)</span><input style={inputStyle} type="number" value={newBottle.price} onChange={(e) => setNewBottle((p) => ({ ...p, price: e.target.value }))} placeholder="0" /></label>
               <label><span style={labelStyle}>Purchase date</span><input style={inputStyle} type="date" value={newBottle.date} onChange={(e) => setNewBottle((p) => ({ ...p, date: e.target.value }))} /></label>
-              <label style={{ gridColumn: "1/-1" }}><span style={labelStyle}>Shop / link</span><input style={inputStyle} value={newBottle.shopCombined} onChange={(e) => setNewBottle((p) => ({ ...p, shopCombined: e.target.value }))} placeholder="Shop name | https://link" /></label>
+              <label style={{ gridColumn: "1/-1" }}><span style={labelStyle}>Shop</span><input style={inputStyle} value={newBottle.shopCombined} onChange={(e) => setNewBottle((p) => ({ ...p, shopCombined: e.target.value }))} placeholder="Shop name" /></label>
             </div>
             <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "flex-end", gap: 8 }}><button style={btnStyle} onClick={() => setShowAddBottle(false)}>Cancel</button><button style={primaryBtnStyle} onClick={addBottle}>Add</button></div>
           </div>
