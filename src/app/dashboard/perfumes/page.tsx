@@ -12,26 +12,43 @@ type GenderScale = 0 | 1 | 2 | 3 | 4;
 type ToastKind = "success" | "error" | "info";
 
 type Bottle = { id: string; bottleSizeMl: number; bottleType: BottleType; status: string; usage: string };
-type Purchase = { id: string; perfumeId: string; bottleId: string; date: string; ml: number; price: number; currency: string; shopName: string; shopLink?: string };
+type Purchase = { id: string; perfumeId: string; bottleId: string; date: string; ml: number; price: number; shopName: string; shopLink?: string };
+type WearLog = { id: string; perfumeId: string; wornOn: string; compliment: boolean; sprays: number; weatherTag: string; occasion: string; performance: string };
 type Perfume = {
   id: string; status: PerfumeStatus; brand: string; model: string; imageUrl: string;
   ratingStars: number | null; notesTags: string[]; weatherTags: string[];
   genderScale: GenderScale; longevity: string; sillage: string;
   value: string; cloneSimilar: string; notesText: string;
+  purchasePriority?: string; targetPriceAed?: number | null; preferredShop?: string;
+  archivedAt?: string | null; resalePriceAed?: number | null; archiveNotes?: string;
   bottles: Bottle[]; archiveReason?: string;
 };
 type Toast = { id: string; kind: ToastKind; message: string };
 type AddForm = {
   status: PerfumeStatus; brand: string; model: string; imageDataUrl: string;
-  rating: number; bottleType: BottleType; sizeMl: string; usage: string;
-  price: string; currency: string; shop: string; shopLink: string; date: string;
+  rating: number; bottleType: BottleType; sizeMl: string;
+  price: string; shop: string; shopLink: string; date: string;
+  priority: string; targetPriceAed: string; preferredShop: string;
 };
 
 function uid() { return `id-${Math.random().toString(16).slice(2)}-${Date.now()}`; }
 function safeNum(x: unknown, fb = 0) { const n = typeof x === "number" ? x : Number(x); return Number.isFinite(n) ? n : fb; }
 function nowIso() { return new Date().toISOString().slice(0, 10); }
 function monthKey(d: string) { return d.slice(0, 7); }
-function fmtMoney(c: string, a: number) { return `${c} ${a.toFixed(2)}`; }
+function fmtMoney(a: number) { return `AED ${a.toFixed(2)}`; }
+function normalizeName(v: string) { return v.trim().toLowerCase().replace(/\s+/g, " "); }
+function monthShort(iso: string) { const [y,m] = iso.split("-"); return new Date(Number(y), Number(m)-1, 1).toLocaleString("en", { month:"short" }); }
+function useDarkMode() {
+  const get = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const [isDark, setIsDark] = useState(get);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const obs = new MutationObserver(() => setIsDark(get()));
+    obs.observe(document.documentElement, { attributes:true, attributeFilter:["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return isDark;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(row: any): Perfume {
@@ -43,6 +60,8 @@ function dbToItem(row: any): Perfume {
     longevity: row.longevity ?? "", sillage: row.sillage ?? "",
     value: row.value_rating ?? "Neutral", cloneSimilar: row.clone_similar ?? "",
     notesText: row.notes_text ?? "",
+    purchasePriority: row.purchase_priority ?? "Medium", targetPriceAed: row.target_price_aed ?? null, preferredShop: row.preferred_shop ?? "",
+    archivedAt: row.archived_at ?? null, resalePriceAed: row.resale_price_aed ?? null, archiveNotes: row.archive_notes ?? "",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bottles: (row.perfume_bottles ?? []).map((b: any): Bottle => ({
       id: b.id, bottleSizeMl: b.bottle_size_ml ?? 100, bottleType: b.bottle_type ?? "Full bottle",
@@ -53,7 +72,10 @@ function dbToItem(row: any): Perfume {
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToPurchase(p: any): Purchase {
-  return { id: p.id, perfumeId: p.perfume_id, bottleId: p.bottle_id ?? "none", date: p.date, ml: p.ml ?? 0, price: p.price ?? 0, currency: p.currency ?? "AED", shopName: p.shop_name ?? "Unknown", shopLink: p.shop_link ?? undefined };
+  return { id: p.id, perfumeId: p.perfume_id, bottleId: p.bottle_id ?? "none", date: p.date, ml: p.ml ?? 0, price: p.price ?? 0, shopName: p.shop_name ?? "Unknown", shopLink: p.shop_link ?? undefined };
+}
+function dbToWear(p: any): WearLog {
+  return { id: p.id, perfumeId: p.perfume_id, wornOn: p.worn_on, compliment: !!p.compliment, sprays: p.sprays ?? 0, weatherTag: p.weather_tag ?? "", occasion: p.occasion ?? "", performance: p.performance ?? "" };
 }
 
 function Stars({ value, size = 14 }: { value: number | null; size?: number }) {
@@ -80,14 +102,17 @@ export default function PerfumesPage() {
   const [sortBy, setSortBy] = useState("brand_asc");
   const [showAdd, setShowAdd] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [dubaiTemp, setDubaiTemp] = useState<number|null>(null);
+  const [wearLogs, setWearLogs] = useState<WearLog[]>([]);
+  const [dubaiWeather, setDubaiWeather] = useState<{ temp:number|null; humidity:number|null; tag:string } | null>(null);
+  const [brandFocus, setBrandFocus] = useState<string | null>(null);
   const [af, setAf] = useState<AddForm>({
     status: "wardrobe", brand: "", model: "", imageDataUrl: "", rating: 4,
-    bottleType: "Full bottle", sizeMl: "100", usage: "Casual",
-    price: "0", currency: "AED", shop: "Unknown", shopLink: "", date: nowIso(),
+    bottleType: "Full bottle", sizeMl: "100",
+    price: "", shop: "Unknown", shopLink: "", date: nowIso(),
+    priority: "Medium", targetPriceAed: "", preferredShop: "",
   });
 
-  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const isDark = useDarkMode();
 
   useEffect(() => {
     async function load() {
@@ -100,25 +125,39 @@ export default function PerfumesPage() {
       if (!user) { setLoading(false); return; }
       setUserId(user.id);
 
-      const [pr, pur] = await Promise.all([
+      const [pr, pur, wear] = await Promise.all([
         supabase.from("perfumes").select("*, perfume_bottles(*)").eq("user_id", user.id).order("brand"),
         supabase.from("perfume_purchases").select("*").eq("user_id", user.id).order("date", { ascending: false }),
+        supabase.from("perfume_wear_logs").select("*").eq("user_id", user.id).order("worn_on", { ascending: false }),
       ]);
+      if (pr.error) toast(pr.error.message, "error");
+      if (pur.error) toast(pur.error.message, "error");
+      if (wear.error) toast(wear.error.message, "error");
       const loaded = (pr.data ?? []).map(dbToItem);
       const loadedPur = (pur.data ?? []).map(dbToPurchase);
+      const loadedWear = (wear.data ?? []).map(dbToWear);
       setItems(loaded);
       setPurchases(loadedPur);
+      setWearLogs(loadedWear);
       saveToCache("perfumes", loaded);
       saveToCache("purchases", loadedPur);
       markSynced();
       setLoading(false);
-      // Fetch Dubai weather for season suggestions (free, no key needed)
       try {
-        const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m&timezone=Asia%2FDubai");
+        const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,relative_humidity_2m,apparent_temperature&timezone=Asia%2FDubai");
         const data = await r.json();
         const temp = data?.current?.temperature_2m ?? null;
-        if (temp !== null) setDubaiTemp(temp);
-      } catch { /* skip */ }
+        const humidity = data?.current?.relative_humidity_2m ?? null;
+        let tag = "Neutral";
+        if (temp !== null) {
+          if (temp < 22) tag = "Cold";
+          else if (temp > 34 || (temp > 31 && (humidity ?? 0) > 65)) tag = "Hot";
+        }
+        setDubaiWeather({ temp, humidity, tag });
+      } catch {
+        const m = new Date().getMonth() + 1;
+        setDubaiWeather({ temp:null, humidity:null, tag: m >= 5 && m <= 10 ? "Hot" : "Neutral" });
+      }
     }
     load();
   }, []);
@@ -129,17 +168,33 @@ export default function PerfumesPage() {
     archive: items.filter(x => x.status === "archive").length,
   }), [items]);
 
-  // Stats per tab: total items + total cost
-  // Weather-based suggestions using open-meteo temp
+  const wearByPerfume = useMemo(() => {
+    const map = new Map<string, WearLog[]>();
+    for (const w of wearLogs) {
+      if (!map.has(w.perfumeId)) map.set(w.perfumeId, []);
+      map.get(w.perfumeId)!.push(w);
+    }
+    return map;
+  }, [wearLogs]);
+
   const weatherSuggestedItems = useMemo(() => {
-    if (dubaiTemp === null) return [];
-    // Dubai weather mapping: Cold < 22°C, Moderate 22-32°C, Hot > 32°C
-    let tag = "Moderate";
-    if (dubaiTemp < 22) tag = "Cold";
-    else if (dubaiTemp > 32) tag = "Hot";
-    const wardrobe = items.filter(p => p.status === "wardrobe");
-    return wardrobe.filter(p => p.weatherTags.includes(tag) || p.weatherTags.includes("All Season")).slice(0, 4);
-  }, [items, dubaiTemp]);
+    const tag = dubaiWeather?.tag ?? "Neutral";
+    const today = nowIso();
+    return items.filter(p => p.status === "wardrobe").map(p => {
+      const logs = wearByPerfume.get(p.id) ?? [];
+      const lastWorn = logs[0]?.wornOn ?? "";
+      let score = 0;
+      if (p.weatherTags.includes(tag)) score += 4;
+      score += (p.ratingStars ?? 0) * 0.7;
+      if (logs[0]?.compliment) score += 1.5;
+      if (!lastWorn) score += 2;
+      else {
+        const gap = Math.floor((new Date(today).getTime() - new Date(lastWorn).getTime()) / 86400000);
+        score += Math.min(4, Math.max(0, gap / 7));
+      }
+      return { perfume: p, score, reason: p.weatherTags.includes(tag) ? `${tag} match` : "rotation pick" };
+    }).sort((a,b) => b.score - a.score).slice(0,4);
+  }, [items, wearByPerfume, dubaiWeather]);
 
   const tabStats = useMemo(() => {
     const thirtyDaysAgo = new Date();
@@ -151,14 +206,15 @@ export default function PerfumesPage() {
       const ids = new Set(list.map(x => x.id));
       const paid = purchases.filter(p => ids.has(p.perfumeId) && p.price > 0);
       const total = paid.reduce((s, p) => s + safeNum(p.price), 0);
-      const currency = paid[0]?.currency ?? "AED";
-      return { count: list.length, total, currency };
+      const avg = paid.length ? total / paid.length : 0;
+      return { count: list.length, total, avg };
     };
 
     // "New" perfume ids — purchased within last 30 days
     const newIds = new Set(purchases.filter(p => p.date >= cutoff && p.price > 0).map(p => p.perfumeId));
 
-    return { wardrobe: calc("wardrobe"), wishlist: calc("wishlist"), archive: calc("archive"), newIds };
+    const wardrobeValue = purchases.filter(p => items.find(x => x.id === p.perfumeId)?.status === "wardrobe").reduce((s,p) => s + safeNum(p.price), 0);
+    return { wardrobe: calc("wardrobe"), wishlist: calc("wishlist"), archive: calc("archive"), newIds, wardrobeValue };
   }, [items, purchases]);
 
   const tabItems = useMemo(() => {
@@ -185,7 +241,7 @@ export default function PerfumesPage() {
     return Array.from({ length: 12 }).map((_, i) => {
       const dt = new Date(today.getFullYear(), today.getMonth() - 11 + i, 1);
       const mk = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-      return { month: mk.slice(5), count: map.get(mk) ?? 0 };
+      return { month: monthShort(mk), count: map.get(mk) ?? 0 };
     });
   }, [purchases]);
 
@@ -197,30 +253,34 @@ export default function PerfumesPage() {
 
   async function doAdd() {
     if (!userId) return;
-    if (!af.brand.trim() || !af.model.trim()) { toast("Brand and model required", "error"); return; }
+    const brand = af.brand.trim();
+    const model = af.model.trim();
+    if (!brand || !model) { toast("Brand and model required", "error"); return; }
+    const dupe = items.find(x => normalizeName(x.brand) === normalizeName(brand) && normalizeName(x.model) === normalizeName(model));
+    if (dupe) { toast("This perfume already exists in Aromatica", "error"); router.push(`/dashboard/perfumes/${dupe.id}`); return; }
+    const size = safeNum(af.sizeMl, 100);
+    const price = safeNum(af.price, 0);
+    if (af.status === "wardrobe" && price <= 0) { toast("Enter bottle price in AED", "error"); return; }
     const { data: pd, error } = await supabase.from("perfumes").insert({
-      user_id: userId, brand: af.brand.trim(), model: af.model.trim(), status: af.status,
+      user_id: userId, brand, model, status: af.status,
       image_url: af.imageDataUrl || "", rating_stars: af.rating,
       notes_tags: [], weather_tags: [], gender_scale: 2,
       longevity: "Unknown", sillage: "Unknown", value_rating: "Neutral",
+      purchase_priority: af.priority, target_price_aed: safeNum(af.targetPriceAed, 0) || null, preferred_shop: af.preferredShop || null,
     }).select("*").single();
-    if (error || !pd) { toast("Failed to save", "error"); return; }
+    if (error || !pd) { toast(error?.message || "Failed to save", "error"); return; }
     if (af.status === "wardrobe") {
-      const size = safeNum(af.sizeMl, 100);
-      const { data: bd } = await supabase.from("perfume_bottles").insert({
+      const { data: bd, error: bErr } = await supabase.from("perfume_bottles").insert({
         perfume_id: pd.id, user_id: userId, bottle_size_ml: size,
-        bottle_type: af.bottleType, status: "In collection", usage: af.usage,
+        bottle_type: af.bottleType, status: "In collection", usage: "Casual",
       }).select("*").single();
-      if (bd) {
-        const price = safeNum(af.price, 0);
-        if (price > 0 || af.shop.trim()) {
-          await supabase.from("perfume_purchases").insert({
-            perfume_id: pd.id, bottle_id: bd.id, user_id: userId,
-            date: af.date || nowIso(), ml: size, price, currency: af.currency,
-            shop_name: af.shop, shop_link: af.shopLink || null,
-          });
-        }
-      }
+      if (bErr || !bd) { toast(bErr?.message || "Bottle save failed", "error"); return; }
+      const { error: pErr } = await supabase.from("perfume_purchases").insert({
+        perfume_id: pd.id, bottle_id: bd.id, user_id: userId,
+        date: af.date || nowIso(), ml: size, price, currency: "AED",
+        shop_name: af.shop || "Unknown", shop_link: af.shopLink || null,
+      });
+      if (pErr) { toast(pErr.message, "error"); return; }
     }
     setShowAdd(false);
     router.push(`/dashboard/perfumes/${pd.id}`);
@@ -259,7 +319,7 @@ export default function PerfumesPage() {
       <div style={{ padding:"22px 24px 0", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
         <div style={{ fontSize:22, fontWeight:800 }}>Aroma<span style={{ color:V.accent, fontStyle:"italic" }}>tica</span> <span style={{ fontSize:13, fontWeight:500, color:V.faint, fontStyle:"normal" }}>— Fragrance Collection</span></div>
         <div style={{ display:"flex", gap:8 }}>
-          <button style={btnPrimary} onClick={() => { setAf({ status:"wardrobe", brand:"", model:"", imageDataUrl:"", rating:4, bottleType:"Full bottle", sizeMl:"100", usage:"Casual", price:"0", currency:"AED", shop:"Unknown", shopLink:"", date:nowIso() }); setShowAdd(true); }}>+ Add</button>
+          <button style={btnPrimary} onClick={() => { setAf({ status:"wardrobe", brand:"", model:"", imageDataUrl:"", rating:4, bottleType:"Full bottle", sizeMl:"100", price:"", shop:"Unknown", shopLink:"", date:nowIso(), priority:"Medium", targetPriceAed:"", preferredShop:"" }); setShowAdd(true); }}>+ Add</button>
         </div>
       </div>
 
@@ -279,12 +339,62 @@ export default function PerfumesPage() {
         return s && s.count > 0 ? (
           <div style={{ margin:"10px 24px 0", padding:"10px 16px", background:V.card, border:`1px solid ${V.border}`, borderRadius:12, display:"flex", gap:20, flexWrap:"wrap", fontSize:13 }}>
             <span style={{ color:V.muted }}><strong style={{ color:V.text, fontWeight:700 }}>{s.count}</strong> perfumes</span>
-            {s.total > 0 && <span style={{ color:V.muted }}>Total spent: <strong style={{ color:V.accent, fontWeight:700 }}>{s.currency} {s.total.toFixed(2)}</strong></span>}
+            {s.total > 0 && <span style={{ color:V.muted }}>Total spent: <strong style={{ color:V.accent, fontWeight:700 }}>{fmtMoney(s.total)}</strong></span>}
+            {s.avg > 0 && <span style={{ color:V.muted }}>Avg bottle: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(s.avg)}</strong></span>}
+            {activeTab === "wardrobe" && tabStats.wardrobeValue > 0 && <span style={{ color:V.muted }}>Wardrobe value: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(tabStats.wardrobeValue)}</strong></span>}
             {tabStats.newIds.size > 0 && activeTab === "wardrobe" && <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter(id => items.find(x=>x.id===id&&x.status==="wardrobe")).length} added this month</span>}
           </div>
         ) : null;
       })()}
 
+
+      {activeTab === "wardrobe" && weatherSuggestedItems.length > 0 && (
+        <div style={{ margin:"12px 24px 0", padding:"14px 16px", background:V.card, border:`1px solid ${V.border}`, borderRadius:14 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", gap:12, flexWrap:"wrap", marginBottom:10 }}>
+            <div>
+              <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint }}>Today in Dubai</div>
+              <div style={{ fontSize:14, fontWeight:700 }}>{dubaiWeather?.temp !== null && dubaiWeather?.temp !== undefined ? `${dubaiWeather.temp}°C` : "Season fallback"} · Best tag: {dubaiWeather?.tag ?? "Neutral"}</div>
+            </div>
+            <div style={{ fontSize:12, color:V.muted }}>Suggestions favor weather match, rating, compliments, and rotation.</div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
+            {weatherSuggestedItems.map(({ perfume, reason }) => (
+              <button key={perfume.id} onClick={() => router.push(`/dashboard/perfumes/${perfume.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
+                <div style={{ fontSize:11, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>{perfume.brand}</div>
+                <div style={{ fontSize:14, fontWeight:800, margin:"2px 0 6px" }}>{perfume.model}</div>
+                <div style={{ fontSize:12, color:V.muted }}>{reason}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {brandFocus && (() => {
+        const brandItems = items.filter(x => x.brand === brandFocus);
+        const brandIds = new Set(brandItems.map(x => x.id));
+        const spend = purchases.filter(p => brandIds.has(p.perfumeId)).reduce((s,p) => s + p.price, 0);
+        const rated = brandItems.filter(p => p.ratingStars);
+        const avgRating = rated.length ? rated.reduce((s,p) => s + (p.ratingStars ?? 0), 0) / rated.length : 0;
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:70, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={() => setBrandFocus(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ width:"min(700px,100%)", background:V.card, border:`1px solid ${V.border}`, borderRadius:18, padding:20 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                <div><div style={{ fontSize:20, fontWeight:800 }}>{brandFocus}</div><div style={{ fontSize:12, color:V.muted }}>Brand page with spend, rating, and lineup.</div></div>
+                <button style={btn} onClick={() => setBrandFocus(null)}>Close</button>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,minmax(0,1fr))", gap:10, marginBottom:14 }}>
+                <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Perfumes</div><div style={{ fontSize:16, fontWeight:800 }}>{brandItems.length}</div></div>
+                <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Wardrobe</div><div style={{ fontSize:16, fontWeight:800 }}>{brandItems.filter(x => x.status === "wardrobe").length}</div></div>
+                <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Avg rating</div><div style={{ fontSize:16, fontWeight:800 }}>{avgRating ? avgRating.toFixed(1) : "—"}</div></div>
+                <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Spent</div><div style={{ fontSize:16, fontWeight:800 }}>{fmtMoney(spend)}</div></div>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
+                {brandItems.map(x => <button key={x.id} onClick={() => router.push(`/dashboard/perfumes/${x.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}><div style={{ fontSize:14, fontWeight:800 }}>{x.model}</div><div style={{ fontSize:12, color:V.muted }}>{x.status} · {x.purchasePriority || "Medium"}</div></button>)}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {/* Search + sort */}
       {activeTab !== "purchases" && (
         <div style={{ padding:"14px 24px", display:"flex", gap:10, flexWrap:"wrap" }}>
@@ -319,7 +429,7 @@ export default function PerfumesPage() {
                       : <div style={{ width:"100%", height:160, borderRadius:"14px 14px 0 0", background:V.input, display:"flex", alignItems:"center", justifyContent:"center", fontSize:36 }}>🌸</div>
                     }
                     <div style={{ padding:"10px 12px 12px" }}>
-                      <div style={{ fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:V.faint, marginBottom:1 }}>{item.brand}</div>
+                      <button onClick={(e) => { e.stopPropagation(); setBrandFocus(item.brand); }} style={{ background:"none", border:"none", padding:0, fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:V.faint, marginBottom:1, cursor:"pointer" }}>{item.brand}</button>
                       <div style={{ fontSize:13, fontWeight:700, marginBottom:6, lineHeight:1.3 }}>{item.model}</div>
                       <div style={{ marginBottom:5 }}><Stars value={item.ratingStars} size={11} /></div>
                       <div style={{ display:"flex", gap:3, flexWrap:"wrap", alignItems:"center" }}>
@@ -362,7 +472,7 @@ export default function PerfumesPage() {
               return (
                 <div key={p.id} style={{ display:"grid", gridTemplateColumns:"1fr 0.6fr 0.8fr 1.2fr", gap:8, padding:"11px 16px", borderTop:`1px solid ${V.border}`, fontSize:13, alignItems:"center" }}>
                   <button onClick={() => perf && router.push(`/dashboard/perfumes/${perf.id}`)} style={{ background:"none", border:"none", textAlign:"left", cursor:"pointer", padding:0, fontWeight:700, color:V.text, fontSize:13 }}>{perf ? `${perf.brand} ${perf.model}` : "Unknown"}</button>
-                  <div style={{ fontWeight:700 }}>{p.price > 0 ? fmtMoney(p.currency, p.price) : <span style={{ color:V.faint }}>Free</span>}</div>
+                  <div style={{ fontWeight:700 }}>{p.price > 0 ? fmtMoney(p.price) : <span style={{ color:V.faint }}>Free</span>}</div>
                   <div style={{ color:V.muted, fontSize:12 }}>{p.date}</div>
                   <div>{p.shopLink ? <a href={p.shopLink} target="_blank" rel="noreferrer" style={{ color:V.accent, textDecoration:"none", fontWeight:600, fontSize:12 }}>{p.shopName}</a> : <span style={{ color:V.muted, fontSize:12 }}>{p.shopName}</span>}</div>
                 </div>
@@ -419,10 +529,6 @@ export default function PerfumesPage() {
                 <input style={inputSt} value={af.sizeMl} onChange={e => setAf(f => ({ ...f, sizeMl: e.target.value }))} />
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Usage
-                <input style={inputSt} value={af.usage} onChange={e => setAf(f => ({ ...f, usage: e.target.value }))} placeholder="Office . Party" />
-              </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Purchase date
                 <input style={inputSt} type="date" value={af.date} onChange={e => setAf(f => ({ ...f, date: e.target.value }))} />
               </label>
@@ -431,10 +537,18 @@ export default function PerfumesPage() {
                 <input style={inputSt} value={af.price} onChange={e => setAf(f => ({ ...f, price: e.target.value }))} />
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Currency
-                <select style={inputSt} value={af.currency} onChange={e => setAf(f => ({ ...f, currency: e.target.value }))}>
-                  <option>AED</option><option>USD</option><option>INR</option><option>GBP</option><option>EUR</option>
+                Priority
+                <select style={inputSt} value={af.priority} onChange={e => setAf(f => ({ ...f, priority: e.target.value }))}>
+                  <option>Low</option><option>Medium</option><option>High</option><option>Must buy</option>
                 </select>
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Target price (AED)
+                <input style={inputSt} value={af.targetPriceAed} onChange={e => setAf(f => ({ ...f, targetPriceAed: e.target.value }))} placeholder="Optional" />
+              </label>
+              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Preferred shop
+                <input style={inputSt} value={af.preferredShop} onChange={e => setAf(f => ({ ...f, preferredShop: e.target.value }))} placeholder="Optional" />
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Shop name
