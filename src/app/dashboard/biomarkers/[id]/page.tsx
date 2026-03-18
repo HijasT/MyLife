@@ -211,7 +211,7 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
           <div style={{ ...section, padding: 16 }}>
             <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>Latest value</div>
-            <div style={{ fontSize: 34, fontWeight: 900, marginTop: 6 }}>{latest?.valueNum ?? latest?.valueText || "—"}</div>
+            <div style={{ fontSize: 34, fontWeight: 900, marginTop: 6 }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
             <div style={{ fontSize: 12, color: V.muted }}>{test.unit || "Text marker"} · {latest ? fmtDate(latest.testDate) : "No result yet"}</div>
           </div>
           <div style={{ ...section, padding: 16 }}>
@@ -274,7 +274,7 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
                       <div style={{ fontWeight: 800 }}>{fmtDate(row.testDate)}</div>
                       {row.notes && <div style={{ fontSize: 11, color: V.muted }}>{row.notes}</div>}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 900 }}>{row.valueNum ?? row.valueText || "—"}</div>
+                    <div style={{ fontSize: 15, fontWeight: 900 }}>{(row.valueNum ?? row.valueText) || "—"}</div>
                     <div style={{ padding: "4px 8px", borderRadius: 999, background: t.bg, color: t.fg, fontSize: 11, fontWeight: 800, width: "fit-content" }}>{t.label}</div>
                     <div style={{ fontSize: 12, color: compareTone(dp.delta), fontWeight: 800 }}>{dp.delta == null ? "—" : `${dp.delta > 0 ? "+" : ""}${dp.delta}${dp.pct != null ? ` (${dp.pct > 0 ? "+" : ""}${dp.pct}%)` : row.valueNum != null && prev?.valueNum === 0 ? " (New)" : ""}`}</div>
                   </div>
