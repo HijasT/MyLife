@@ -28,7 +28,7 @@ type AddForm = {
   status: PerfumeStatus; brand: string; model: string; imageDataUrl: string;
   rating: number; bottleType: BottleType; sizeMl: string;
   price: string; shop: string; shopLink: string; date: string;
-  priority: string; targetPriceAed: string; preferredShop: string;
+  priority: string;
 };
 
 function uid() { return `id-${Math.random().toString(16).slice(2)}-${Date.now()}`; }
@@ -103,13 +103,12 @@ export default function PerfumesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [wearLogs, setWearLogs] = useState<WearLog[]>([]);
-  const [dubaiWeather, setDubaiWeather] = useState<{ temp:number|null; humidity:number|null; tag:string } | null>(null);
   const [brandFocus, setBrandFocus] = useState<string | null>(null);
   const [af, setAf] = useState<AddForm>({
     status: "wardrobe", brand: "", model: "", imageDataUrl: "", rating: 4,
     bottleType: "Full bottle", sizeMl: "100",
     price: "", shop: "Unknown", shopLink: "", date: nowIso(),
-    priority: "Medium", targetPriceAed: "", preferredShop: "",
+    priority: "Medium",
   });
 
   const isDark = useDarkMode();
@@ -143,21 +142,6 @@ export default function PerfumesPage() {
       saveToCache("purchases", loadedPur);
       markSynced();
       setLoading(false);
-      try {
-        const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,relative_humidity_2m,apparent_temperature&timezone=Asia%2FDubai");
-        const data = await r.json();
-        const temp = data?.current?.temperature_2m ?? null;
-        const humidity = data?.current?.relative_humidity_2m ?? null;
-        let tag = "Neutral";
-        if (temp !== null) {
-          if (temp < 22) tag = "Cold";
-          else if (temp > 34 || (temp > 31 && (humidity ?? 0) > 65)) tag = "Hot";
-        }
-        setDubaiWeather({ temp, humidity, tag });
-      } catch {
-        const m = new Date().getMonth() + 1;
-        setDubaiWeather({ temp:null, humidity:null, tag: m >= 5 && m <= 10 ? "Hot" : "Neutral" });
-      }
     }
     load();
   }, []);
@@ -177,24 +161,18 @@ export default function PerfumesPage() {
     return map;
   }, [wearLogs]);
 
-  const weatherSuggestedItems = useMemo(() => {
-    const tag = dubaiWeather?.tag ?? "Neutral";
-    const today = nowIso();
-    return items.filter(p => p.status === "wardrobe").map(p => {
-      const logs = wearByPerfume.get(p.id) ?? [];
-      const lastWorn = logs[0]?.wornOn ?? "";
-      let score = 0;
-      if (p.weatherTags.includes(tag)) score += 4;
-      score += (p.ratingStars ?? 0) * 0.7;
-      if (logs[0]?.compliment) score += 1.5;
-      if (!lastWorn) score += 2;
-      else {
-        const gap = Math.floor((new Date(today).getTime() - new Date(lastWorn).getTime()) / 86400000);
-        score += Math.min(4, Math.max(0, gap / 7));
-      }
-      return { perfume: p, score, reason: p.weatherTags.includes(tag) ? `${tag} match` : "rotation pick" };
-    }).sort((a,b) => b.score - a.score).slice(0,4);
-  }, [items, wearByPerfume, dubaiWeather]);
+  const topUsed = useMemo(() => {
+    const usage = items
+      .filter(p => p.status === "wardrobe")
+      .map(p => {
+        const uniqueDays = new Set((wearByPerfume.get(p.id) ?? []).map(w => w.wornOn)).size;
+        return { perfume: p, days: uniqueDays };
+      })
+      .filter(x => x.days > 0)
+      .sort((a, b) => b.days - a.days || (b.perfume.ratingStars ?? 0) - (a.perfume.ratingStars ?? 0))
+      .slice(0, 3);
+    return usage;
+  }, [items, wearByPerfume]);
 
   const tabStats = useMemo(() => {
     const thirtyDaysAgo = new Date();
@@ -266,7 +244,7 @@ export default function PerfumesPage() {
       image_url: af.imageDataUrl || "", rating_stars: af.rating,
       notes_tags: [], weather_tags: [], gender_scale: 2,
       longevity: "Unknown", sillage: "Unknown", value_rating: "Neutral",
-      purchase_priority: af.priority, target_price_aed: safeNum(af.targetPriceAed, 0) || null, preferred_shop: af.preferredShop || null,
+      purchase_priority: af.status === "wishlist" ? af.priority : null,
     }).select("*").single();
     if (error || !pd) { toast(error?.message || "Failed to save", "error"); return; }
     if (af.status === "wardrobe") {
@@ -289,7 +267,7 @@ export default function PerfumesPage() {
   function downloadCsv() {
     const rows = [["Brand","Model","Status","Rating","Notes","Weather","Longevity","Sillage","Value","Clone"].join(",")];
     for (const it of items) {
-      rows.push([it.brand, it.model, it.status, it.ratingStars ?? "", it.notesTags.join("|"), it.weatherTags.join("|"), it.longevity, it.sillage, it.value, it.cloneSimilar].map(v => `"${String(v).replaceAll('"','""')}"`).join(","));
+      rows.push([it.brand, it.model, it.status, it.ratingStars ?? "", it.notesTags.join("|"), it.weatherTags.join("|"), it.cloneSimilar].map(v => `"${String(v).replaceAll('"','""')}"`).join(","));
     }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv" }));
@@ -319,7 +297,7 @@ export default function PerfumesPage() {
       <div style={{ padding:"22px 24px 0", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
         <div style={{ fontSize:22, fontWeight:800 }}>Aroma<span style={{ color:V.accent, fontStyle:"italic" }}>tica</span> <span style={{ fontSize:13, fontWeight:500, color:V.faint, fontStyle:"normal" }}>— Fragrance Collection</span></div>
         <div style={{ display:"flex", gap:8 }}>
-          <button style={btnPrimary} onClick={() => { setAf({ status:"wardrobe", brand:"", model:"", imageDataUrl:"", rating:4, bottleType:"Full bottle", sizeMl:"100", price:"", shop:"Unknown", shopLink:"", date:nowIso(), priority:"Medium", targetPriceAed:"", preferredShop:"" }); setShowAdd(true); }}>+ Add</button>
+          <button style={btnPrimary} onClick={() => { setAf({ status:"wardrobe", brand:"", model:"", imageDataUrl:"", rating:4, bottleType:"Full bottle", sizeMl:"100", price:"", shop:"Unknown", shopLink:"", date:nowIso(), priority:"Medium" }); setShowAdd(true); }}>+ Add</button>
         </div>
       </div>
 
@@ -346,23 +324,20 @@ export default function PerfumesPage() {
           </div>
         ) : null;
       })()}
-
-
-      {activeTab === "wardrobe" && weatherSuggestedItems.length > 0 && (
+      {activeTab === "wardrobe" && topUsed.length > 0 && (
         <div style={{ margin:"12px 24px 0", padding:"14px 16px", background:V.card, border:`1px solid ${V.border}`, borderRadius:14 }}>
           <div style={{ display:"flex", justifyContent:"space-between", gap:12, flexWrap:"wrap", marginBottom:10 }}>
             <div>
-              <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint }}>Today in Dubai</div>
-              <div style={{ fontSize:14, fontWeight:700 }}>{dubaiWeather?.temp !== null && dubaiWeather?.temp !== undefined ? `${dubaiWeather.temp}°C` : "Season fallback"} · Best tag: {dubaiWeather?.tag ?? "Neutral"}</div>
+              <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint }}>Most used</div>
+              <div style={{ fontSize:14, fontWeight:700 }}>Top 3 perfumes by number of days worn</div>
             </div>
-            <div style={{ fontSize:12, color:V.muted }}>Suggestions favor weather match, rating, compliments, and rotation.</div>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
-            {weatherSuggestedItems.map(({ perfume, reason }) => (
+            {topUsed.map(({ perfume, days }) => (
               <button key={perfume.id} onClick={() => router.push(`/dashboard/perfumes/${perfume.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
                 <div style={{ fontSize:11, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>{perfume.brand}</div>
                 <div style={{ fontSize:14, fontWeight:800, margin:"2px 0 6px" }}>{perfume.model}</div>
-                <div style={{ fontSize:12, color:V.muted }}>{reason}</div>
+                <div style={{ fontSize:12, color:V.muted }}>{days} day{days === 1 ? "" : "s"} used</div>
               </button>
             ))}
           </div>
@@ -536,20 +511,12 @@ export default function PerfumesPage() {
                 Price
                 <input style={inputSt} value={af.price} onChange={e => setAf(f => ({ ...f, price: e.target.value }))} />
               </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Priority
+              {af.status === "wishlist" && <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                Wishlist priority
                 <select style={inputSt} value={af.priority} onChange={e => setAf(f => ({ ...f, priority: e.target.value }))}>
                   <option>Low</option><option>Medium</option><option>High</option><option>Must buy</option>
                 </select>
-              </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Target price (AED)
-                <input style={inputSt} value={af.targetPriceAed} onChange={e => setAf(f => ({ ...f, targetPriceAed: e.target.value }))} placeholder="Optional" />
-              </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Preferred shop
-                <input style={inputSt} value={af.preferredShop} onChange={e => setAf(f => ({ ...f, preferredShop: e.target.value }))} placeholder="Optional" />
-              </label>
+              </label>}
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Shop name
                 <input style={inputSt} value={af.shop} onChange={e => setAf(f => ({ ...f, shop: e.target.value }))} />
