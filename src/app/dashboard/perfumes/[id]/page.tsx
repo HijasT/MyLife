@@ -627,9 +627,11 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   }
 
   function toggleOccasion(label: string) {
-    const next = item.occasionTags.includes(label)
-      ? item.occasionTags.filter((x) => x !== label)
-      : [...item.occasionTags, label];
+    if (!item) return;
+    const current = item.occasionTags ?? [];
+    const next = current.includes(label)
+      ? current.filter((x) => x !== label)
+      : [...current, label];
     update({ occasionTags: next });
   }
 
