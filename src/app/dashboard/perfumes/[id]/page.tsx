@@ -356,7 +356,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
             <label><span style={labelStyle}>Priority</span><select style={inputStyle} value={item.purchasePriority || "Medium"} onChange={e => update({ purchasePriority: e.target.value })}><option>Low</option><option>Medium</option><option>High</option><option>Must buy</option></select></label>
           </div>
-        </div>
+        </div>}
 
         <div style={sectionStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
