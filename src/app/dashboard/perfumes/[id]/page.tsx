@@ -393,7 +393,6 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     const { data } = supabase.storage.from("aromatica").getPublicUrl(path);
     await update({ imageUrl: data.publicUrl });
     setShowPhoto(false);
-    setPhotoPreviewUrl("");
     showToast("Photo updated");
   }
 
