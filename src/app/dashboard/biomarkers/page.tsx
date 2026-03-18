@@ -706,8 +706,8 @@ export default function BiomarkersPage() {
                     <div style={{ fontWeight: 800 }}>{row.name}</div>
                     <div style={{ fontSize: 11, color: V.muted }}>{row.groupName}</div>
                   </div>
-                  <div style={{ fontSize: 13, color: V.muted }}>{row.prevVal ?? row.prevText || "—"}</div>
-                  <div style={{ fontSize: 13, fontWeight: 800 }}>{row.currVal ?? row.currText || "—"}</div>
+                  <div style={{ fontSize: 13, color: V.muted }}>{(row.prevVal ?? row.prevText) || "—"}</div>
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>{(row.currVal ?? row.currText) || "—"}</div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                     <span style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</span>
                     <span style={{ fontSize: 12, color: compareTone(row.delta), fontWeight: 800 }}>{row.delta == null ? "—" : `${row.delta > 0 ? "+" : ""}${row.delta}${row.pct != null ? ` (${row.pct > 0 ? "+" : ""}${row.pct}%)` : row.prevVal === 0 ? " (New)" : ""}`}</span>
@@ -783,7 +783,7 @@ export default function BiomarkersPage() {
                             <div style={{ fontSize: 14, fontWeight: 800 }}>{test.name}</div>
                             <span style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</span>
                           </div>
-                          <div style={{ fontSize: 22, fontWeight: 900 }}>{latest?.valueNum ?? latest?.valueText || "—"}</div>
+                          <div style={{ fontSize: 22, fontWeight: 900 }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
                           <div style={{ fontSize: 12, color: V.muted }}>{test.unit || test.refRange || "Text marker"}</div>
                           <div style={{ fontSize: 12, color: compareTone(d.delta), fontWeight: 800, marginTop: 8 }}>{d.delta == null ? "No numeric delta yet" : `${d.delta > 0 ? "+" : ""}${d.delta}${d.pct != null ? ` (${d.pct > 0 ? "+" : ""}${d.pct}%)` : ""}`}</div>
                         </div>
