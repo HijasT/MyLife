@@ -38,6 +38,19 @@ function fmtDate(dateStr: string) {
 function fmtShort(dateStr: string) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-AE", { day: "2-digit", month: "short" });
 }
+
+function rangeLabel(test: BiomarkerTest) {
+  if (test.refMin == null && test.refMax == null) return "Not configured";
+  if (test.refMin != null && test.refMax != null) return `${test.refMin} – ${test.refMax}${test.unit ? ` ${test.unit}` : ""}`;
+  if (test.refMin != null) return `≥ ${test.refMin}${test.unit ? ` ${test.unit}` : ""}`;
+  return `≤ ${test.refMax}${test.unit ? ` ${test.unit}` : ""}`;
+}
+function deltaColorForTest(delta: number | null, current: number | null, test: BiomarkerTest) {
+  if (delta == null || current == null) return "#6b7280";
+  const within = (test.refMin == null || current >= test.refMin) && (test.refMax == null || current <= test.refMax);
+  return within ? "#059669" : "#dc2626";
+}
+
 function markerStatus(result: BiomarkerResult | undefined, test: BiomarkerTest): MarkerStatus {
   if (!result) return "missing";
   if (result.valueNum == null) return result.valueText ? "text" : "missing";
@@ -112,7 +125,9 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
   const [editMode, setEditMode] = useState(false);
   const [toast, setToast] = useState("");
   const [compareTestId, setCompareTestId] = useState("");
-  const [editFields, setEditFields] = useState({ method: "", refMin: "", refMax: "", refRange: "", unit: "", groupName: "" });
+  const [editFields, setEditFields] = useState({ method: "", refMin: "", refMax: "", unit: "", groupName: "", newGroupName: "" });
+  const [editingResultId, setEditingResultId] = useState<string | null>(null);
+  const [editingResultFields, setEditingResultFields] = useState({ valueNum: "", valueText: "", notes: "" });
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   const V = { bg: isDark ? "#0d0f14" : "#f9f8f5", card: isDark ? "#16191f" : "#ffffff", border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)", text: isDark ? "#f0ede8" : "#1a1a1a", muted: isDark ? "#9ba3b2" : "#6b7280", faint: isDark ? "#6b7280" : "#9ca3af", input: isDark ? "#1e2130" : "#f7f7f8", accent: "#10b981" };
   const btn = { padding: "8px 14px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 700 } as const;
@@ -138,7 +153,7 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
       if (tRes.data) {
         const mapped = dbToTest(tRes.data);
         setTest(mapped);
-        setEditFields({ method: mapped.method, refMin: mapped.refMin?.toString() ?? "", refMax: mapped.refMax?.toString() ?? "", refRange: mapped.refRange, unit: mapped.unit, groupName: mapped.groupName });
+        setEditFields({ method: mapped.method, refMin: mapped.refMin?.toString() ?? "", refMax: mapped.refMax?.toString() ?? "", unit: mapped.unit, groupName: mapped.groupName, newGroupName: "" });
       }
       setResults((rRes.data ?? []).map(dbToResult));
       setAllTests((allTRes.data ?? []).map(dbToTest));
@@ -170,15 +185,17 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
     return { rows: right, r: denA && denB ? Number((num / (denA * denB)).toFixed(2)) : null };
   }, [compareTestId, results, allResults, test]);
 
+  const existingGroups = useMemo(() => Array.from(new Set(allTests.map((x) => x.groupName).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [allTests]);
+
   async function saveEdit() {
     if (!test) return;
     const payload = {
       method: editFields.method || null,
       ref_min: editFields.refMin === "" ? null : Number(editFields.refMin),
       ref_max: editFields.refMax === "" ? null : Number(editFields.refMax),
-      ref_range: editFields.refRange || null,
+      ref_range: null,
       unit: editFields.unit || null,
-      group_name: editFields.groupName || test.groupName,
+      group_name: (editFields.groupName === "__new__" ? editFields.newGroupName : editFields.groupName) || test.groupName,
     };
     const { data, error } = await client.from("biomarker_tests").update(payload).eq("id", test.id).select("*").single();
     if (error) {
@@ -190,6 +207,23 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
       setTest(mapped);
       setEditMode(false);
       showToast("Definition updated");
+    }
+  }
+
+  async function saveResultEdit() {
+    if (!editingResultId) return;
+    const payload = {
+      value_num: editingResultFields.valueNum === "" ? null : Number(editingResultFields.valueNum),
+      value_text: editingResultFields.valueText || null,
+      notes: editingResultFields.notes || null,
+    };
+    const { data, error } = await client.from("biomarker_results").update(payload).eq("id", editingResultId).select("*").single();
+    if (error) { showToast(error.message); return; }
+    if (data) {
+      const mapped = dbToResult(data);
+      setResults((prev) => prev.map((r) => r.id === mapped.id ? mapped : r).sort((a, b) => a.testDate.localeCompare(b.testDate)));
+      setEditingResultId(null);
+      showToast("Result updated");
     }
   }
 
@@ -217,11 +251,11 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
           <div style={{ ...section, padding: 16 }}>
             <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>Range status</div>
             <div style={{ display: "inline-flex", marginTop: 12, padding: "6px 12px", borderRadius: 999, background: tone.bg, color: tone.fg, fontWeight: 900, fontSize: 12 }}>{tone.label}</div>
-            <div style={{ fontSize: 12, color: V.muted, marginTop: 10 }}>Reference: {test.refRange || "Not configured"}</div>
+            <div style={{ fontSize: 12, color: V.muted, marginTop: 10 }}>Reference: {rangeLabel(test)}</div>
           </div>
           <div style={{ ...section, padding: 16 }}>
             <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>Change vs previous</div>
-            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 8, color: compareTone(d.delta) }}>{d.delta == null ? "—" : `${d.delta > 0 ? "+" : ""}${d.delta}`}</div>
+            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 8, color: deltaColorForTest(d.delta, latest?.valueNum ?? null, test) }}>{d.delta == null ? "—" : `${d.delta > 0 ? "+" : ""}${d.delta}`}</div>
             <div style={{ fontSize: 12, color: V.muted }}>{d.pct == null ? "No comparable previous value" : `${d.pct > 0 ? "+" : ""}${d.pct}%`}</div>
           </div>
           <div style={{ ...section, padding: 16 }}>
@@ -240,10 +274,11 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 12 }}>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Method</span><input style={input} value={editFields.method} onChange={(e) => setEditFields((p) => ({ ...p, method: e.target.value }))} /></label>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Unit</span><input style={input} value={editFields.unit} onChange={(e) => setEditFields((p) => ({ ...p, unit: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Group</span><input style={input} value={editFields.groupName} onChange={(e) => setEditFields((p) => ({ ...p, groupName: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Group</span><select style={input} value={editFields.groupName} onChange={(e) => setEditFields((p) => ({ ...p, groupName: e.target.value }))}><option value="">Select group</option>{existingGroups.map((g) => <option key={g} value={g}>{g}</option>)}<option value="__new__">+ Create new group</option></select></label>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref min</span><input style={input} type="number" value={editFields.refMin} onChange={(e) => setEditFields((p) => ({ ...p, refMin: e.target.value }))} /></label>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref max</span><input style={input} type="number" value={editFields.refMax} onChange={(e) => setEditFields((p) => ({ ...p, refMax: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Range label</span><input style={input} value={editFields.refRange} onChange={(e) => setEditFields((p) => ({ ...p, refRange: e.target.value }))} /></label>
+              <div style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Computed range</span><div style={{ ...input, display: "flex", alignItems: "center" }}>{rangeLabel({ ...test, refMin: editFields.refMin === "" ? null : Number(editFields.refMin), refMax: editFields.refMax === "" ? null : Number(editFields.refMax), unit: editFields.unit })}</div></div>
+              {editFields.groupName === "__new__" && <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>New group name</span><input style={input} value={editFields.newGroupName} onChange={(e) => setEditFields((p) => ({ ...p, newGroupName: e.target.value }))} /></label>}
             </div>
           </div>
         )}
@@ -268,15 +303,17 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
                 const s = markerStatus(row, test);
                 const t = statusTone(s);
                 const dp = deltaPct(prev?.valueNum ?? null, row.valueNum ?? null);
+                const rowEdit = editingResultId === row.id;
                 return (
-                  <div key={row.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "0.9fr 0.9fr 0.8fr 0.8fr", gap: 10, alignItems: "center" }}>
+                  <div key={row.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "0.9fr 1.1fr 0.8fr 0.9fr auto", gap: 10, alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: 800 }}>{fmtDate(row.testDate)}</div>
-                      {row.notes && <div style={{ fontSize: 11, color: V.muted }}>{row.notes}</div>}
+                      {rowEdit ? <input style={{ ...input, marginTop: 6 }} value={editingResultFields.notes} onChange={(e) => setEditingResultFields((p) => ({ ...p, notes: e.target.value }))} placeholder="Notes" /> : row.notes && <div style={{ fontSize: 11, color: V.muted }}>{row.notes}</div>}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 900 }}>{(row.valueNum ?? row.valueText) || "—"}</div>
+                    <div style={{ fontSize: 15, fontWeight: 900 }}>{rowEdit ? (row.valueNum != null || numericPoints.length ? <input style={input} type="number" value={editingResultFields.valueNum} onChange={(e) => setEditingResultFields((p) => ({ ...p, valueNum: e.target.value, valueText: "" }))} /> : <input style={input} value={editingResultFields.valueText} onChange={(e) => setEditingResultFields((p) => ({ ...p, valueText: e.target.value, valueNum: "" }))} />) : ((row.valueNum ?? row.valueText) || "—")}</div>
                     <div style={{ padding: "4px 8px", borderRadius: 999, background: t.bg, color: t.fg, fontSize: 11, fontWeight: 800, width: "fit-content" }}>{t.label}</div>
-                    <div style={{ fontSize: 12, color: compareTone(dp.delta), fontWeight: 800 }}>{dp.delta == null ? "—" : `${dp.delta > 0 ? "+" : ""}${dp.delta}${dp.pct != null ? ` (${dp.pct > 0 ? "+" : ""}${dp.pct}%)` : row.valueNum != null && prev?.valueNum === 0 ? " (New)" : ""}`}</div>
+                    <div style={{ fontSize: 12, color: deltaColorForTest(dp.delta, row.valueNum ?? null, test), fontWeight: 800 }}>{dp.delta == null ? "—" : `${dp.delta > 0 ? "+" : ""}${dp.delta}${dp.pct != null ? ` (${dp.pct > 0 ? "+" : ""}${dp.pct}%)` : row.valueNum != null && prev?.valueNum === 0 ? " (New)" : ""}`}</div>
+                    <div>{rowEdit ? <button style={btnP} onClick={saveResultEdit}>Save</button> : <button style={btn} onClick={() => { setEditingResultId(row.id); setEditingResultFields({ valueNum: row.valueNum?.toString() ?? "", valueText: row.valueText ?? "", notes: row.notes ?? "" }); }}>Edit</button>}</div>
                   </div>
                 );
               })}

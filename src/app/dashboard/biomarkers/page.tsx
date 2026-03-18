@@ -122,6 +122,33 @@ function fmtMoney(n: number | null | undefined) {
   return n == null ? "—" : `AED ${n.toFixed(2)}`;
 }
 
+
+function bodyMetricTone(kind: string, val: number | null) {
+  if (val == null) return { bg: "rgba(107,114,128,0.12)", fg: "#6b7280", label: "No data" };
+  const ranges: Record<string, [number, number]> = {
+    weight: [70, 75],
+    bmi: [21, 24],
+    fat: [12, 20],
+    skeletal: [32, 35],
+    visceral: [2, 4],
+  };
+  const r = ranges[kind];
+  if (!r) return { bg: "rgba(107,114,128,0.12)", fg: "#6b7280", label: "—" };
+  const ok = val >= r[0] && val <= r[1];
+  return ok ? { bg: "rgba(16,185,129,0.12)", fg: "#059669", label: `Optimal ${r[0]}-${r[1]}` } : { bg: "rgba(239,68,68,0.12)", fg: "#dc2626", label: `Target ${r[0]}-${r[1]}` };
+}
+function rangeLabel(test: BiomarkerTest) {
+  if (test.refMin == null && test.refMax == null) return test.unit || "Text marker";
+  if (test.refMin != null && test.refMax != null) return `${test.refMin} – ${test.refMax}${test.unit ? ` ${test.unit}` : ""}`;
+  if (test.refMin != null) return `≥ ${test.refMin}${test.unit ? ` ${test.unit}` : ""}`;
+  return `≤ ${test.refMax}${test.unit ? ` ${test.unit}` : ""}`;
+}
+function deltaColorForTest(delta: number | null, current: number | null, test: BiomarkerTest) {
+  if (delta == null || current == null) return "#6b7280";
+  const within = (test.refMin == null || current >= test.refMin) && (test.refMax == null || current <= test.refMax);
+  return within ? "#059669" : "#dc2626";
+}
+
 function daysSince(dateStr: string) {
   const then = new Date(`${dateStr}T00:00:00`).getTime();
   const now = new Date().getTime();
@@ -236,6 +263,7 @@ export default function BiomarkersPage() {
   const [showAddResult, setShowAddResult] = useState(false);
   const [showAddMetric, setShowAddMetric] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showAddTest, setShowAddTest] = useState(false);
   const [addDate, setAddDate] = useState(nowDubai().slice(0, 10));
   const [addValues, setAddValues] = useState<Record<string, string>>({});
   const [sessionCost, setSessionCost] = useState("");
@@ -244,6 +272,8 @@ export default function BiomarkersPage() {
   const [metricForm, setMetricForm] = useState({ measuredAt: nowDubai().slice(0, 10), weightKg: "", heightCm: "", bodyFatPct: "", visceralFatL: "", skeletalMuscleKg: "", notes: "" });
   const [compareLeft, setCompareLeft] = useState("");
   const [compareRight, setCompareRight] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [testForm, setTestForm] = useState({ name: "", groupName: "", newGroupName: "", method: "", unit: "", refMin: "", refMax: "", sortOrder: "0" });
 
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   const V = {
@@ -423,6 +453,8 @@ export default function BiomarkersPage() {
 
   const bodyLatest = metrics[0] ?? null;
 
+  const existingGroups = useMemo(() => groups.map(([groupName]) => groupName), [groups]);
+
   const groupCards = useMemo(() => {
     return groups.map(([groupName, list]) => {
       const abnormal = list.filter((test) => {
@@ -588,6 +620,36 @@ export default function BiomarkersPage() {
     showToast(`Imported ${saved.length} results`);
   }
 
+  async function saveTestDefinition() {
+    if (!userId) return;
+    const groupName = testForm.groupName === "__new__" ? testForm.newGroupName.trim() : testForm.groupName.trim();
+    if (!testForm.name.trim() || !groupName) {
+      showToast("Name and group are required");
+      return;
+    }
+    const payload = {
+      user_id: userId,
+      name: testForm.name.trim(),
+      group_name: groupName,
+      method: testForm.method.trim() || null,
+      unit: testForm.unit.trim() || null,
+      ref_min: testForm.refMin === "" ? null : Number(testForm.refMin),
+      ref_max: testForm.refMax === "" ? null : Number(testForm.refMax),
+      ref_range: null,
+      sort_order: Number(testForm.sortOrder || 0),
+    };
+    const { data, error } = await client.from("biomarker_tests").insert(payload).select("*").single();
+    if (error) { showToast(error.message); return; }
+    if (data) {
+      const mapped = dbToTest(data);
+      setTests((prev) => [...prev, mapped].sort((a, b) => a.groupName.localeCompare(b.groupName) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)));
+      setShowAddTest(false);
+      setTestForm({ name: "", groupName: "", newGroupName: "", method: "", unit: "", refMin: "", refMax: "", sortOrder: "0" });
+      setAddValues((prev) => ({ ...prev, [mapped.id]: "" }));
+      showToast("Marker created");
+    }
+  }
+
   if (loading) {
     return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: V.bg, color: V.muted }}>Loading biomarkers…</div>;
   }
@@ -602,6 +664,7 @@ export default function BiomarkersPage() {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={btn} onClick={() => setShowImport(true)}>Bulk import</button>
           <button style={btn} onClick={() => setShowAddMetric(true)}>+ Body metrics</button>
+          <button style={btn} onClick={() => setShowAddTest(true)}>+ Marker</button>
           <button style={btnP} onClick={() => setShowAddResult(true)}>+ Lab session</button>
         </div>
       </div>
@@ -766,10 +829,12 @@ export default function BiomarkersPage() {
         <div style={{ ...section, padding: 16 }}>
           <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Tracked markers</div>
           <div style={{ display: "grid", gap: 14 }}>
-            {groups.map(([groupName, list]) => (
+            {groups.map(([groupName, list]) => {
+              const collapsed = !!collapsedGroups[groupName];
+              return (
               <div key={groupName}>
-                <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>{groupName}</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
+                <button style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, background: "transparent", border: "none", color: V.text, cursor: "pointer", padding: 0 }} onClick={() => setCollapsedGroups((p) => ({ ...p, [groupName]: !p[groupName] }))}><span style={{ fontSize: 15, fontWeight: 800 }}>{groupName}</span><span style={{ fontSize: 12, color: V.muted }}>{collapsed ? "Show" : "Hide"}</span></button>
+                {!collapsed && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
                   {list.map((test) => {
                     const latest = latestByTest.get(test.id);
                     const prev = prevByTest.get(test.id);
@@ -784,15 +849,15 @@ export default function BiomarkersPage() {
                             <span style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</span>
                           </div>
                           <div style={{ fontSize: 22, fontWeight: 900 }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
-                          <div style={{ fontSize: 12, color: V.muted }}>{test.unit || test.refRange || "Text marker"}</div>
-                          <div style={{ fontSize: 12, color: compareTone(d.delta), fontWeight: 800, marginTop: 8 }}>{d.delta == null ? "No numeric delta yet" : `${d.delta > 0 ? "+" : ""}${d.delta}${d.pct != null ? ` (${d.pct > 0 ? "+" : ""}${d.pct}%)` : ""}`}</div>
+                          <div style={{ fontSize: 12, color: V.muted }}>{rangeLabel(test)}</div>
+                          <div style={{ fontSize: 12, color: deltaColorForTest(d.delta, latest?.valueNum ?? null, test), fontWeight: 800, marginTop: 8 }}>{d.delta == null ? "No numeric delta yet" : `${d.delta > 0 ? "+" : ""}${d.delta}${d.pct != null ? ` (${d.pct > 0 ? "+" : ""}${d.pct}%)` : ""}`}</div>
                         </div>
                       </Link>
                     );
                   })}
-                </div>
+                </div>}
               </div>
-            ))}
+            )})}
           </div>
         </div>
 
@@ -801,17 +866,20 @@ export default function BiomarkersPage() {
           {bodyLatest ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
               {[
-                ["Weight", bodyLatest.weightKg, "kg"],
-                ["BMI", bodyLatest.bmi, ""],
-                ["Body fat", bodyLatest.bodyFatPct, "%"],
-                ["Visceral fat", bodyLatest.visceralFatL, "L"],
-                ["Skeletal muscle", bodyLatest.skeletalMuscleKg, "kg"],
-              ].map(([label, val, unit]) => (
+                ["Weight", bodyLatest.weightKg, "kg", "weight"],
+                ["BMI", bodyLatest.bmi, "", "bmi"],
+                ["Body fat", bodyLatest.bodyFatPct, "%", "fat"],
+                ["Visceral fat", bodyLatest.visceralFatL, "L", "visceral"],
+                ["Skeletal muscle", bodyLatest.skeletalMuscleKg, "kg", "skeletal"],
+              ].map(([label, val, unit, kind]) => {
+                const tone = bodyMetricTone(String(kind), typeof val === "number" ? val : null);
+                return (
                 <div key={String(label)} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12 }}>
                   <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{label}</div>
                   <div style={{ fontSize: 22, fontWeight: 900, marginTop: 4 }}>{val ?? "—"} <span style={{ fontSize: 12, color: V.muted }}>{unit}</span></div>
+                  <div style={{ marginTop: 8, display: "inline-flex", padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</div>
                 </div>
-              ))}
+              )})}
               <div style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, gridColumn: "1/-1" }}>
                 <div style={{ fontSize: 12, color: V.muted }}>Latest on {fmtDate(bodyLatest.measuredAt)}</div>
               </div>
@@ -860,6 +928,32 @@ export default function BiomarkersPage() {
                 <button style={btn} onClick={() => setShowAddResult(false)}>Cancel</button>
                 <button style={btnP} onClick={saveResults}>Save session</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {showAddTest && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+          <div style={{ width: "min(760px,100%)", ...section }}>
+            <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>Create marker</div>
+                <div style={{ fontSize: 12, color: V.muted }}>Add a new tracked test and put it into an existing or new group.</div>
+              </div>
+              <button style={btn} onClick={() => setShowAddTest(false)}>Close</button>
+            </div>
+            <div style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Test name</span><input style={input} value={testForm.name} onChange={(e) => setTestForm((p) => ({ ...p, name: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Group</span><select style={input} value={testForm.groupName} onChange={(e) => setTestForm((p) => ({ ...p, groupName: e.target.value }))}><option value="">Select group</option>{existingGroups.map((g) => <option key={g} value={g}>{g}</option>)}<option value="__new__">+ Create new group</option></select></label>
+              {testForm.groupName === "__new__" && <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>New group name</span><input style={input} value={testForm.newGroupName} onChange={(e) => setTestForm((p) => ({ ...p, newGroupName: e.target.value }))} /></label>}
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Method</span><input style={input} value={testForm.method} onChange={(e) => setTestForm((p) => ({ ...p, method: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Unit</span><input style={input} value={testForm.unit} onChange={(e) => setTestForm((p) => ({ ...p, unit: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref min</span><input style={input} type="number" value={testForm.refMin} onChange={(e) => setTestForm((p) => ({ ...p, refMin: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref max</span><input style={input} type="number" value={testForm.refMax} onChange={(e) => setTestForm((p) => ({ ...p, refMax: e.target.value }))} /></label>
+              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Sort order</span><input style={input} type="number" value={testForm.sortOrder} onChange={(e) => setTestForm((p) => ({ ...p, sortOrder: e.target.value }))} /></label>
+              <div style={{ gridColumn: "1/-1", display: "flex", justifyContent: "flex-end", gap: 8 }}><button style={btn} onClick={() => setShowAddTest(false)}>Cancel</button><button style={btnP} onClick={saveTestDefinition}>Save marker</button></div>
             </div>
           </div>
         </div>
