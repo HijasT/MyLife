@@ -124,7 +124,7 @@ function fmtMonthDay(date: Date) {
   return date.toLocaleDateString("en-AE", { month: "short", day: "numeric" });
 }
 
-function getCycleDates(statementDay: number | null, dueDay: number | null, todayIso: string) {
+function getCycleDates(statementDay: number | null, dueDay: number | null, todayIso: string, status?: Status) {
   if (!statementDay && !dueDay) return null;
   const today = new Date(`${todayIso}T00:00:00`);
   const thisMonth = todayIso.slice(0, 7);
@@ -156,17 +156,32 @@ function getCycleDates(statementDay: number | null, dueDay: number | null, today
 
   let nextLabel: "statement" | "due" | null = null;
   let nextDate: Date | null = null;
+  const settled = status ? isSettled(status) : false;
 
-  if (active.statementDate && today < active.statementDate) {
-    nextLabel = "statement";
-    nextDate = active.statementDate;
-  } else if (active.dueDate && today <= active.dueDate) {
-    nextLabel = "due";
-    nextDate = active.dueDate;
-  } else if (nextPair.statementDate) {
-    nextLabel = "statement";
-    nextDate = nextPair.statementDate;
-    active = nextPair;
+  if (settled) {
+    if (active.dueDate && today <= active.dueDate && nextPair.statementDate) {
+      nextLabel = "statement";
+      nextDate = nextPair.statementDate;
+    } else if (active.statementDate && today < active.statementDate) {
+      nextLabel = "statement";
+      nextDate = active.statementDate;
+    } else if (nextPair.statementDate) {
+      nextLabel = "statement";
+      nextDate = nextPair.statementDate;
+      active = nextPair;
+    }
+  } else {
+    if (active.statementDate && today < active.statementDate) {
+      nextLabel = "statement";
+      nextDate = active.statementDate;
+    } else if (active.dueDate && today <= active.dueDate) {
+      nextLabel = "due";
+      nextDate = active.dueDate;
+    } else if (nextPair.statementDate) {
+      nextLabel = "statement";
+      nextDate = nextPair.statementDate;
+      active = nextPair;
+    }
   }
 
   return {
@@ -686,7 +701,7 @@ export default function DueTrackerPage() {
       const prevAmount = prev?.amount ?? item.defaultAmount ?? null;
       const diffAbs = prevAmount == null ? null : amount - prevAmount;
       const diffPct = prevAmount && prevAmount !== 0 ? ((amount - prevAmount) / prevAmount) * 100 : null;
-      const cycle = getCycleDates(item.statementDay, item.dueDay, today);
+      const cycle = getCycleDates(item.statementDay, item.dueDay, today, entry?.status ?? "pending");
       const overdue = !!cycle?.dueDate && cycle.dueDate < new Date(`${today}T00:00:00`) && !(entry && isSettled(entry.status));
       const upcoming = !!cycle?.nextDate && (cycle.daysUntilNext ?? 99) >= 0 && (cycle.daysUntilNext ?? 99) <= 3 && !(entry && isSettled(entry.status));
       return { item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle };
