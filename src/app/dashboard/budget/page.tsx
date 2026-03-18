@@ -104,6 +104,81 @@ function ordinal(n: number) {
   const v = n % 100;
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
+function daysBetween(fromDate: Date, toDate: Date) {
+  const from = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+  const to = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate());
+  return Math.round((to.getTime() - from.getTime()) / 86400000);
+}
+
+function monthDayDate(baseMonth: string, day: number) {
+  const [y, mo] = baseMonth.split("-").map(Number);
+  const lastDay = new Date(y, mo, 0).getDate();
+  return new Date(y, mo - 1, Math.min(day, lastDay));
+}
+
+function monthKeyFromDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function fmtMonthDay(date: Date) {
+  return date.toLocaleDateString("en-AE", { month: "short", day: "numeric" });
+}
+
+function getCycleDates(statementDay: number | null, dueDay: number | null, todayIso: string) {
+  if (!statementDay && !dueDay) return null;
+  const today = new Date(`${todayIso}T00:00:00`);
+  const thisMonth = todayIso.slice(0, 7);
+  const prev = prevMonth(thisMonth);
+  const next = nextMonth(thisMonth);
+
+  const buildPair = (statementMonth: string) => {
+    const statementDate = statementDay ? monthDayDate(statementMonth, statementDay) : null;
+    let dueDate: Date | null = null;
+    if (dueDay) {
+      const dueMonth = statementDay && statementDay < dueDay ? statementMonth : nextMonth(statementMonth);
+      dueDate = monthDayDate(dueMonth, dueDay);
+    }
+    return { statementDate, dueDate };
+  };
+
+  const previousPair = buildPair(prev);
+  const currentPair = buildPair(thisMonth);
+  const nextPair = buildPair(next);
+
+  let active = currentPair;
+  if (currentPair.statementDate && today < currentPair.statementDate) {
+    active = currentPair;
+  } else if (currentPair.dueDate && today <= currentPair.dueDate) {
+    active = currentPair;
+  } else {
+    active = nextPair;
+  }
+
+  let nextLabel: "statement" | "due" | null = null;
+  let nextDate: Date | null = null;
+
+  if (active.statementDate && today < active.statementDate) {
+    nextLabel = "statement";
+    nextDate = active.statementDate;
+  } else if (active.dueDate && today <= active.dueDate) {
+    nextLabel = "due";
+    nextDate = active.dueDate;
+  } else if (nextPair.statementDate) {
+    nextLabel = "statement";
+    nextDate = nextPair.statementDate;
+    active = nextPair;
+  }
+
+  return {
+    statementDate: active.statementDate,
+    dueDate: active.dueDate,
+    nextLabel,
+    nextDate,
+    daysUntilNext: nextDate ? daysBetween(today, nextDate) : null,
+    previousStatementDate: previousPair.statementDate,
+    previousDueDate: previousPair.dueDate,
+  };
+}
 
 function toAed(amount: number, currency: Currency, rates: Record<string, number>) {
   if (currency === "AED") return amount;
@@ -599,7 +674,8 @@ export default function DueTrackerPage() {
     void toggleMonthLock(true);
   }, [allVisibleSettled, userId, loading]);
 
-  const currentDay = Number(todayDubai().slice(8, 10));
+  const today = todayDubai();
+  const currentDay = Number(today.slice(8, 10));
 
   const enrichedItems = useMemo(() => {
     return visibleItems.map((item) => {
@@ -610,11 +686,12 @@ export default function DueTrackerPage() {
       const prevAmount = prev?.amount ?? item.defaultAmount ?? null;
       const diffAbs = prevAmount == null ? null : amount - prevAmount;
       const diffPct = prevAmount && prevAmount !== 0 ? ((amount - prevAmount) / prevAmount) * 100 : null;
-      const overdue = !!item.dueDay && currentDay > item.dueDay && entry?.month === month ? !isSettled(entry.status) : !!item.dueDay && currentDay > item.dueDay && !entry;
-      const upcoming = !!item.dueDay && item.dueDay >= currentDay && item.dueDay - currentDay <= 3 && !(entry && isSettled(entry.status));
-      return { item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming };
+      const cycle = getCycleDates(item.statementDay, item.dueDay, today);
+      const overdue = !!cycle?.dueDate && cycle.dueDate < new Date(`${today}T00:00:00`) && !(entry && isSettled(entry.status));
+      const upcoming = !!cycle?.nextDate && (cycle.daysUntilNext ?? 99) >= 0 && (cycle.daysUntilNext ?? 99) <= 3 && !(entry && isSettled(entry.status));
+      return { item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle };
     });
-  }, [visibleItems, entries, prevEntries, month, currentDay]);
+  }, [visibleItems, entries, prevEntries, month, currentDay, today]);
 
   const filteredSortedItems = useMemo(() => {
     const statusRank: Record<Status, number> = { pending: 0, paid: 1, skipped: 2, waived: 3 };
@@ -909,7 +986,7 @@ export default function DueTrackerPage() {
                 </div>
               )}
 
-              {!isCollapsed && rows.map(({ item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming }) => {
+              {!isCollapsed && rows.map(({ item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle }) => {
                 const status = entry?.status ?? "pending";
                 const tone = statusTone(status);
                 const isEditing = editItemId === item.id;
@@ -935,9 +1012,14 @@ export default function DueTrackerPage() {
                           {overdue && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "rgba(239,68,68,0.1)", color: "#ef4444" }}>Overdue</span>}
                           {!overdue && upcoming && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "rgba(59,130,246,0.1)", color: "#3b82f6" }}>Upcoming</span>}
                         </div>
-                        <div style={{ fontSize: 11, color: V.muted, marginTop: 3 }}>
-                          {item.statementDay ? <span style={{ marginRight: 8, fontWeight: 600, color: "#F5A623" }}>S:{item.statementDay}</span> : null}
-                          {item.dueDay ? <span style={{ fontWeight: 600, color: "#ef4444" }}>D:{item.dueDay}</span> : null}
+                        <div style={{ fontSize: 11, color: V.muted, marginTop: 3, display: "flex", flexDirection: "column", gap: 2 }}>
+                          {cycle?.statementDate ? <span style={{ fontWeight: 600, color: "#F5A623" }}>Statement: {fmtMonthDay(cycle.statementDate)}</span> : null}
+                          {cycle?.dueDate ? <span style={{ fontWeight: 600, color: "#ef4444" }}>Due: {fmtMonthDay(cycle.dueDate)}</span> : null}
+                          {cycle?.nextDate && cycle.nextLabel ? (
+                            <span style={{ color: cycle.nextLabel === "statement" ? "#F5A623" : "#ef4444" }}>
+                              {cycle.daysUntilNext === 0 ? "Today" : `${cycle.daysUntilNext} day${cycle.daysUntilNext === 1 ? "" : "s"}` } for the {cycle.nextLabel === "statement" ? "Statement" : "Due"}: {fmtMonthDay(cycle.nextDate)}
+                            </span>
+                          ) : null}
                         </div>
                         {isEditing ? (
                           <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>

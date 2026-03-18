@@ -30,6 +30,11 @@ type DueEntry = {
   note: string;
 };
 
+type DueItemNav = {
+  id: string;
+  name: string;
+};
+
 function fmtMonth(m: string) {
   const [y, mo] = m.split("-");
   return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-AE", { month: "long", year: "numeric" });
@@ -95,6 +100,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [item, setItem] = useState<DueItem | null>(null);
+  const [itemNav, setItemNav] = useState<DueItemNav[]>([]);
   const [entries, setEntries] = useState<DueEntry[]>([]);
   const [fxByMonth, setFxByMonth] = useState<Record<string, Record<string, number>>>({});
   const [monthLocks, setMonthLocks] = useState<Record<string, boolean>>({});
@@ -137,10 +143,11 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       }
       setUserId(user.id);
 
-      const [itemRes, entriesRes, settingsRes] = await Promise.all([
+      const [itemRes, entriesRes, settingsRes, navRes] = await Promise.all([
         supabase.from("due_items").select("*").eq("id", params.id).eq("user_id", user.id).single(),
         supabase.from("due_entries").select("*").eq("due_item_id", params.id).eq("user_id", user.id).order("month", { ascending: false }),
         supabase.from("due_month_settings").select("month,fx_rates,is_locked").eq("user_id", user.id),
+        supabase.from("due_items").select("id,name,sort_order,created_at").eq("user_id", user.id).order("sort_order").order("created_at"),
       ]);
 
       if (itemRes.data) {
@@ -174,8 +181,16 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
 
       if (settingsRes.data) {
         const monthMap: Record<string, Record<string, number>> = {};
-        for (const row of settingsRes.data) monthMap[row.month] = row.fx_rates ?? { INR: 25.2, USD: 3.67 };
+        const locks: Record<string, boolean> = {};
+        for (const row of settingsRes.data) {
+          monthMap[row.month] = row.fx_rates ?? { INR: 25.2, USD: 3.67 };
+          locks[row.month] = row.is_locked ?? false;
+        }
         setFxByMonth(monthMap);
+        setMonthLocks(locks);
+      }
+      if (navRes.data) {
+        setItemNav(navRes.data.map((r: { id: string; name: string }) => ({ id: r.id, name: r.name })));
       }
       setLoading(false);
     }
@@ -277,6 +292,14 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     showToast(`Status updated to ${status}`);
   }
 
+  const nav = useMemo(() => {
+    const idx = itemNav.findIndex((row) => row.id === params.id);
+    return {
+      prev: idx > 0 ? itemNav[idx - 1] : null,
+      next: idx >= 0 && idx < itemNav.length - 1 ? itemNav[idx + 1] : null,
+    };
+  }, [itemNav, params.id]);
+
   const nativeCurrency = item?.defaultCurrency ?? "AED";
   const stats = useMemo(() => {
     if (!item) return null;
@@ -355,7 +378,11 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           Due Tracker
         </Link>
-        <button style={btnP} onClick={() => { setNewCurrency(item.defaultCurrency); setShowAddMonth(true); }}>+ Add month</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button style={{ ...btn, opacity: nav.prev ? 1 : 0.45, cursor: nav.prev ? "pointer" : "not-allowed" }} disabled={!nav.prev} onClick={() => nav.prev && router.push(`/dashboard/budget/${nav.prev.id}`)} title={nav.prev ? `Previous: ${nav.prev.name}` : "No previous due"}>‹</button>
+          <button style={{ ...btn, opacity: nav.next ? 1 : 0.45, cursor: nav.next ? "pointer" : "not-allowed" }} disabled={!nav.next} onClick={() => nav.next && router.push(`/dashboard/budget/${nav.next.id}`)} title={nav.next ? `Next: ${nav.next.name}` : "No next due"}>›</button>
+          <button style={btnP} onClick={() => { setNewCurrency(item.defaultCurrency); setShowAddMonth(true); }}>+ Add month</button>
+        </div>
       </div>
 
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "24px 20px" }}>
