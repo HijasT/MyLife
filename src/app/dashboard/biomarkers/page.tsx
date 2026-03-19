@@ -296,6 +296,19 @@ export default function BiomarkersPage() {
     setTimeout(() => setToast(""), 2500);
   }
 
+  function openModal(setter: React.Dispatch<React.SetStateAction<boolean>>) {
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+      document.body.style.overflow = "hidden";
+    }
+    setter(true);
+  }
+
+  function closeModal(setter: React.Dispatch<React.SetStateAction<boolean>>) {
+    setter(false);
+    if (typeof document !== "undefined") document.body.style.overflow = "";
+  }
+
   useEffect(() => {
     async function load() {
       const { data: { user } } = await client.auth.getUser();
@@ -477,7 +490,15 @@ export default function BiomarkersPage() {
   }, [corrPairs, corrA, corrB]);
 
   useEffect(() => {
-    if (showAddResult || showAddMetric || showImport || showAddTest) window.scrollTo({ top: 0, behavior: "smooth" });
+    if (showAddResult || showAddMetric || showImport || showAddTest) {
+      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+      if (typeof document !== "undefined") document.body.style.overflow = "hidden";
+    } else {
+      if (typeof document !== "undefined") document.body.style.overflow = "";
+    }
+    return () => {
+      if (typeof document !== "undefined") document.body.style.overflow = "";
+    };
   }, [showAddResult, showAddMetric, showImport, showAddTest]);
   const corrData = useMemo(() => {
     if (!corrA || !corrB || corrA === corrB) return { points: [] as { date: string; a: number; b: number }[], r: null as number | null };
@@ -548,7 +569,7 @@ export default function BiomarkersPage() {
     setAddValues({});
     setSessionCost("");
     setSessionNote("");
-    setShowAddResult(false);
+    closeModal(setShowAddResult);
     showToast(`Saved ${rows.length} results`);
   }
 
@@ -575,7 +596,7 @@ export default function BiomarkersPage() {
     }
     if (data) {
       setMetrics((prev) => [dbToMetric(data), ...prev.filter((m) => m.measuredAt !== data.measured_at)].sort((a, b) => b.measuredAt.localeCompare(a.measuredAt)));
-      setShowAddMetric(false);
+      closeModal(setShowAddMetric);
       showToast("Body metrics saved");
     }
   }
@@ -619,7 +640,7 @@ export default function BiomarkersPage() {
       const keep = prev.filter((r) => !saved.some((s) => s.testId === r.testId && s.testDate === r.testDate));
       return [...saved, ...keep].sort((a, b) => b.testDate.localeCompare(a.testDate));
     });
-    setShowImport(false);
+    closeModal(setShowImport);
     setImportText("");
     showToast(`Imported ${saved.length} results`);
   }
@@ -647,7 +668,7 @@ export default function BiomarkersPage() {
     if (data) {
       const mapped = dbToTest(data);
       setTests((prev) => [...prev, mapped].sort((a, b) => a.groupName.localeCompare(b.groupName) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)));
-      setShowAddTest(false);
+      closeModal(setShowAddTest);
       setTestForm({ name: "", groupName: "", newGroupName: "", method: "", unit: "", refMin: "", refMax: "", sortOrder: "0" });
       setAddValues((prev) => ({ ...prev, [mapped.id]: "" }));
       showToast("Marker created");
@@ -666,17 +687,17 @@ export default function BiomarkersPage() {
           <div style={{ fontSize: 12, color: V.muted }}>Monitor what changed, not just what exists.</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={btn} onClick={() => setShowImport(true)}>Bulk import</button>
-          <button style={btn} onClick={() => setShowAddMetric(true)}>+ Body metrics</button>
-          <button style={btn} onClick={() => setShowAddTest(true)}>+ Marker</button>
-          <button style={btnP} onClick={() => setShowAddResult(true)}>+ Lab session</button>
+          <button style={btn} onClick={() => openModal(setShowImport)}>Bulk import</button>
+          <button style={btn} onClick={() => openModal(setShowAddMetric)}>+ Body metrics</button>
+          <button style={btn} onClick={() => openModal(setShowAddTest)}>+ Marker</button>
+          <button style={btnP} onClick={() => openModal(setShowAddResult)}>+ Lab session</button>
         </div>
       </div>
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: 20, display: "grid", gap: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
           {[
-            { label: "Tracked markers", value: summary.tracked, color: "#111827" },
+            { label: "Tracked markers", value: summary.tracked, color: isDark ? "#f8fafc" : "#111827" },
             { label: "Currently abnormal", value: summary.abnormal, color: "#dc2626" },
             { label: "Newly abnormal", value: summary.newlyAbnormal, color: "#d97706" },
             { label: "Back to normal", value: summary.backToNormal, color: "#059669" },
@@ -852,7 +873,7 @@ export default function BiomarkersPage() {
                             <div style={{ fontSize: 14, fontWeight: 800 }}>{test.name}</div>
                             <span style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</span>
                           </div>
-                          <div style={{ fontSize: 22, fontWeight: 900, color: V.text }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
+                          <div style={{ fontSize: 22, fontWeight: 900, color: isDark ? "#f8fafc" : V.text }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
                           <div style={{ fontSize: 12, color: V.muted }}>{rangeLabel(test)}</div>
                           <div style={{ fontSize: 12, color: deltaColorForTest(d.delta, latest?.valueNum ?? null, test), fontWeight: 800, marginTop: 8 }}>{d.delta == null ? "No numeric delta yet" : `${d.delta > 0 ? "+" : ""}${d.delta}${d.pct != null ? ` (${d.pct > 0 ? "+" : ""}${d.pct}%)` : ""}`}</div>
                         </div>
@@ -893,14 +914,14 @@ export default function BiomarkersPage() {
       </div>
 
       {showAddResult && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
           <div style={{ width: "min(920px,100%)", maxHeight: "90vh", overflow: "auto", ...section }}>
             <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 800 }}>Add lab session</div>
                 <div style={{ fontSize: 12, color: V.muted }}>Numeric tests get numeric input. Text-only tests stop polluting the chart. A modest miracle.</div>
               </div>
-              <button style={btn} onClick={() => setShowAddResult(false)}>Close</button>
+              <button style={btn} onClick={() => closeModal(setShowAddResult)}>Close</button>
             </div>
             <div style={{ padding: 18, display: "grid", gap: 14 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
@@ -929,7 +950,7 @@ export default function BiomarkersPage() {
                 </div>
               ))}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button style={btn} onClick={() => setShowAddResult(false)}>Cancel</button>
+                <button style={btn} onClick={() => closeModal(setShowAddResult)}>Cancel</button>
                 <button style={btnP} onClick={saveResults}>Save session</button>
               </div>
             </div>
@@ -939,14 +960,14 @@ export default function BiomarkersPage() {
 
 
       {showAddTest && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
           <div style={{ width: "min(760px,100%)", ...section }}>
             <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 800 }}>Create marker</div>
                 <div style={{ fontSize: 12, color: V.muted }}>Add a new tracked test and put it into an existing or new group.</div>
               </div>
-              <button style={btn} onClick={() => setShowAddTest(false)}>Close</button>
+              <button style={btn} onClick={() => closeModal(setShowAddTest)}>Close</button>
             </div>
             <div style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Test name</span><input style={input} value={testForm.name} onChange={(e) => setTestForm((p) => ({ ...p, name: e.target.value }))} /></label>
@@ -957,18 +978,18 @@ export default function BiomarkersPage() {
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref min</span><input style={input} type="number" value={testForm.refMin} onChange={(e) => setTestForm((p) => ({ ...p, refMin: e.target.value }))} /></label>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref max</span><input style={input} type="number" value={testForm.refMax} onChange={(e) => setTestForm((p) => ({ ...p, refMax: e.target.value }))} /></label>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Sort order</span><input style={input} type="number" value={testForm.sortOrder} onChange={(e) => setTestForm((p) => ({ ...p, sortOrder: e.target.value }))} /></label>
-              <div style={{ gridColumn: "1/-1", display: "flex", justifyContent: "flex-end", gap: 8 }}><button style={btn} onClick={() => setShowAddTest(false)}>Cancel</button><button style={btnP} onClick={saveTestDefinition}>Save marker</button></div>
+              <div style={{ gridColumn: "1/-1", display: "flex", justifyContent: "flex-end", gap: 8 }}><button style={btn} onClick={() => closeModal(setShowAddTest)}>Cancel</button><button style={btnP} onClick={saveTestDefinition}>Save marker</button></div>
             </div>
           </div>
         </div>
       )}
 
       {showAddMetric && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
           <div style={{ width: "min(660px,100%)", ...section }}>
             <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>Add body metrics</div>
-              <button style={btn} onClick={() => setShowAddMetric(false)}>Close</button>
+              <button style={btn} onClick={() => closeModal(setShowAddMetric)}>Close</button>
             </div>
             <div style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Date</span><input style={input} type="date" value={metricForm.measuredAt} onChange={(e) => setMetricForm((p) => ({ ...p, measuredAt: e.target.value }))} /></label>
@@ -979,7 +1000,7 @@ export default function BiomarkersPage() {
               <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Skeletal muscle (kg)</span><input style={input} type="number" value={metricForm.skeletalMuscleKg} onChange={(e) => setMetricForm((p) => ({ ...p, skeletalMuscleKg: e.target.value }))} /></label>
               <label style={{ display: "grid", gap: 6, gridColumn: "1/-1" }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Notes</span><textarea style={{ ...input, minHeight: 90, resize: "vertical" }} value={metricForm.notes} onChange={(e) => setMetricForm((p) => ({ ...p, notes: e.target.value }))} /></label>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, gridColumn: "1/-1" }}>
-                <button style={btn} onClick={() => setShowAddMetric(false)}>Cancel</button>
+                <button style={btn} onClick={() => closeModal(setShowAddMetric)}>Cancel</button>
                 <button style={btnP} onClick={saveMetric}>Save</button>
               </div>
             </div>
@@ -988,19 +1009,19 @@ export default function BiomarkersPage() {
       )}
 
       {showImport && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", placeItems: "center", padding: 16, zIndex: 50 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
           <div style={{ width: "min(760px,100%)", ...section }}>
             <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 800 }}>Bulk import</div>
                 <div style={{ fontSize: 12, color: V.muted }}>Paste rows like: <code>Name,Value,YYYY-MM-DD,Optional notes</code></div>
               </div>
-              <button style={btn} onClick={() => setShowImport(false)}>Close</button>
+              <button style={btn} onClick={() => closeModal(setShowImport)}>Close</button>
             </div>
             <div style={{ padding: 18, display: "grid", gap: 12 }}>
               <textarea style={{ ...input, minHeight: 220, resize: "vertical", fontFamily: "ui-monospace,monospace" }} value={importText} onChange={(e) => setImportText(e.target.value)} placeholder={`LDL,132,2026-03-18\nVitamin D,31,2026-03-18\nCOVID PCR,Negative,2026-03-18`} />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button style={btn} onClick={() => setShowImport(false)}>Cancel</button>
+                <button style={btn} onClick={() => closeModal(setShowImport)}>Cancel</button>
                 <button style={btnP} onClick={importBulk}>Import</button>
               </div>
             </div>

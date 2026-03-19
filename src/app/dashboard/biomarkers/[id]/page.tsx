@@ -132,8 +132,8 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
   const [editingResults, setEditingResults] = useState<Record<string, { valueNum: string; valueText: string; notes: string }>>({});
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   const V = { bg: isDark ? "#0d0f14" : "#f9f8f5", card: isDark ? "#16191f" : "#ffffff", border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)", text: isDark ? "#f0ede8" : "#1a1a1a", muted: isDark ? "#9ba3b2" : "#6b7280", faint: isDark ? "#6b7280" : "#9ca3af", input: isDark ? "#1e2130" : "#f7f7f8", accent: "#10b981" };
-  const btn = { padding: "8px 14px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 700 } as const;
-  const btnP = { ...btn, background: V.accent, color: "#fff", border: "none" } as const;
+  const btn = { padding: "10px 16px", minWidth: 92, height: 44, borderRadius: 14, border: `1px solid ${V.border}`, background: isDark ? "rgba(255,255,255,0.03)" : "#fff", color: V.text, cursor: "pointer", fontSize: 13, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", boxShadow: isDark ? "0 10px 24px rgba(0,0,0,0.18)" : "0 10px 24px rgba(15,23,42,0.06)" } as const;
+  const btnP = { ...btn, minWidth: 160, background: "linear-gradient(135deg, #10b981 0%, #14b8a6 100%)", color: "#fff", border: "none" } as const;
   const input = { padding: "9px 12px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
   const section = { background: V.card, border: `1px solid ${V.border}`, borderRadius: 16 } as const;
 
@@ -248,10 +248,12 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
           <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{test.name}</div>
           <div style={{ fontSize: 12, color: V.muted }}>{test.groupName}</div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={btn} onClick={() => prevTest && router.push(`/dashboard/biomarkers/${prevTest.id}`)} disabled={!prevTest}>{"<"}</button>
-          <button style={btn} onClick={() => nextTest && router.push(`/dashboard/biomarkers/${nextTest.id}`)} disabled={!nextTest}>{">"}</button>
-          <button style={editMode ? btn : btnP} onClick={() => editMode ? saveEdit() : setEditMode(true)}>{editMode ? "Save" : "Edit definition"}</button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, padding: 6, borderRadius: 18, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(15,23,42,0.03)", border: `1px solid ${V.border}` }}>
+            <button style={{ ...btn, minWidth: 56, padding: "10px 0" }} onClick={() => prevTest && router.push(`/dashboard/biomarkers/${prevTest.id}`)} disabled={!prevTest} aria-label="Previous marker">‹</button>
+            <button style={{ ...btn, minWidth: 56, padding: "10px 0" }} onClick={() => nextTest && router.push(`/dashboard/biomarkers/${nextTest.id}`)} disabled={!nextTest} aria-label="Next marker">›</button>
+          </div>
+          <button style={editMode ? { ...btn, minWidth: 160 } : btnP} onClick={() => editMode ? saveEdit() : setEditMode(true)}>{editMode ? "Save changes" : "Edit definition"}</button>
         </div>
       </div>
 
