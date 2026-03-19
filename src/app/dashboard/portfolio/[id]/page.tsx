@@ -228,6 +228,8 @@ export default function PortfolioItemPage({
   const [toast, setToast] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [livePriceSymbolInput, setLivePriceSymbolInput] = useState("");
+  const [savingLiveLink, setSavingLiveLink] = useState(false);
+  const [fetchingLinkedPrice, setFetchingLinkedPrice] = useState(false);
 
   const [alertForm, setAlertForm] = useState({
     alertType: "above" as AlertType,
@@ -592,13 +594,31 @@ export default function PortfolioItemPage({
   }
 
   async function saveLivePriceLink() {
-    if (!item) return;
-    await supabase
-      .from("portfolio_items")
-      .update({ live_price_symbol: livePriceSymbolInput || null })
-      .eq("id", item.id);
-    setItem((p) => (p ? { ...p, livePriceSymbol: livePriceSymbolInput || null } : p));
-    showToast("Live price link updated");
+    if (!item) {
+      showToast("Asset not loaded yet");
+      return;
+    }
+    try {
+      setSavingLiveLink(true);
+      const nextLink = livePriceSymbolInput || null;
+      const { error } = await supabase
+        .from("portfolio_items")
+        .update({ live_price_symbol: nextLink })
+        .eq("id", item.id);
+
+      if (error) {
+        showToast(error.message || "Could not save live price link");
+        return;
+      }
+
+      setItem((p) => (p ? { ...p, livePriceSymbol: nextLink } : p));
+      setLivePriceSymbolInput(nextLink ?? "");
+      showToast(nextLink ? "Live price link saved" : "Live price link cleared");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not save live price link");
+    } finally {
+      setSavingLiveLink(false);
+    }
   }
 
   async function fetchLinkedLivePrice() {
@@ -606,31 +626,53 @@ export default function PortfolioItemPage({
       showToast("Asset not loaded yet");
       return;
     }
-    if (!item.livePriceSymbol && !livePriceSymbolInput) {
+
+    const link = (livePriceSymbolInput || item.livePriceSymbol || "").trim();
+    if (!link) {
       showToast("Choose a live price link first");
       return;
     }
-    const itemId = item.id;
-    const link = livePriceSymbolInput || item.livePriceSymbol || "";
-    const price = await fetchPriceForLiveLink(link);
-    if (!price || price <= 0) {
-      showToast("Could not fetch linked live price");
-      return;
+
+    try {
+      setFetchingLinkedPrice(true);
+      const price = await fetchPriceForLiveLink(link);
+      if (!price || price <= 0) {
+        showToast("Could not fetch linked live price");
+        return;
+      }
+
+      const nowIso = nowDubai();
+      const { error } = await supabase
+        .from("portfolio_items")
+        .update({
+          current_price: price,
+          current_price_updated_at: nowIso,
+          live_price_symbol: link,
+        })
+        .eq("id", item.id);
+
+      if (error) {
+        showToast(error.message || "Could not save fetched price");
+        return;
+      }
+
+      setItem((p) =>
+        p
+          ? {
+              ...p,
+              currentPrice: price,
+              currentPriceUpdatedAt: nowIso,
+              livePriceSymbol: link,
+            }
+          : p
+      );
+      setLivePriceSymbolInput(link);
+      showToast(`Linked live price fetched: AED ${fmtNum(price)}`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not fetch linked live price");
+    } finally {
+      setFetchingLinkedPrice(false);
     }
-    const nowIso = nowDubai();
-    await supabase
-      .from("portfolio_items")
-      .update({
-        current_price: price,
-        current_price_updated_at: nowIso,
-        live_price_symbol: link || null,
-      })
-      .eq("id", item.id);
-    setItem((p) =>
-      p ? { ...p, currentPrice: price, currentPriceUpdatedAt: nowIso, livePriceSymbol: link || null } : p
-    );
-    setLivePriceSymbolInput(link);
-    showToast("Linked live price fetched");
   }
 
   async function deleteItem() {
@@ -854,11 +896,11 @@ export default function PortfolioItemPage({
                   ))}
                 </select>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button style={{ ...btn, padding: "6px 12px", fontSize: 12 }} onClick={saveLivePriceLink}>
-                    Save link
+                  <button type="button" disabled={savingLiveLink || fetchingLinkedPrice} style={{ ...btn, padding: "6px 12px", fontSize: 12, opacity: savingLiveLink || fetchingLinkedPrice ? 0.65 : 1, cursor: savingLiveLink || fetchingLinkedPrice ? "not-allowed" : "pointer" }} onClick={saveLivePriceLink}>
+                    {savingLiveLink ? "Saving..." : "Save link"}
                   </button>
-                  <button style={{ ...btnPrimary, padding: "6px 12px", fontSize: 12 }} onClick={fetchLinkedLivePrice}>
-                    Fetch linked price
+                  <button type="button" disabled={savingLiveLink || fetchingLinkedPrice} style={{ ...btnPrimary, padding: "6px 12px", fontSize: 12, opacity: savingLiveLink || fetchingLinkedPrice ? 0.65 : 1, cursor: savingLiveLink || fetchingLinkedPrice ? "not-allowed" : "pointer" }} onClick={fetchLinkedLivePrice}>
+                    {fetchingLinkedPrice ? "Fetching..." : "Fetch linked price"}
                   </button>
                 </div>
                 {(item.livePriceSymbol || livePriceSymbolInput) && (
