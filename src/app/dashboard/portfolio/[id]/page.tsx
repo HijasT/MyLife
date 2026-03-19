@@ -622,7 +622,7 @@ export default function PortfolioItemPage({
   }
 
   async function fetchLinkedLivePrice() {
-    if (!item) {
+    if (!item || !userId) {
       showToast("Asset not loaded yet");
       return;
     }
@@ -635,24 +635,40 @@ export default function PortfolioItemPage({
 
     try {
       setFetchingLinkedPrice(true);
-      const price = await fetchPriceForLiveLink(link);
-      if (!price || price <= 0) {
-        showToast("Could not fetch linked live price");
+
+      const { data: profileRow, error: profileError } = await supabase
+        .from("profiles")
+        .select("metal_prices")
+        .eq("id", userId)
+        .single();
+
+      if (profileError) {
+        showToast(profileError.message || "Could not read cached live prices");
         return;
       }
 
-      const nowIso = nowDubai();
+      const priceMap = (profileRow?.metal_prices ?? {}) as Record<string, { bid?: number; ask?: number; updated?: string }>;
+      const livePoint = priceMap[link];
+      const sellValue = Number(livePoint?.bid ?? 0);
+      const updatedAt = String(livePoint?.updated || nowDubai());
+
+      if (!sellValue || sellValue <= 0) {
+        showToast("No cached sell value found for this link. Refresh live prices on the main portfolio page first.");
+        return;
+      }
+
       const { error } = await supabase
         .from("portfolio_items")
         .update({
-          current_price: price,
-          current_price_updated_at: nowIso,
+          current_price: sellValue,
+          current_price_updated_at: updatedAt,
           live_price_symbol: link,
         })
-        .eq("id", item.id);
+        .eq("id", item.id)
+        .eq("user_id", userId);
 
       if (error) {
-        showToast(error.message || "Could not save fetched price");
+        showToast(error.message || "Could not save linked price");
         return;
       }
 
@@ -660,14 +676,14 @@ export default function PortfolioItemPage({
         p
           ? {
               ...p,
-              currentPrice: price,
-              currentPriceUpdatedAt: nowIso,
+              currentPrice: sellValue,
+              currentPriceUpdatedAt: updatedAt,
               livePriceSymbol: link,
             }
           : p
       );
       setLivePriceSymbolInput(link);
-      showToast(`Linked live price fetched: AED ${fmtNum(price)}`);
+      showToast(`Linked sell price applied: AED ${fmtNum(sellValue)}`);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Could not fetch linked live price");
     } finally {
