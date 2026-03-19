@@ -475,6 +475,10 @@ export default function BiomarkersPage() {
     if (!corrA && corrPairs[0]) setCorrA(corrPairs[0].id);
     if (!corrB && corrPairs[1]) setCorrB(corrPairs[1].id);
   }, [corrPairs, corrA, corrB]);
+
+  useEffect(() => {
+    if (showAddResult || showAddMetric || showImport || showAddTest) window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [showAddResult, showAddMetric, showImport, showAddTest]);
   const corrData = useMemo(() => {
     if (!corrA || !corrB || corrA === corrB) return { points: [] as { date: string; a: number; b: number }[], r: null as number | null };
     const aMap = new Map((resultsByTest.get(corrA) ?? []).filter((x) => x.valueNum != null).map((x) => [x.testDate, x.valueNum as number]));
@@ -848,7 +852,7 @@ export default function BiomarkersPage() {
                             <div style={{ fontSize: 14, fontWeight: 800 }}>{test.name}</div>
                             <span style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</span>
                           </div>
-                          <div style={{ fontSize: 22, fontWeight: 900 }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
+                          <div style={{ fontSize: 22, fontWeight: 900, color: V.text }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
                           <div style={{ fontSize: 12, color: V.muted }}>{rangeLabel(test)}</div>
                           <div style={{ fontSize: 12, color: deltaColorForTest(d.delta, latest?.valueNum ?? null, test), fontWeight: 800, marginTop: 8 }}>{d.delta == null ? "No numeric delta yet" : `${d.delta > 0 ? "+" : ""}${d.delta}${d.pct != null ? ` (${d.pct > 0 ? "+" : ""}${d.pct}%)` : ""}`}</div>
                         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -117,6 +118,7 @@ function TrendChart({ points, refMin, refMax }: { points: { x: string; y: number
 
 export default function BiomarkerDetailPage({ params }: { params: { id: string } }) {
   const client = createClient();
+  const router = useRouter();
   const [test, setTest] = useState<BiomarkerTest | null>(null);
   const [results, setResults] = useState<BiomarkerResult[]>([]);
   const [allTests, setAllTests] = useState<BiomarkerTest[]>([]);
@@ -126,8 +128,8 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
   const [toast, setToast] = useState("");
   const [compareTestId, setCompareTestId] = useState("");
   const [editFields, setEditFields] = useState({ method: "", refMin: "", refMax: "", unit: "", groupName: "", newGroupName: "" });
-  const [editingResultId, setEditingResultId] = useState<string | null>(null);
-  const [editingResultFields, setEditingResultFields] = useState({ valueNum: "", valueText: "", notes: "" });
+  const [historyEditMode, setHistoryEditMode] = useState(false);
+  const [editingResults, setEditingResults] = useState<Record<string, { valueNum: string; valueText: string; notes: string }>>({});
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   const V = { bg: isDark ? "#0d0f14" : "#f9f8f5", card: isDark ? "#16191f" : "#ffffff", border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)", text: isDark ? "#f0ede8" : "#1a1a1a", muted: isDark ? "#9ba3b2" : "#6b7280", faint: isDark ? "#6b7280" : "#9ca3af", input: isDark ? "#1e2130" : "#f7f7f8", accent: "#10b981" };
   const btn = { padding: "8px 14px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 700 } as const;
@@ -186,6 +188,10 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
   }, [compareTestId, results, allResults, test]);
 
   const existingGroups = useMemo(() => Array.from(new Set(allTests.map((x) => x.groupName).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [allTests]);
+  const orderedTests = useMemo(() => [...allTests].sort((a, b) => a.groupName.localeCompare(b.groupName) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)), [allTests]);
+  const currentIndex = orderedTests.findIndex((x) => x.id === test?.id);
+  const prevTest = currentIndex > 0 ? orderedTests[currentIndex - 1] : null;
+  const nextTest = currentIndex >= 0 && currentIndex < orderedTests.length - 1 ? orderedTests[currentIndex + 1] : null;
 
   async function saveEdit() {
     if (!test) return;
@@ -210,21 +216,25 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
     }
   }
 
-  async function saveResultEdit() {
-    if (!editingResultId) return;
-    const payload = {
-      value_num: editingResultFields.valueNum === "" ? null : Number(editingResultFields.valueNum),
-      value_text: editingResultFields.valueText || null,
-      notes: editingResultFields.notes || null,
-    };
-    const { data, error } = await client.from("biomarker_results").update(payload).eq("id", editingResultId).select("*").single();
-    if (error) { showToast(error.message); return; }
-    if (data) {
-      const mapped = dbToResult(data);
-      setResults((prev) => prev.map((r) => r.id === mapped.id ? mapped : r).sort((a, b) => a.testDate.localeCompare(b.testDate)));
-      setEditingResultId(null);
-      showToast("Result updated");
+  async function saveAllHistoryEdits() {
+    const entries = Object.entries(editingResults);
+    if (!entries.length) { setHistoryEditMode(false); return; }
+    for (const [id, vals] of entries) {
+      const payload = {
+        value_num: vals.valueNum === "" ? null : Number(vals.valueNum),
+        value_text: vals.valueText || null,
+        notes: vals.notes || null,
+      };
+      const { data, error } = await client.from("biomarker_results").update(payload).eq("id", id).select("*").single();
+      if (error) { showToast(error.message); return; }
+      if (data) {
+        const mapped = dbToResult(data);
+        setResults((prev) => prev.map((r) => r.id === mapped.id ? mapped : r).sort((a, b) => a.testDate.localeCompare(b.testDate)));
+      }
     }
+    setHistoryEditMode(false);
+    setEditingResults({});
+    showToast("History updated");
   }
 
   if (loading) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: V.bg, color: V.muted }}>Loading marker…</div>;
@@ -238,7 +248,11 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
           <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{test.name}</div>
           <div style={{ fontSize: 12, color: V.muted }}>{test.groupName}</div>
         </div>
-        <button style={editMode ? btn : btnP} onClick={() => editMode ? saveEdit() : setEditMode(true)}>{editMode ? "Save" : "Edit definition"}</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={btn} onClick={() => prevTest && router.push(`/dashboard/biomarkers/${prevTest.id}`)} disabled={!prevTest}>{"<"}</button>
+          <button style={btn} onClick={() => nextTest && router.push(`/dashboard/biomarkers/${nextTest.id}`)} disabled={!nextTest}>{">"}</button>
+          <button style={editMode ? btn : btnP} onClick={() => editMode ? saveEdit() : setEditMode(true)}>{editMode ? "Save" : "Edit definition"}</button>
+        </div>
       </div>
 
       <div style={{ maxWidth: 1080, margin: "0 auto", padding: 20, display: "grid", gap: 18 }}>
@@ -296,24 +310,23 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 0.9fr", gap: 18 }}>
           <div style={{ ...section, padding: 16 }}>
-            <div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 800, color: V.faint, letterSpacing: "0.08em", marginBottom: 12 }}>Result history</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}><div style={{ fontSize: 12, textTransform: "uppercase", fontWeight: 800, color: V.faint, letterSpacing: "0.08em" }}>Result history</div><button style={historyEditMode ? btnP : btn} onClick={() => { if (historyEditMode) { void saveAllHistoryEdits(); } else { setEditingResults(Object.fromEntries(results.map((row) => [row.id, { valueNum: row.valueNum?.toString() ?? "", valueText: row.valueText ?? "", notes: row.notes ?? "" }]))); setHistoryEditMode(true); } }}>{historyEditMode ? "Save all" : "Edit all"}</button></div>
             <div style={{ display: "grid", gap: 8 }}>
               {[...results].reverse().map((row, idx, arr) => {
                 const prev = idx > 0 ? arr[idx - 1] : undefined;
                 const s = markerStatus(row, test);
                 const t = statusTone(s);
                 const dp = deltaPct(prev?.valueNum ?? null, row.valueNum ?? null);
-                const rowEdit = editingResultId === row.id;
+                const rowEdit = historyEditMode;
                 return (
-                  <div key={row.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "0.9fr 1.1fr 0.8fr 0.9fr auto", gap: 10, alignItems: "center" }}>
+                  <div key={row.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "0.9fr 1.1fr 0.8fr 0.9fr", gap: 10, alignItems: "center" }}>
                     <div>
                       <div style={{ fontWeight: 800 }}>{fmtDate(row.testDate)}</div>
-                      {rowEdit ? <input style={{ ...input, marginTop: 6 }} value={editingResultFields.notes} onChange={(e) => setEditingResultFields((p) => ({ ...p, notes: e.target.value }))} placeholder="Notes" /> : row.notes && <div style={{ fontSize: 11, color: V.muted }}>{row.notes}</div>}
+                      {rowEdit ? <input style={{ ...input, marginTop: 6 }} value={editingResults[row.id]?.notes ?? row.notes} onChange={(e) => setEditingResults((prev) => ({ ...prev, [row.id]: { ...(prev[row.id] ?? { valueNum: row.valueNum?.toString() ?? "", valueText: row.valueText ?? "", notes: row.notes ?? "" }), notes: e.target.value } }))} placeholder="Notes" /> : row.notes && <div style={{ fontSize: 11, color: V.muted }}>{row.notes}</div>}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 900 }}>{rowEdit ? (row.valueNum != null || numericPoints.length ? <input style={input} type="number" value={editingResultFields.valueNum} onChange={(e) => setEditingResultFields((p) => ({ ...p, valueNum: e.target.value, valueText: "" }))} /> : <input style={input} value={editingResultFields.valueText} onChange={(e) => setEditingResultFields((p) => ({ ...p, valueText: e.target.value, valueNum: "" }))} />) : ((row.valueNum ?? row.valueText) || "—")}</div>
+                    <div style={{ fontSize: 15, fontWeight: 900 }}>{rowEdit ? (row.valueNum != null || numericPoints.length ? <input style={input} type="number" value={editingResults[row.id]?.valueNum ?? (row.valueNum?.toString() ?? "")} onChange={(e) => setEditingResults((prev) => ({ ...prev, [row.id]: { ...(prev[row.id] ?? { valueNum: row.valueNum?.toString() ?? "", valueText: row.valueText ?? "", notes: row.notes ?? "" }), valueNum: e.target.value, valueText: "" } }))} /> : <input style={input} value={editingResults[row.id]?.valueText ?? row.valueText} onChange={(e) => setEditingResults((prev) => ({ ...prev, [row.id]: { ...(prev[row.id] ?? { valueNum: row.valueNum?.toString() ?? "", valueText: row.valueText ?? "", notes: row.notes ?? "" }), valueText: e.target.value, valueNum: "" } }))} />) : ((row.valueNum ?? row.valueText) || "—")}</div>
                     <div style={{ padding: "4px 8px", borderRadius: 999, background: t.bg, color: t.fg, fontSize: 11, fontWeight: 800, width: "fit-content" }}>{t.label}</div>
                     <div style={{ fontSize: 12, color: deltaColorForTest(dp.delta, row.valueNum ?? null, test), fontWeight: 800 }}>{dp.delta == null ? "—" : `${dp.delta > 0 ? "+" : ""}${dp.delta}${dp.pct != null ? ` (${dp.pct > 0 ? "+" : ""}${dp.pct}%)` : row.valueNum != null && prev?.valueNum === 0 ? " (New)" : ""}`}</div>
-                    <div>{rowEdit ? <button style={btnP} onClick={saveResultEdit}>Save</button> : <button style={btn} onClick={() => { setEditingResultId(row.id); setEditingResultFields({ valueNum: row.valueNum?.toString() ?? "", valueText: row.valueText ?? "", notes: row.notes ?? "" }); }}>Edit</button>}</div>
                   </div>
                 );
               })}
