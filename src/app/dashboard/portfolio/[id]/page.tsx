@@ -581,7 +581,7 @@ export default function PortfolioItemPage({
     await supabase
       .from("portfolio_items")
       .update({ current_price: price, current_price_updated_at: nowDubai() })
-      .eq("id", itemId);
+      .eq("id", item.id);
 
     setItem((p) =>
       p ? { ...p, currentPrice: price, currentPriceUpdatedAt: nowDubai() } : p
