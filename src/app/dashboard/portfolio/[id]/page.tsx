@@ -11,6 +11,15 @@ type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
 type TxType = "buy" | "sell";
 type AlertType = "above" | "below";
 
+const LIVE_PRICE_OPTIONS = [
+  { value: "", label: "None — manual price update" },
+  { value: "XAU_OZ", label: "24K Gold — 1 oz (AED)" },
+  { value: "XAU_G", label: "24K Gold — 1 g (AED)" },
+  { value: "XAG_OZ", label: "999 Silver — 1 oz (AED)" },
+  { value: "XAG_G", label: "999 Silver — 1 g (AED)" },
+  { value: "PARKIN.DFM", label: "Parkin (DFM)" },
+];
+
 type PortfolioItem = {
   id: string;
   symbol: string;
@@ -21,6 +30,7 @@ type PortfolioItem = {
   currentPrice: number | null;
   currentPriceUpdatedAt: string | null;
   notes: string;
+  livePriceSymbol?: string | null;
 };
 
 type Purchase = {
@@ -86,6 +96,70 @@ function fmtSignedAed(n: number | null) {
   return `${n >= 0 ? "+" : "-"}AED ${fmtNum(Math.abs(n))}`;
 }
 
+async function fetchPriceForLiveLink(link: string): Promise<number | null> {
+  const sym = (link || "").toUpperCase();
+  const proxy = (url: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+  let usdToAed = FX_TO_AED.USD;
+  try {
+    const fxRes = await fetch("https://api.frankfurter.app/latest?from=USD&to=AED");
+    const fxData = await fxRes.json();
+    if (fxData?.rates?.AED) usdToAed = fxData.rates.AED;
+  } catch {}
+  const OZ_TO_G = 31.1034768;
+
+  if (["XAU_OZ", "XAU_G", "XAG_OZ", "XAG_G"].includes(sym)) {
+    const metal = sym.startsWith("XAU") ? "XAU" : "XAG";
+    const keyToUse = process.env.NEXT_PUBLIC_GOLDAPI_KEY || "";
+    if (keyToUse) {
+      try {
+        const r = await fetch(`https://www.goldapi.io/api/${metal}/AED`, {
+          headers: { "x-access-token": keyToUse, "Content-Type": "application/json" },
+        });
+        if (r.ok) {
+          const data = await r.json();
+          if (data?.price > 0) return sym.endsWith("_G") ? data.price / OZ_TO_G : data.price;
+        }
+      } catch {}
+    }
+    try {
+      const ticker = metal === "XAU" ? "XAUUSD=X" : "XAGUSD=X";
+      const r = await fetch(proxy(`https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`));
+      const w = await r.json();
+      const p = JSON.parse(w?.contents ?? "{}")?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+      if (p > 0) {
+        const aed = p * usdToAed;
+        return sym.endsWith("_G") ? aed / OZ_TO_G : aed;
+      }
+    } catch {}
+    return null;
+  }
+
+  if (sym === "PARKIN.DFM") {
+    try {
+      const r = await fetch(proxy("https://parkin.ae/stock-price"));
+      const wrapper = await r.json();
+      const html: string = wrapper?.contents ?? "";
+      const pats = [
+        /TickerValueTD_LastPrice[^>]*>([\d.]+)/,
+        /TickerValueTD[^>]*LastPrice[^>]*>([\d.]+)/,
+        /"lastPrice"\s*:\s*"?([\d.]+)"?/,
+        /"last"\s*:\s*([\d.]+)/,
+        /PARK[A-Z.]*[^<]{0,30}([\d]{1,3}\.[\d]{1,4})/,
+      ];
+      for (const pat of pats) {
+        const m = html.match(pat);
+        if (m) {
+          const v = parseFloat(m[1]);
+          if (v > 0) return v;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  return null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(r: any): PortfolioItem {
   return {
@@ -98,6 +172,7 @@ function dbToItem(r: any): PortfolioItem {
     currentPrice: r.current_price ?? null,
     currentPriceUpdatedAt: r.current_price_updated_at ?? null,
     notes: r.notes ?? "",
+    livePriceSymbol: r.live_price_symbol ?? null,
   };
 }
 
@@ -152,6 +227,7 @@ export default function PortfolioItemPage({
   const [newPrice, setNewPrice] = useState("");
   const [toast, setToast] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [livePriceSymbolInput, setLivePriceSymbolInput] = useState("");
 
   const [alertForm, setAlertForm] = useState({
     alertType: "above" as AlertType,
@@ -200,7 +276,11 @@ export default function PortfolioItemPage({
           .order("created_at", { ascending: false }),
       ]);
 
-      if (itemRes.data) setItem(dbToItem(itemRes.data));
+      if (itemRes.data) {
+        const mapped = dbToItem(itemRes.data);
+        setItem(mapped);
+        setLivePriceSymbolInput(mapped.livePriceSymbol ?? "");
+      }
       if (purRes.data) setPurchases(purRes.data.map(dbToPurchase));
       if (alertRes.data) setAlerts(alertRes.data.map(dbToAlert));
 
@@ -511,6 +591,43 @@ export default function PortfolioItemPage({
     showToast("Price updated");
   }
 
+  async function saveLivePriceLink() {
+    if (!item) return;
+    await supabase
+      .from("portfolio_items")
+      .update({ live_price_symbol: livePriceSymbolInput || null })
+      .eq("id", item.id);
+    setItem((p) => (p ? { ...p, livePriceSymbol: livePriceSymbolInput || null } : p));
+    showToast("Live price link updated");
+  }
+
+  async function fetchLinkedLivePrice() {
+    if (!item?.livePriceSymbol && !livePriceSymbolInput) {
+      showToast("Choose a live price link first");
+      return;
+    }
+    const link = livePriceSymbolInput || item?.livePriceSymbol || "";
+    const price = await fetchPriceForLiveLink(link);
+    if (!price || price <= 0) {
+      showToast("Could not fetch linked live price");
+      return;
+    }
+    const nowIso = nowDubai();
+    await supabase
+      .from("portfolio_items")
+      .update({
+        current_price: price,
+        current_price_updated_at: nowIso,
+        live_price_symbol: link || null,
+      })
+      .eq("id", item.id);
+    setItem((p) =>
+      p ? { ...p, currentPrice: price, currentPriceUpdatedAt: nowIso, livePriceSymbol: link || null } : p
+    );
+    setLivePriceSymbolInput(link);
+    showToast("Linked live price fetched");
+  }
+
   async function deleteItem() {
     if (!item || !userId) return;
     await supabase.from("portfolio_alerts").delete().eq("item_id", item.id);
@@ -717,6 +834,34 @@ export default function PortfolioItemPage({
                   No current price set, click Update price to set it
                 </span>
               )}
+
+              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                  Live price link
+                </div>
+                <select
+                  style={inp}
+                  value={livePriceSymbolInput}
+                  onChange={(e) => setLivePriceSymbolInput(e.target.value)}
+                >
+                  {LIVE_PRICE_OPTIONS.map((opt) => (
+                    <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button style={{ ...btn, padding: "6px 12px", fontSize: 12 }} onClick={saveLivePriceLink}>
+                    Save link
+                  </button>
+                  <button style={{ ...btnPrimary, padding: "6px 12px", fontSize: 12 }} onClick={fetchLinkedLivePrice}>
+                    Fetch linked price
+                  </button>
+                </div>
+                {(item.livePriceSymbol || livePriceSymbolInput) && (
+                  <div style={{ fontSize: 11, color: V.faint }}>
+                    Current link: {livePriceSymbolInput || item.livePriceSymbol}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>

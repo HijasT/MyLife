@@ -131,6 +131,94 @@ async function fetchLivePrice(symbol: string): Promise<number | null> {
   }
 }
 
+
+async function fetchPriceForLiveLink(link: string): Promise<number | null> {
+  const sym = (link || "").toUpperCase();
+  const proxy = (url: string) =>
+    `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+
+  let usdToAed = FX.USD;
+  try {
+    const fxRes = await fetch(
+      "https://api.frankfurter.app/latest?from=USD&to=AED"
+    );
+    const fxData = await fxRes.json();
+    if (fxData?.rates?.AED) usdToAed = fxData.rates.AED;
+  } catch {
+    // fallback
+  }
+
+  const OZ_TO_G = 31.1034768;
+
+  if (sym === "XAU_OZ" || sym === "XAU_G" || sym === "XAG_OZ" || sym === "XAG_G") {
+    const metal = sym.startsWith("XAU") ? "XAU" : "XAG";
+    const keyToUse = process.env.NEXT_PUBLIC_GOLDAPI_KEY || "";
+
+    if (keyToUse) {
+      try {
+        const r = await fetch(`https://www.goldapi.io/api/${metal}/AED`, {
+          headers: {
+            "x-access-token": keyToUse,
+            "Content-Type": "application/json",
+          },
+        });
+        if (r.ok) {
+          const data = await r.json();
+          if (data?.price > 0) {
+            return sym.endsWith("_G") ? data.price / OZ_TO_G : data.price;
+          }
+        }
+      } catch {
+        // fallback below
+      }
+    }
+
+    const yahooTicker = metal === "XAU" ? "XAUUSD=X" : "XAGUSD=X";
+    try {
+      const r = await fetch(
+        proxy(
+          `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?interval=1d&range=5d`
+        )
+      );
+      const wrapper = await r.json();
+      const data = JSON.parse(wrapper?.contents ?? "{}");
+      const usdPrice = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
+      if (usdPrice > 0) {
+        const aedPrice = usdPrice * usdToAed;
+        return sym.endsWith("_G") ? aedPrice / OZ_TO_G : aedPrice;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  if (sym === "PARKIN.DFM") {
+    try {
+      const r = await fetch(proxy("https://parkin.ae/stock-price"));
+      const wrapper = await r.json();
+      const html = wrapper?.contents ?? "";
+      const pats = [
+        /TickerValueTD_LastPrice[^>]*>([\d.]+)/,
+        /TickerValueTD[^>]*LastPrice[^>]*>([\d.]+)/,
+        /"lastPrice"\s*:\s*"?([\d.]+)"?/, 
+        /"last"\s*:\s*([\d.]+)/,
+        /PARK[A-Z.]*[^<]{0,30}([\d]{1,3}\.[\d]{1,4})/,
+      ];
+      for (const pat of pats) {
+        const m = html.match(pat);
+        if (m) {
+          const price = parseFloat(m[1]);
+          if (price > 0) return price;
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return fetchLivePrice(sym);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dbToItem = (r: any): PortfolioItem => ({
   id: r.id,
@@ -340,15 +428,17 @@ export default function PortfolioPage() {
   async function fetchAllLivePrices() {
     setLiveLoading(true);
 
-    const updatable = items.filter((i) =>
-      ["gold", "silver", "stock", "crypto"].includes(i.assetType)
+    const updatable = items.filter(
+      (i) => i.livePriceSymbol || ["gold", "silver", "stock", "crypto"].includes(i.assetType)
     );
 
     const updates: PortfolioItem[] = [...items];
 
     await Promise.all(
       updatable.map(async (item) => {
-        const price = await fetchLivePrice(item.symbol);
+        const price = item.livePriceSymbol
+          ? await fetchPriceForLiveLink(item.livePriceSymbol)
+          : await fetchLivePrice(item.symbol);
         if (price && price > 0) {
           const nowIso = new Date().toISOString();
 
