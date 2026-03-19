@@ -581,7 +581,7 @@ export default function PortfolioItemPage({
     await supabase
       .from("portfolio_items")
       .update({ current_price: price, current_price_updated_at: nowDubai() })
-      .eq("id", item.id);
+      .eq("id", itemId);
 
     setItem((p) =>
       p ? { ...p, currentPrice: price, currentPriceUpdatedAt: nowDubai() } : p
@@ -602,11 +602,16 @@ export default function PortfolioItemPage({
   }
 
   async function fetchLinkedLivePrice() {
-    if (!item?.livePriceSymbol && !livePriceSymbolInput) {
+    if (!item) {
+      showToast("Asset not loaded yet");
+      return;
+    }
+    if (!item.livePriceSymbol && !livePriceSymbolInput) {
       showToast("Choose a live price link first");
       return;
     }
-    const link = livePriceSymbolInput || item?.livePriceSymbol || "";
+    const itemId = item.id;
+    const link = livePriceSymbolInput || item.livePriceSymbol || "";
     const price = await fetchPriceForLiveLink(link);
     if (!price || price <= 0) {
       showToast("Could not fetch linked live price");
