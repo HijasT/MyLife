@@ -37,6 +37,12 @@ type DueEntry = {
   lastPaidAt: string | null;
 };
 
+type PaymentModalState = {
+  item: DueItem;
+  entry: DueEntry;
+  remaining: number;
+};
+
 type MonthSettings = {
   month: string;
   mainCurrency: Currency;
@@ -306,6 +312,10 @@ export default function DueTrackerPage() {
   const [isDark, setIsDark] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [remittanceEditMode, setRemittanceEditMode] = useState(false);
+  const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [savingPayment, setSavingPayment] = useState(false);
   const [newItem, setNewItem] = useState({
     name: "",
     group: "UAE",
@@ -464,7 +474,7 @@ export default function DueTrackerPage() {
     return refreshed;
   }
 
-  async function addPaymentToEntry(item: DueItem, explicitAmount?: number, explicitNote?: string) {
+  async function openPaymentModal(item: DueItem) {
     if (settings.isLocked) {
       showToast("Month is locked");
       return;
@@ -477,23 +487,44 @@ export default function DueTrackerPage() {
         showToast("Nothing left to pay");
         return;
       }
-      const rawAmount = explicitAmount ?? Number(window.prompt(`Payment amount for ${item.name} (${entry.currency}). Remaining: ${entry.currency} ${remaining.toFixed(2)}`, remaining.toFixed(2)));
-      if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
-        showToast("Payment cancelled");
-        return;
-      }
-      const rawNote = explicitNote ?? window.prompt("Payment note (optional)", "") ?? "";
+      setPaymentModal({ item, entry, remaining });
+      setPaymentAmount(remaining.toFixed(2));
+      setPaymentNote("");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not open payment form");
+    }
+  }
+
+  function closePaymentModal() {
+    if (savingPayment) return;
+    setPaymentModal(null);
+    setPaymentAmount("");
+    setPaymentNote("");
+  }
+
+  async function submitPaymentModal() {
+    if (!paymentModal || !userId) return;
+    const amount = Number(paymentAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast("Enter a valid payment amount");
+      return;
+    }
+    setSavingPayment(true);
+    try {
       const { error } = await supabase.from("due_payments").insert({
         user_id: userId,
-        due_entry_id: entry.id,
-        paid_amount: rawAmount,
-        note: rawNote.trim() || null,
+        due_entry_id: paymentModal.entry.id,
+        paid_amount: amount,
+        note: paymentNote.trim() || null,
       });
       if (error) throw error;
-      await refreshEntry(entry.id);
-      showToast(rawAmount >= remaining ? "Payment saved and cleared" : "Partial payment saved");
+      await refreshEntry(paymentModal.entry.id);
+      closePaymentModal();
+      showToast(amount >= paymentModal.remaining ? "Payment saved and cleared" : "Partial payment saved");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not save payment");
+    } finally {
+      setSavingPayment(false);
     }
   }
 
@@ -503,7 +534,7 @@ export default function DueTrackerPage() {
       return;
     }
     if (status === "paid" || status === "partial") {
-      await addPaymentToEntry(item);
+      await openPaymentModal(item);
       return;
     }
     try {
@@ -1130,7 +1161,7 @@ export default function DueTrackerPage() {
                       </div>
 
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                        <button onClick={() => void addPaymentToEntry(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>{entry && entry.amountPaid > 0 ? "Add payment" : "Pay"}</button>
+                        <button onClick={() => void openPaymentModal(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>{entry && entry.amountPaid > 0 ? "Add payment" : "Pay"}</button>
                         <button onClick={() => router.push(`/dashboard/budget/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
                         <button onClick={() => setEditItemId(isEditing ? null : item.id)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: isEditing ? V.accent : V.muted }}>{isEditing ? "Done" : "Edit"}</button>
                         <button onClick={() => void toggleHide(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.faint }}>{item.isHidden ? "Show" : "Hide"}</button>
@@ -1240,6 +1271,81 @@ export default function DueTrackerPage() {
             <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button style={btn} onClick={() => setShowSettings(false)}>Cancel</button>
               <button style={btnP} onClick={() => void saveSettings()}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {paymentModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={closePaymentModal}
+        >
+          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
+                <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{paymentModal.item.name} · {fmtMonth(month)}</div>
+              </div>
+              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment}>✕</button>
+            </div>
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Total</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModal.entry.currency} {(paymentModal.entry.amount ?? 0).toFixed(2)}</div>
+                </div>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Paid so far</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: paymentModal.entry.amountPaid > 0 ? "#16a34a" : V.text }}>{paymentModal.entry.currency} {(paymentModal.entry.amountPaid ?? 0).toFixed(2)}</div>
+                </div>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Remaining</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: V.accent }}>{paymentModal.entry.currency} {paymentModal.remaining.toFixed(2)}</div>
+                </div>
+              </div>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Payment amount
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max={paymentModal.remaining}
+                  style={inp}
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  placeholder={paymentModal.remaining.toFixed(2)}
+                  disabled={savingPayment}
+                />
+              </label>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(paymentModal.remaining.toFixed(2))} disabled={savingPayment}>Use remaining</button>
+                {paymentModal.remaining > 1 && (
+                  <button type="button" style={btn} onClick={() => setPaymentAmount((paymentModal.remaining / 2).toFixed(2))} disabled={savingPayment}>Half</button>
+                )}
+              </div>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Note
+                <textarea
+                  style={{ ...inp, minHeight: 92, resize: "vertical" as const }}
+                  value={paymentNote}
+                  onChange={(e) => setPaymentNote(e.target.value)}
+                  placeholder="Optional note, reference, transfer details, emotional damage, whatever helps later."
+                  disabled={savingPayment}
+                />
+              </label>
+            </div>
+            <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, color: V.faint }}>
+                New remaining after this payment: {paymentModal.entry.currency} {Math.max(paymentModal.remaining - (Number(paymentAmount) || 0), 0).toFixed(2)}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>Cancel</button>
+                <button style={btnP} onClick={() => void submitPaymentModal()} disabled={savingPayment}>{savingPayment ? "Saving..." : "Save payment"}</button>
+              </div>
             </div>
           </div>
         </div>

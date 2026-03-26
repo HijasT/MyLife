@@ -136,6 +136,10 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   const [editStatDay, setEditStatDay] = useState("");
   const [editDueDay, setEditDueDay] = useState("");
   const [editingDates, setEditingDates] = useState(false);
+  const [paymentModalEntry, setPaymentModalEntry] = useState<DueEntry | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [savingPayment, setSavingPayment] = useState(false);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -278,37 +282,51 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     return refreshed;
   }
 
-  async function addPayment(entry: DueEntry) {
+  function openPaymentModal(entry: DueEntry) {
     if (monthLocks[entry.month]) {
       showToast("That month is locked");
       return;
     }
-    if (!userId) return;
-
     const remaining = Math.max((entry.amount ?? 0) - (entry.amountPaid ?? 0), 0);
     if (remaining <= 0) {
       showToast("Nothing left to pay");
       return;
     }
+    setPaymentModalEntry(entry);
+    setPaymentAmount(remaining.toFixed(2));
+    setPaymentNote("");
+  }
 
-    const amount = Number(window.prompt(`Payment amount for ${fmtMonth(entry.month)} (${entry.currency}). Remaining: ${entry.currency} ${remaining.toFixed(2)}`, remaining.toFixed(2)));
+  function closePaymentModal() {
+    if (savingPayment) return;
+    setPaymentModalEntry(null);
+    setPaymentAmount("");
+    setPaymentNote("");
+  }
+
+  async function submitPaymentModal() {
+    if (!paymentModalEntry || !userId) return;
+    const amount = Number(paymentAmount);
+    const remaining = Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0);
     if (!Number.isFinite(amount) || amount <= 0) {
-      showToast("Payment cancelled");
+      showToast("Enter a valid payment amount");
       return;
     }
-    const note = window.prompt("Payment note (optional)", "") ?? "";
-
+    setSavingPayment(true);
     const { error } = await supabase.from("due_payments").insert({
       user_id: userId,
-      due_entry_id: entry.id,
+      due_entry_id: paymentModalEntry.id,
       paid_amount: amount,
-      note: note.trim() || null,
+      note: paymentNote.trim() || null,
     });
     if (error) {
+      setSavingPayment(false);
       showToast(error.message);
       return;
     }
-    await refreshEntry(entry.id);
+    await refreshEntry(paymentModalEntry.id);
+    closePaymentModal();
+    setSavingPayment(false);
     showToast(amount >= remaining ? "Payment saved and cleared" : "Partial payment saved");
   }
 
@@ -396,7 +414,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     if (monthLocks[entry.month] ) { showToast("That month is locked"); return; }
     if (!userId) return;
     if (status === "paid" || status === "partial") {
-      await addPayment(entry);
+      openPaymentModal(entry);
       return;
     }
     const { error } = await supabase.from("due_entries").update({ status, paid_at: null }).eq("id", entry.id).eq("user_id", userId);
@@ -677,6 +695,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                         {entry.currency !== "AED" && entry.amount !== null && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {aed.toFixed(0)}</div>}
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, display: "inline-block", marginTop: 3, background: tone.bg, color: tone.fg }}>{entry.status}</span>
                       </div>
+                      <button style={{ ...btn, color: "#16a34a" }} onClick={() => openPaymentModal(entry)} disabled={monthLocks[entry.month]}>Add payment</button>
                       <button style={btn} onClick={() => startEdit(entry)}>Edit</button>
                     </div>
                   </div>
@@ -699,6 +718,62 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
           })}
         </div>
       </div>
+
+      {paymentModalEntry && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 55, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={closePaymentModal}>
+          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
+                <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{item?.name ?? "Due item"} · {fmtMonth(paymentModalEntry.month)}</div>
+              </div>
+              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment}>✕</button>
+            </div>
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Total</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModalEntry.currency} {(paymentModalEntry.amount ?? 0).toFixed(2)}</div>
+                </div>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Paid so far</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: paymentModalEntry.amountPaid > 0 ? "#16a34a" : V.text }}>{paymentModalEntry.currency} {(paymentModalEntry.amountPaid ?? 0).toFixed(2)}</div>
+                </div>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Remaining</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: V.accent }}>{paymentModalEntry.currency} {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2)}</div>
+                </div>
+              </div>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Payment amount
+                <input type="number" step="0.01" min="0.01" style={inp} value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} disabled={savingPayment} />
+              </label>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2))} disabled={savingPayment}>Use remaining</button>
+                {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) > 1 && (
+                  <button type="button" style={btn} onClick={() => setPaymentAmount((Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) / 2).toFixed(2))} disabled={savingPayment}>Half</button>
+                )}
+              </div>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Note
+                <textarea style={{ ...inp, minHeight: 92, resize: "vertical" as const }} value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} placeholder="Optional note or reference" disabled={savingPayment} />
+              </label>
+            </div>
+            <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, color: V.faint }}>
+                New remaining after this payment: {paymentModalEntry.currency} {Math.max(Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) - (Number(paymentAmount) || 0), 0).toFixed(2)}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>Cancel</button>
+                <button style={btnP} onClick={() => void submitPaymentModal()} disabled={savingPayment}>{savingPayment ? "Saving..." : "Save payment"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddMonth && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowAddMonth(false)}>
