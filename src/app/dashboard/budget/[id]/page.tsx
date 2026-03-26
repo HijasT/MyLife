@@ -136,6 +136,10 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   const [editStatDay, setEditStatDay] = useState("");
   const [editDueDay, setEditDueDay] = useState("");
   const [editingDates, setEditingDates] = useState(false);
+  const [paymentModalEntry, setPaymentModalEntry] = useState<DueEntry | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [savingPayment, setSavingPayment] = useState(false);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -278,7 +282,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     return refreshed;
   }
 
-  async function openPaymentModal(entry: DueEntry) {
+  function openPaymentModal(entry: DueEntry) {
     if (monthLocks[entry.month]) {
       showToast("That month is locked");
       return;
@@ -301,37 +305,29 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   }
 
   async function submitPaymentModal() {
-    const entry = paymentModalEntry;
-    if (!entry || !userId) return;
-
-    const remaining = Math.max((entry.amount ?? 0) - (entry.amountPaid ?? 0), 0);
+    if (!paymentModalEntry || !userId) return;
     const amount = Number(paymentAmount);
+    const remaining = Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0);
     if (!Number.isFinite(amount) || amount <= 0) {
       showToast("Enter a valid payment amount");
       return;
     }
-    if (amount > remaining) {
-      showToast(`Amount cannot exceed remaining ${entry.currency} ${remaining.toFixed(2)}`);
+    setSavingPayment(true);
+    const { error } = await supabase.from("due_payments").insert({
+      user_id: userId,
+      due_entry_id: paymentModalEntry.id,
+      paid_amount: amount,
+      note: paymentNote.trim() || null,
+    });
+    if (error) {
+      setSavingPayment(false);
+      showToast(error.message);
       return;
     }
-
-    try {
-      setSavingPayment(true);
-      const { error } = await supabase.from("due_payments").insert({
-        user_id: userId,
-        due_entry_id: entry.id,
-        paid_amount: amount,
-        note: paymentNote.trim() || null,
-      });
-      if (error) throw error;
-      await refreshEntry(entry.id);
-      closePaymentModal();
-      showToast(amount >= remaining ? "Payment saved and cleared" : "Partial payment saved");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not save payment");
-    } finally {
-      setSavingPayment(false);
-    }
+    await refreshEntry(paymentModalEntry.id);
+    closePaymentModal();
+    setSavingPayment(false);
+    showToast(amount >= remaining ? "Payment saved and cleared" : "Partial payment saved");
   }
 
   async function saveDates() {
@@ -418,7 +414,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     if (monthLocks[entry.month] ) { showToast("That month is locked"); return; }
     if (!userId) return;
     if (status === "paid" || status === "partial") {
-      await openPaymentModal(entry);
+      openPaymentModal(entry);
       return;
     }
     const { error } = await supabase.from("due_entries").update({ status, paid_at: null }).eq("id", entry.id).eq("user_id", userId);
@@ -699,6 +695,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                         {entry.currency !== "AED" && entry.amount !== null && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {aed.toFixed(0)}</div>}
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, display: "inline-block", marginTop: 3, background: tone.bg, color: tone.fg }}>{entry.status}</span>
                       </div>
+                      <button style={{ ...btn, color: "#16a34a" }} onClick={() => openPaymentModal(entry)} disabled={monthLocks[entry.month]}>Add payment</button>
                       <button style={btn} onClick={() => startEdit(entry)}>Edit</button>
                     </div>
                   </div>
@@ -721,6 +718,62 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
           })}
         </div>
       </div>
+
+      {paymentModalEntry && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 55, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={closePaymentModal}>
+          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
+                <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{item?.name ?? "Due item"} · {fmtMonth(paymentModalEntry.month)}</div>
+              </div>
+              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment}>✕</button>
+            </div>
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Total</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModalEntry.currency} {(paymentModalEntry.amount ?? 0).toFixed(2)}</div>
+                </div>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Paid so far</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: paymentModalEntry.amountPaid > 0 ? "#16a34a" : V.text }}>{paymentModalEntry.currency} {(paymentModalEntry.amountPaid ?? 0).toFixed(2)}</div>
+                </div>
+                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Remaining</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: V.accent }}>{paymentModalEntry.currency} {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2)}</div>
+                </div>
+              </div>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Payment amount
+                <input type="number" step="0.01" min="0.01" style={inp} value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} disabled={savingPayment} />
+              </label>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2))} disabled={savingPayment}>Use remaining</button>
+                {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) > 1 && (
+                  <button type="button" style={btn} onClick={() => setPaymentAmount((Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) / 2).toFixed(2))} disabled={savingPayment}>Half</button>
+                )}
+              </div>
+
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Note
+                <textarea style={{ ...inp, minHeight: 92, resize: "vertical" as const }} value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} placeholder="Optional note or reference" disabled={savingPayment} />
+              </label>
+            </div>
+            <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, color: V.faint }}>
+                New remaining after this payment: {paymentModalEntry.currency} {Math.max(Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) - (Number(paymentAmount) || 0), 0).toFixed(2)}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>Cancel</button>
+                <button style={btnP} onClick={() => void submitPaymentModal()} disabled={savingPayment}>{savingPayment ? "Saving..." : "Save payment"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAddMonth && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowAddMonth(false)}>
@@ -758,54 +811,6 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
             <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button style={btn} onClick={() => setShowAddMonth(false)}>Cancel</button>
               <button style={btnP} onClick={() => void addMissingMonth()}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {paymentModalEntry && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={closePaymentModal}>
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.1em" }}>{fmtMonth(paymentModalEntry.month)}</div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
-                <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{item?.name ?? "Due item"}</div>
-              </div>
-              <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>✕</button>
-            </div>
-            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
-                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase" }}>Total</div>
-                  <div style={{ fontSize: 16, fontWeight: 800 }}>{paymentModalEntry.currency} {(paymentModalEntry.amount ?? 0).toFixed(2)}</div>
-                </div>
-                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase" }}>Paid so far</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: paymentModalEntry.amountPaid > 0 ? V.accent : V.text }}>{paymentModalEntry.currency} {(paymentModalEntry.amountPaid ?? 0).toFixed(2)}</div>
-                </div>
-                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase" }}>Remaining</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: "#ef4444" }}>{paymentModalEntry.currency} {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2)}</div>
-                </div>
-              </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Payment amount
-                <input autoFocus type="number" min="0.01" step="0.01" style={{ ...inp, width: "100%", boxSizing: "border-box" }} value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-              </label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="button" style={btn} onClick={() => setPaymentAmount(Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2))}>Full remaining</button>
-                <button type="button" style={btn} onClick={() => setPaymentAmount((Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) / 2).toFixed(2))}>Half</button>
-                <button type="button" style={btn} onClick={() => setPaymentAmount("")}>Clear</button>
-              </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Note
-                <textarea style={{ ...inp, resize: "vertical", minHeight: 80 }} value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} placeholder="Optional note, like cash or transfer" />
-              </label>
-            </div>
-            <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>Cancel</button>
-              <button style={{ ...btnP, opacity: savingPayment ? 0.7 : 1 }} onClick={() => void submitPaymentModal()} disabled={savingPayment}>{savingPayment ? "Saving..." : "Save payment"}</button>
             </div>
           </div>
         </div>
