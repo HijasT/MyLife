@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { nowDubai } from "@/lib/timezone";
 
 type Currency = "AED" | "INR" | "USD";
-type Status = "pending" | "paid" | "skipped" | "waived";
+type Status = "pending" | "partial" | "paid" | "skipped" | "waived";
 
 type DueItem = {
   id: string;
@@ -28,11 +28,21 @@ type DueEntry = {
   status: Status;
   paidAt: string | null;
   note: string;
+  amountPaid: number;
+  lastPaidAt: string | null;
 };
 
 type DueItemNav = {
   id: string;
   name: string;
+};
+
+type DuePayment = {
+  id: string;
+  dueEntryId: string;
+  paidAmount: number;
+  paidAt: string;
+  note: string;
 };
 
 function fmtMonth(m: string) {
@@ -81,8 +91,9 @@ function ordinal(n: number) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
+  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
   if (status === "skipped") return { bg: "rgba(99,102,241,0.12)", fg: "#6366f1" };
-  if (status === "waived") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
+  if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
 
@@ -102,6 +113,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   const [item, setItem] = useState<DueItem | null>(null);
   const [itemNav, setItemNav] = useState<DueItemNav[]>([]);
   const [entries, setEntries] = useState<DueEntry[]>([]);
+  const [paymentsByEntry, setPaymentsByEntry] = useState<Record<string, DuePayment[]>>({});
   const [fxByMonth, setFxByMonth] = useState<Record<string, Record<string, number>>>({});
   const [monthLocks, setMonthLocks] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -176,7 +188,34 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
           status: (e.status ?? "pending") as Status,
           paidAt: e.paid_at ?? null,
           note: e.note ?? "",
+          amountPaid: Number((e as { amount_paid?: number | null }).amount_paid ?? 0),
+          lastPaidAt: (e as { last_paid_at?: string | null }).last_paid_at ?? null,
         })));
+
+        const entryIds = entriesRes.data.map((e: { id: string }) => e.id);
+        if (entryIds.length > 0) {
+          const paymentsRes = await supabase
+            .from("due_payments")
+            .select("*")
+            .in("due_entry_id", entryIds)
+            .eq("user_id", user.id)
+            .order("paid_at", { ascending: false });
+
+          if (paymentsRes.data) {
+            const grouped: Record<string, DuePayment[]> = {};
+            for (const row of paymentsRes.data as Array<{ id: string; due_entry_id: string; paid_amount: number; paid_at: string; note: string | null }>) {
+              if (!grouped[row.due_entry_id]) grouped[row.due_entry_id] = [];
+              grouped[row.due_entry_id].push({
+                id: row.id,
+                dueEntryId: row.due_entry_id,
+                paidAmount: Number(row.paid_amount ?? 0),
+                paidAt: row.paid_at,
+                note: row.note ?? "",
+              });
+            }
+            setPaymentsByEntry(grouped);
+          }
+        }
       }
 
       if (settingsRes.data) {
@@ -201,6 +240,76 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     setToast(msg);
     window.clearTimeout((showToast as unknown as { timer?: number }).timer);
     (showToast as unknown as { timer?: number }).timer = window.setTimeout(() => setToast(""), 2500);
+  }
+
+  async function refreshEntry(entryId: string) {
+    const [entryRes, paymentsRes] = await Promise.all([
+      supabase.from("due_entries").select("*").eq("id", entryId).maybeSingle(),
+      supabase.from("due_payments").select("*").eq("due_entry_id", entryId).eq("user_id", userId ?? "").order("paid_at", { ascending: false }),
+    ]);
+
+    if (entryRes.error || !entryRes.data) {
+      throw new Error(entryRes.error?.message ?? "Could not refresh due entry");
+    }
+
+    const refreshed: DueEntry = {
+      id: entryRes.data.id,
+      month: entryRes.data.month,
+      amount: entryRes.data.amount ?? null,
+      currency: (entryRes.data.currency ?? "AED") as Currency,
+      status: (entryRes.data.status ?? "pending") as Status,
+      paidAt: entryRes.data.paid_at ?? null,
+      note: entryRes.data.note ?? "",
+      amountPaid: Number(entryRes.data.amount_paid ?? 0),
+      lastPaidAt: entryRes.data.last_paid_at ?? null,
+    };
+
+    setEntries((prev) => prev.map((entry) => (entry.id === entryId ? refreshed : entry)));
+    setPaymentsByEntry((prev) => ({
+      ...prev,
+      [entryId]: (paymentsRes.data ?? []).map((row: { id: string; due_entry_id: string; paid_amount: number; paid_at: string; note: string | null }) => ({
+        id: row.id,
+        dueEntryId: row.due_entry_id,
+        paidAmount: Number(row.paid_amount ?? 0),
+        paidAt: row.paid_at,
+        note: row.note ?? "",
+      })),
+    }));
+    return refreshed;
+  }
+
+  async function addPayment(entry: DueEntry) {
+    if (monthLocks[entry.month]) {
+      showToast("That month is locked");
+      return;
+    }
+    if (!userId) return;
+
+    const remaining = Math.max((entry.amount ?? 0) - (entry.amountPaid ?? 0), 0);
+    if (remaining <= 0) {
+      showToast("Nothing left to pay");
+      return;
+    }
+
+    const amount = Number(window.prompt(`Payment amount for ${fmtMonth(entry.month)} (${entry.currency}). Remaining: ${entry.currency} ${remaining.toFixed(2)}`, remaining.toFixed(2)));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast("Payment cancelled");
+      return;
+    }
+    const note = window.prompt("Payment note (optional)", "") ?? "";
+
+    const { error } = await supabase.from("due_payments").insert({
+      user_id: userId,
+      due_entry_id: entry.id,
+      paid_amount: amount,
+      note: note.trim() || null,
+    });
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await refreshEntry(entry.id);
+    showToast(amount >= remaining ? "Payment saved and cleared" : "Partial payment saved");
   }
 
   async function saveDates() {
@@ -228,13 +337,16 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   async function saveEdit(entry: DueEntry) {
     if (!userId) return;
     const amount = editAmount === "" ? null : Number(editAmount);
-    const paidAt = editStatus === "paid" ? entry.paidAt ?? nowDubai() : null;
-    const { error } = await supabase.from("due_entries").update({ amount, currency: editCurrency, note: editNote, status: editStatus, paid_at: paidAt }).eq("id", entry.id).eq("user_id", userId);
+    const { error } = await supabase
+      .from("due_entries")
+      .update({ amount, currency: editCurrency, note: editNote, status: editStatus, paid_at: null })
+      .eq("id", entry.id)
+      .eq("user_id", userId);
     if (error) {
       showToast(error.message);
       return;
     }
-    setEntries((p) => p.map((e) => (e.id === entry.id ? { ...e, amount, currency: editCurrency, note: editNote, status: editStatus, paidAt } : e)));
+    await refreshEntry(entry.id);
     setEditingMonth(null);
     showToast("Updated");
   }
@@ -246,7 +358,6 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       return;
     }
     const amount = newAmount === "" ? item.defaultAmount : Number(newAmount);
-    const paidAt = newStatus === "paid" ? nowDubai() : null;
     const { data, error } = await supabase.from("due_entries").insert({
       user_id: userId,
       due_item_id: item.id,
@@ -255,7 +366,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       currency: newCurrency,
       status: newStatus,
       note: newNote,
-      paid_at: paidAt,
+      paid_at: null,
     }).select("*").single();
     if (error || !data) {
       showToast(error?.message ?? "Could not add month");
@@ -269,6 +380,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       status: (data.status ?? "pending") as Status,
       paidAt: data.paid_at ?? null,
       note: data.note ?? "",
+      amountPaid: Number(data.amount_paid ?? 0),
+      lastPaidAt: data.last_paid_at ?? null,
     };
     setEntries((p) => [entry, ...p].sort((a, b) => b.month.localeCompare(a.month)));
     setShowAddMonth(false);
@@ -282,13 +395,16 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   async function updateStatus(entry: DueEntry, status: Status) {
     if (monthLocks[entry.month] ) { showToast("That month is locked"); return; }
     if (!userId) return;
-    const paidAt = status === "paid" ? entry.paidAt ?? nowDubai() : null;
-    const { error } = await supabase.from("due_entries").update({ status, paid_at: paidAt }).eq("id", entry.id).eq("user_id", userId);
+    if (status === "paid" || status === "partial") {
+      await addPayment(entry);
+      return;
+    }
+    const { error } = await supabase.from("due_entries").update({ status, paid_at: null }).eq("id", entry.id).eq("user_id", userId);
     if (error) {
       showToast(error.message);
       return;
     }
-    setEntries((p) => p.map((e) => (e.id === entry.id ? { ...e, status, paidAt } : e)));
+    await refreshEntry(entry.id);
     showToast(`Status updated to ${status}`);
   }
 
@@ -304,13 +420,13 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   const stats = useMemo(() => {
     if (!item) return null;
     const settled = entries.filter((e) => isSettled(e.status));
-    const paid = entries.filter((e) => e.status === "paid");
+    const paid = entries.filter((e) => e.amountPaid > 0);
     const waived = entries.filter((e) => e.status === "waived").length;
     const skipped = entries.filter((e) => e.status === "skipped").length;
 
     let totalNative = 0;
     for (const e of paid) {
-      const amt = e.amount ?? 0;
+      const amt = e.amountPaid ?? 0;
       const fx = fxByMonth[e.month] ?? { INR: 25.2, USD: 3.67 };
       if (e.currency === nativeCurrency) totalNative += amt;
       else if (nativeCurrency === "AED") totalNative += toAed(amt, e.currency, fx);
@@ -515,7 +631,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                       </select>
                       <select disabled={monthLocks[entry.month]} style={inp} value={editStatus} onChange={(e) => setEditStatus(e.target.value as Status)}>
                         <option value="pending">Pending</option>
-                        <option value="paid">Paid</option>
+                        <option value="partial" disabled>Partial (from payments)</option>
+                        <option value="paid" disabled>Paid (from payments)</option>
                         <option value="skipped">Skipped</option>
                         <option value="waived">Waived</option>
                       </select>
@@ -531,6 +648,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                       <select value={entry.status} onChange={(e) => void updateStatus(entry, e.target.value as Status)} style={{ ...inp, width: 110, padding: "5px 8px", fontSize: 12 }}>
                         <option value="pending">Pending</option>
+                        <option value="partial">Partial</option>
                         <option value="paid">Paid</option>
                         <option value="skipped">Skipped</option>
                         <option value="waived">Waived</option>
@@ -538,7 +656,12 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(entry.month)}</div>
                         {entry.note && <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 2 }}>{entry.note}</div>}
-                        {entry.status === "paid" && <div style={{ fontSize: 11, color: "#16a34a", marginTop: 2 }}>Paid: {fmtDateTime(entry.paidAt)}</div>}
+                        {entry.amountPaid > 0 && (
+                          <div style={{ fontSize: 11, color: entry.status === "paid" ? "#16a34a" : V.accent, marginTop: 2 }}>
+                            Paid so far: {entry.currency} {entry.amountPaid.toFixed(2)} · Remaining: {entry.currency} {Math.max((entry.amount ?? 0) - entry.amountPaid, 0).toFixed(2)}
+                            {entry.lastPaidAt ? ` · Last: ${fmtDateTime(entry.lastPaidAt)}` : ""}
+                          </div>
+                        )}
                         {diffAbs !== null && (
                           <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
                             vs previous: {diffAbs > 0 ? "+" : ""}{entry.currency} {diffAbs.toFixed(0)} {diffPct !== null ? `(${diffPct > 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : "(new)"}
@@ -558,6 +681,19 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                     </div>
                   </div>
                 )}
+                {!isEditing && paymentsByEntry[entry.id]?.length ? (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${V.border}` }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, marginBottom: 8 }}>Payment history</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {paymentsByEntry[entry.id].map((payment) => (
+                        <div key={payment.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: V.muted, flexWrap: "wrap" }}>
+                          <span><strong style={{ color: V.text }}>{entry.currency} {payment.paidAmount.toFixed(2)}</strong>{payment.note ? ` · ${payment.note}` : ""}</span>
+                          <span>{fmtDateTime(payment.paidAt)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -583,7 +719,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                   Cur <select style={inp} value={newCurrency} onChange={(e) => setNewCurrency(e.target.value as Currency)}><option>AED</option><option>INR</option><option>USD</option></select>
                 </label>
                 <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Status <select style={inp} value={newStatus} onChange={(e) => setNewStatus(e.target.value as Status)}><option value="pending">Pending</option><option value="paid">Paid</option><option value="skipped">Skipped</option><option value="waived">Waived</option></select>
+                  Status <select style={inp} value={newStatus} onChange={(e) => setNewStatus(e.target.value as Status)}><option value="pending">Pending</option><option value="skipped">Skipped</option><option value="waived">Waived</option></select>
                 </label>
               </div>
               <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>

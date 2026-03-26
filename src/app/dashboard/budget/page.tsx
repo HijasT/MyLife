@@ -7,8 +7,8 @@ import { markSynced } from "@/hooks/useSyncStatus";
 import { nowDubai, todayDubai } from "@/lib/timezone";
 
 type Currency = "AED" | "INR" | "USD";
-type Status = "pending" | "paid" | "skipped" | "waived";
-type FilterKey = "all" | "pending" | "paid" | "skipped" | "waived" | "overdue" | "upcoming";
+type Status = "pending" | "partial" | "paid" | "skipped" | "waived";
+type FilterKey = "all" | "pending" | "partial" | "paid" | "skipped" | "waived" | "overdue" | "upcoming";
 type SortKey = "manual" | "dueDay" | "amountDesc" | "amountAsc" | "name" | "status";
 
 type DueItem = {
@@ -33,6 +33,8 @@ type DueEntry = {
   status: Status;
   paidAt: string | null;
   note: string;
+  amountPaid: number;
+  lastPaidAt: string | null;
 };
 
 type MonthSettings = {
@@ -224,8 +226,9 @@ function isPaid(status: Status) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
+  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
   if (status === "skipped") return { bg: "rgba(99,102,241,0.12)", fg: "#6366f1" };
-  if (status === "waived") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
+  if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
 
@@ -236,7 +239,7 @@ function parseNum(v: string) {
 
 function remittanceStatusFromRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
   const raw = row.cash_in?.__remittance_status;
-  if (raw === "pending" || raw === "paid" || raw === "skipped" || raw === "waived") return raw;
+  if (raw === "pending" || raw === "partial" || raw === "paid" || raw === "skipped" || raw === "waived") return raw;
   return row.remittance_paid ? "paid" : "pending";
 }
 
@@ -267,6 +270,8 @@ function dbToEntry(r: any): DueEntry {
     status: (r.status ?? "pending") as Status,
     paidAt: r.paid_at ?? null,
     note: r.note ?? "",
+    amountPaid: Number(r.amount_paid ?? 0),
+    lastPaidAt: r.last_paid_at ?? null,
   };
 }
 
@@ -448,21 +453,68 @@ export default function DueTrackerPage() {
     return created;
   }
 
-  async function updateEntryStatus(item: DueItem, status: Status) {
+  async function refreshEntry(entryId: string) {
+    const { data, error } = await supabase.from("due_entries").select("*").eq("id", entryId).maybeSingle();
+    if (error || !data) throw new Error(error?.message ?? "Could not refresh entry");
+    const refreshed = dbToEntry(data);
+    setEntries((p) => {
+      const exists = p.some((e) => e.id === entryId);
+      return exists ? p.map((e) => (e.id === entryId ? refreshed : e)) : [...p, refreshed];
+    });
+    return refreshed;
+  }
+
+  async function addPaymentToEntry(item: DueItem, explicitAmount?: number, explicitNote?: string) {
     if (settings.isLocked) {
       showToast("Month is locked");
       return;
     }
     try {
       const entry = await ensureEntry(item);
-      const paidAt = status === "paid" ? nowDubai() : null;
+      const totalAmount = entry.amount ?? item.defaultAmount ?? 0;
+      const remaining = Math.max(totalAmount - (entry.amountPaid ?? 0), 0);
+      if (remaining <= 0) {
+        showToast("Nothing left to pay");
+        return;
+      }
+      const rawAmount = explicitAmount ?? Number(window.prompt(`Payment amount for ${item.name} (${entry.currency}). Remaining: ${entry.currency} ${remaining.toFixed(2)}`, remaining.toFixed(2)));
+      if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+        showToast("Payment cancelled");
+        return;
+      }
+      const rawNote = explicitNote ?? window.prompt("Payment note (optional)", "") ?? "";
+      const { error } = await supabase.from("due_payments").insert({
+        user_id: userId,
+        due_entry_id: entry.id,
+        paid_amount: rawAmount,
+        note: rawNote.trim() || null,
+      });
+      if (error) throw error;
+      await refreshEntry(entry.id);
+      showToast(rawAmount >= remaining ? "Payment saved and cleared" : "Partial payment saved");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not save payment");
+    }
+  }
+
+  async function updateEntryStatus(item: DueItem, status: Status) {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
+    if (status === "paid" || status === "partial") {
+      await addPaymentToEntry(item);
+      return;
+    }
+    try {
+      const entry = await ensureEntry(item);
       const { error } = await supabase
         .from("due_entries")
-        .update({ status, paid_at: paidAt })
+        .update({ status, paid_at: null })
         .eq("id", entry.id)
         .eq("user_id", userId ?? "");
       if (error) throw error;
-      setEntries((p) => p.map((e) => (e.id === entry.id ? { ...e, status, paidAt } : e)));
+      await refreshEntry(entry.id);
       showToast(`Status updated to ${status}`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not update status");
@@ -709,7 +761,7 @@ export default function DueTrackerPage() {
   }, [visibleItems, entries, prevEntries, month, currentDay, today]);
 
   const filteredSortedItems = useMemo(() => {
-    const statusRank: Record<Status, number> = { pending: 0, paid: 1, skipped: 2, waived: 3 };
+    const statusRank: Record<Status, number> = { pending: 0, partial: 1, paid: 2, skipped: 3, waived: 4 };
     const filtered = enrichedItems.filter(({ entry, overdue, upcoming }) => {
       const status = entry?.status ?? "pending";
       if (filter === "all") return true;
@@ -946,6 +998,7 @@ export default function DueTrackerPage() {
                   <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
                     <select disabled={settings.isLocked} value={settings.remittanceStatus} onChange={(e) => setSettings((p) => ({ ...p, remittanceStatus: e.target.value as Status }))} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12 }}>
                       <option value="pending">Pending</option>
+                      <option value="partial">Partial</option>
                       <option value="paid">Paid</option>
                       <option value="skipped">Skipped</option>
                       <option value="waived">Waived</option>
@@ -974,6 +1027,7 @@ export default function DueTrackerPage() {
                           }}
                         >
                           <option value="pending">Pending</option>
+                          <option value="partial">Partial</option>
                           <option value="paid">Paid</option>
                           <option value="skipped">Skipped</option>
                           <option value="waived">Waived</option>
@@ -1013,6 +1067,7 @@ export default function DueTrackerPage() {
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                       <select disabled={settings.isLocked} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked ? 0.6 : 1 }}>
                         <option value="pending">Pending</option>
+                        <option value="partial">Partial</option>
                         <option value="paid">Paid</option>
                         <option value="skipped">Skipped</option>
                         <option value="waived">Waived</option>
@@ -1043,7 +1098,7 @@ export default function DueTrackerPage() {
                         ) : entry?.note ? (
                           <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 3 }}>{entry.note}</div>
                         ) : null}
-                        {isPaid(status) && entry?.paidAt && <div style={{ fontSize: 11, color: "#16a34a", marginTop: 3 }}>Paid: {fmtDateTime(entry.paidAt)}</div>}
+                        {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {Math.max((amount ?? 0) - entry.amountPaid, 0).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt)}` : ""}</div>}
                         {prev && diffAbs !== null && (
                           <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
                             vs last month: {diffAbs > 0 ? "+" : ""}{currency} {diffAbs.toFixed(0)}
@@ -1064,15 +1119,18 @@ export default function DueTrackerPage() {
                           </>
                         ) : (
                           <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, textDecoration: status === "waived" ? "line-through" : "none", color: status === "paid" ? "#16a34a" : status === "waived" ? V.faint : V.text }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, textDecoration: status === "waived" ? "line-through" : "none", color: status === "paid" ? "#16a34a" : status === "partial" ? V.accent : status === "waived" ? V.faint : V.text }}>
                               {currency} {amount.toLocaleString()}
                             </div>
+                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent }}>Paid {currency} {entry.amountPaid.toFixed(2)}</div>}
+                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: V.faint }}>Left {currency} {Math.max((amount ?? 0) - entry.amountPaid, 0).toFixed(2)}</div>}
                             {currency !== "AED" && amount > 0 && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {toAed(amount, currency, settings.fxRates).toFixed(0)}</div>}
                           </div>
                         )}
                       </div>
 
-                      <div style={{ display: "flex", gap: 5 }}>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                        <button onClick={() => void addPaymentToEntry(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>{entry && entry.amountPaid > 0 ? "Add payment" : "Pay"}</button>
                         <button onClick={() => router.push(`/dashboard/budget/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
                         <button onClick={() => setEditItemId(isEditing ? null : item.id)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: isEditing ? V.accent : V.muted }}>{isEditing ? "Done" : "Edit"}</button>
                         <button onClick={() => void toggleHide(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.faint }}>{item.isHidden ? "Show" : "Hide"}</button>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
-type Status = "pending" | "paid" | "skipped" | "waived";
+type Status = "pending" | "partial" | "paid" | "skipped" | "waived";
 
 type MonthRecord = {
   month: string;
@@ -25,6 +25,7 @@ function fmtMonth(m: string) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
+  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
   if (status === "skipped") return { bg: "rgba(99,102,241,0.12)", fg: "#6366f1" };
   if (status === "waived") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
@@ -32,7 +33,7 @@ function statusTone(status: Status) {
 
 function statusFromSettingsRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
   const raw = row.cash_in?.__remittance_status;
-  if (raw === "pending" || raw === "paid" || raw === "skipped" || raw === "waived") return raw;
+  if (raw === "pending" || raw === "partial" || raw === "paid" || raw === "skipped" || raw === "waived") return raw;
   return row.remittance_paid ? "paid" : "pending";
 }
 
@@ -200,7 +201,7 @@ export default function RemittancePage() {
   }
 
   const totalSent = useMemo(() => records.reduce((sum, record) => sum + record.remittanceAed, 0), [records]);
-  const totalPaid = useMemo(() => records.filter((r) => r.status === "paid").reduce((sum, record) => sum + record.remittanceAed, 0), [records]);
+  const totalPaid = useMemo(() => records.filter((r) => r.status === "paid" || r.status === "partial").reduce((sum, record) => sum + record.remittanceAed, 0), [records]);
   const totalVariance = useMemo(() => records.reduce((sum, record) => sum + (record.remittanceInr - record.indiaTotalInr), 0), [records]);
 
   const V = {
