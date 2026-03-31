@@ -861,9 +861,9 @@ export default function PortfolioItemPage({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 10, marginBottom: 20 }}>
           {[
             { label: `Total ${item.unitLabel}s`, value: fmtNum(stats.totalUnits, 4), color: V.accent },
-            { label: "Invested", value: `AED ${fmtNum(stats.costBasisAed)}`, color: V.text },
-            { label: "Bought", value: `AED ${fmtNum(stats.totalBuysAed)}`, color: V.text },
-            { label: "Sold", value: `AED ${fmtNum(stats.totalSellsAed)}`, color: V.text },
+            { label: "Total Bought", value: `AED ${fmtNum(stats.totalBuysAed)}`, color: V.text },
+            { label: "Total Sold", value: `AED ${fmtNum(stats.totalSellsAed)}`, color: V.text },
+			{ label: "Current Investment", value: `AED ${fmtNum(stats.costBasisAed)}`, color: V.text },
             { label: "Current value", value: stats.currentValueAed !== null ? `AED ${fmtNum(stats.currentValueAed)}` : "No price", color: V.text },
             { label: "Unrealized P&L", value: stats.pl !== null ? fmtSignedAed(stats.pl) : "—", color: stats.pl !== null ? plColor : V.text },
             { label: "Unrealized P&L %", value: stats.plPct !== null ? `${stats.plPct >= 0 ? "+" : ""}${stats.plPct.toFixed(2)}%` : "—", color: stats.plPct !== null ? plColor : V.text },

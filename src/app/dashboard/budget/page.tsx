@@ -35,6 +35,8 @@ type DueEntry = {
   note: string;
   amountPaid: number;
   lastPaidAt: string | null;
+  carryForwardAmount: number;
+  carriedForwardFrom: string | null;
 };
 
 type PaymentModalState = {
@@ -243,6 +245,29 @@ function parseNum(v: string) {
   return Number.isFinite(n) ? n : null;
 }
 
+function getEntryRemaining(entry?: DueEntry | null) {
+  if (!entry) return 0;
+  return Math.max((entry.amount ?? 0) - (entry.amountPaid ?? 0), 0);
+}
+
+function getCarryForwardAmount(entry?: DueEntry | null) {
+  if (!entry) return 0;
+  if (entry.status === "partial") return getEntryRemaining(entry);
+  if (entry.status === "pending") return Math.max(entry.amount ?? 0, 0);
+  return 0;
+}
+
+function buildCarryForwardNote(previousMonth: string, currency: Currency, carryForwardAmount: number, existingNote?: string | null) {
+  if (carryForwardAmount <= 0) return (existingNote ?? "").trim();
+  const carryLine = `Carry forward from ${fmtMonth(previousMonth)}: ${currency} ${carryForwardAmount.toFixed(2)}`;
+  const cleaned = (existingNote ?? "")
+    .split("\n")
+    .filter((line) => line.trim() && !line.trim().startsWith("Carry forward from "))
+    .join("\n")
+    .trim();
+  return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
+}
+
 function remittanceStatusFromRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
   const raw = row.cash_in?.__remittance_status;
   if (raw === "pending" || raw === "partial" || raw === "paid" || raw === "skipped" || raw === "waived") return raw;
@@ -278,6 +303,8 @@ function dbToEntry(r: any): DueEntry {
     note: r.note ?? "",
     amountPaid: Number(r.amount_paid ?? 0),
     lastPaidAt: r.last_paid_at ?? null,
+    carryForwardAmount: Number(r.carry_forward_amount ?? 0),
+    carriedForwardFrom: r.carried_forward_from ?? null,
   };
 }
 
@@ -691,14 +718,22 @@ export default function DueTrackerPage() {
       const existing = getEntry(item.id);
       if (existing) continue;
       const prev = prevEntries.find((e) => e.dueItemId === item.id);
+      const baseAmount = item.defaultAmount ?? prev?.amount ?? 0;
+      const carryForwardAmount = getCarryForwardAmount(prev);
+      const nextAmount = baseAmount + carryForwardAmount;
+      const nextCurrency = (prev?.currency ?? item.defaultCurrency) as Currency;
+      const nextNote = buildCarryForwardNote(sourceMonth, nextCurrency, carryForwardAmount, prev?.note ?? "");
+
       const { error } = await supabase.from("due_entries").insert({
         user_id: userId,
         due_item_id: item.id,
         month,
-        amount: prev?.amount ?? item.defaultAmount,
-        currency: prev?.currency ?? item.defaultCurrency,
+        amount: nextAmount,
+        currency: nextCurrency,
         status: "pending",
-        note: prev?.note ?? "",
+        note: nextNote,
+        carry_forward_amount: carryForwardAmount,
+        carried_forward_from: prev?.id ?? null,
       });
       if (!error) created += 1;
     }
@@ -784,10 +819,12 @@ export default function DueTrackerPage() {
       const prevAmount = prev?.amount ?? item.defaultAmount ?? null;
       const diffAbs = prevAmount == null ? null : amount - prevAmount;
       const diffPct = prevAmount && prevAmount !== 0 ? ((amount - prevAmount) / prevAmount) * 100 : null;
+      const carryForwardAmount = entry?.carryForwardAmount ?? 0;
+      const baseMonthlyAmount = Math.max(amount - carryForwardAmount, 0);
       const cycle = getCycleDates(item.statementDay, item.dueDay, today, entry?.status ?? "pending");
       const overdue = !!cycle?.dueDate && cycle.dueDate < new Date(`${today}T00:00:00`) && !(entry && isSettled(entry.status));
       const upcoming = !!cycle?.nextDate && (cycle.daysUntilNext ?? 99) >= 0 && (cycle.daysUntilNext ?? 99) <= 3 && !(entry && isSettled(entry.status));
-      return { item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle };
+      return { item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle, carryForwardAmount, baseMonthlyAmount };
     });
   }, [visibleItems, entries, prevEntries, month, currentDay, today]);
 
@@ -908,12 +945,12 @@ export default function DueTrackerPage() {
       <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800 }}>Due <span style={{ color: V.accent, fontStyle: "italic" }}>Tracker</span></div>
-          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Now with actual statuses instead of paid-or-pretend. Roll forward copies last month’s fixed dues into this month and resets them to pending.</div>
+          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Roll forward now carries unpaid balances into the next month. New due = regular monthly due + unpaid carry forward.</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={btn} onClick={() => setShowHidden((v) => !v)}>{showHidden ? "Hide hidden" : "Show hidden"}</button>
           <button style={btn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          <button style={btn} onClick={() => void rollForwardFixedItems()} title="Copies missing fixed dues from last month into this month, with amount, currency and note, but resets status to pending.">↻ Roll forward</button>
+          <button style={btn} onClick={() => void rollForwardFixedItems()} title="Copies missing fixed dues from last month into this month. New due = regular monthly due + any unpaid carry forward from the previous month.">↻ Roll forward</button>
           <button style={settings.isLocked ? btnP : btn} onClick={() => void toggleMonthLock(settings.isLocked ? false : true)}>{settings.isLocked ? "🔒 Unlock month" : "🔓 Lock month"}</button>
           <button style={btnP} onClick={() => setShowAddItem(true)}>+ Add due</button>
         </div>
@@ -1129,6 +1166,7 @@ export default function DueTrackerPage() {
                         ) : entry?.note ? (
                           <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 3 }}>{entry.note}</div>
                         ) : null}
+                        {entry && entry.carryForwardAmount > 0 && <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 3 }}>Carry forward included: {currency} {entry.carryForwardAmount.toFixed(2)} · Regular monthly due: {currency} {Math.max(amount - entry.carryForwardAmount, 0).toFixed(2)}</div>}
                         {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {Math.max((amount ?? 0) - entry.amountPaid, 0).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt)}` : ""}</div>}
                         {prev && diffAbs !== null && (
                           <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
@@ -1153,7 +1191,9 @@ export default function DueTrackerPage() {
                             <div style={{ fontSize: 14, fontWeight: 700, textDecoration: status === "waived" ? "line-through" : "none", color: status === "paid" ? "#16a34a" : status === "partial" ? V.accent : status === "waived" ? V.faint : V.text }}>
                               {currency} {amount.toLocaleString()}
                             </div>
+                            {entry && entry.carryForwardAmount > 0 && <div style={{ fontSize: 11, color: "#f59e0b" }}>Carry fwd {currency} {entry.carryForwardAmount.toFixed(2)}</div>}
                             {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent }}>Paid {currency} {entry.amountPaid.toFixed(2)}</div>}
+                            {(entry && (entry.amountPaid > 0 || entry.carryForwardAmount > 0)) && <div style={{ fontSize: 11, color: V.faint }}>Regular due {currency} {Math.max(amount - (entry?.carryForwardAmount ?? 0), 0).toFixed(2)}</div>}
                             {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: V.faint }}>Left {currency} {Math.max((amount ?? 0) - entry.amountPaid, 0).toFixed(2)}</div>}
                             {currency !== "AED" && amount > 0 && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {toAed(amount, currency, settings.fxRates).toFixed(0)}</div>}
                           </div>

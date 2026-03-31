@@ -30,6 +30,8 @@ type DueEntry = {
   note: string;
   amountPaid: number;
   lastPaidAt: string | null;
+  carryForwardAmount: number;
+  carriedForwardFrom: string | null;
 };
 
 type DueItemNav = {
@@ -104,6 +106,29 @@ function isSettled(status: Status) {
 function pctDiff(prev: number | null, current: number) {
   if (!prev || prev === 0) return null;
   return ((current - prev) / prev) * 100;
+}
+
+function getEntryRemaining(entry?: DueEntry | null) {
+  if (!entry) return 0;
+  return Math.max((entry.amount ?? 0) - (entry.amountPaid ?? 0), 0);
+}
+
+function getCarryForwardAmount(entry?: DueEntry | null) {
+  if (!entry) return 0;
+  if (entry.status === "partial") return getEntryRemaining(entry);
+  if (entry.status === "pending") return Math.max(entry.amount ?? 0, 0);
+  return 0;
+}
+
+function buildCarryForwardNote(previousMonth: string, currency: Currency, carryForwardAmount: number, existingNote?: string | null) {
+  if (carryForwardAmount <= 0) return (existingNote ?? "").trim();
+  const carryLine = `Carry forward from ${fmtMonth(previousMonth)}: ${currency} ${carryForwardAmount.toFixed(2)}`;
+  const cleaned = (existingNote ?? "")
+    .split("\n")
+    .filter((line) => line.trim() && !line.trim().startsWith("Carry forward from "))
+    .join("\n")
+    .trim();
+  return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
 }
 
 export default function DueItemDetailPage({ params }: { params: { id: string } }) {
@@ -194,6 +219,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
           note: e.note ?? "",
           amountPaid: Number((e as { amount_paid?: number | null }).amount_paid ?? 0),
           lastPaidAt: (e as { last_paid_at?: string | null }).last_paid_at ?? null,
+          carryForwardAmount: Number((e as { carry_forward_amount?: number | null }).carry_forward_amount ?? 0),
+          carriedForwardFrom: (e as { carried_forward_from?: string | null }).carried_forward_from ?? null,
         })));
 
         const entryIds = entriesRes.data.map((e: { id: string }) => e.id);
@@ -266,6 +293,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       note: entryRes.data.note ?? "",
       amountPaid: Number(entryRes.data.amount_paid ?? 0),
       lastPaidAt: entryRes.data.last_paid_at ?? null,
+      carryForwardAmount: Number(entryRes.data.carry_forward_amount ?? 0),
+      carriedForwardFrom: entryRes.data.carried_forward_from ?? null,
     };
 
     setEntries((prev) => prev.map((entry) => (entry.id === entryId ? refreshed : entry)));
@@ -375,16 +404,24 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       showToast("Month already exists");
       return;
     }
-    const amount = newAmount === "" ? item.defaultAmount : Number(newAmount);
+    const previousMonth = addMonths(newMonth, -1);
+    const previousEntry = entries.find((e) => e.month === previousMonth);
+    const baseAmount = newAmount === "" ? (item.defaultAmount ?? 0) : Number(newAmount);
+    const carryForwardAmount = getCarryForwardAmount(previousEntry);
+    const finalAmount = baseAmount + carryForwardAmount;
+    const finalNote = buildCarryForwardNote(previousMonth, newCurrency, carryForwardAmount, newNote);
+
     const { data, error } = await supabase.from("due_entries").insert({
       user_id: userId,
       due_item_id: item.id,
       month: newMonth,
-      amount,
+      amount: finalAmount,
       currency: newCurrency,
       status: newStatus,
-      note: newNote,
+      note: finalNote,
       paid_at: null,
+      carry_forward_amount: carryForwardAmount,
+      carried_forward_from: previousEntry?.id ?? null,
     }).select("*").single();
     if (error || !data) {
       showToast(error?.message ?? "Could not add month");
@@ -400,6 +437,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       note: data.note ?? "",
       amountPaid: Number(data.amount_paid ?? 0),
       lastPaidAt: data.last_paid_at ?? null,
+      carryForwardAmount: Number(data.carry_forward_amount ?? 0),
+      carriedForwardFrom: data.carried_forward_from ?? null,
     };
     setEntries((p) => [entry, ...p].sort((a, b) => b.month.localeCompare(a.month)));
     setShowAddMonth(false);
@@ -407,7 +446,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     setNewAmount("");
     setNewNote("");
     setNewStatus("pending");
-    showToast("Month added");
+    showToast(carryForwardAmount > 0 ? "Month added with carry forward" : "Month added");
   }
 
   async function updateStatus(entry: DueEntry, status: Status) {
@@ -525,6 +564,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.5px", margin: 0 }}>{item.name}</h1>
             <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: V.accent }}>{item.group}</span>
             {item.isFixed && <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(99,102,241,0.1)", color: "#6366f1" }}>Fixed</span>}
+            <div style={{ fontSize: 12, color: V.faint, marginTop: 2 }}>When a month is partial or pending, the unpaid amount is carried into the next month on top of the regular monthly due.</div>
           </div>
 
           <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
@@ -673,7 +713,12 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                       </select>
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(entry.month)}</div>
-                        {entry.note && <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 2 }}>{entry.note}</div>}
+                        {entry.note && <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 2, whiteSpace: "pre-line" }}>{entry.note}</div>}
+                        {entry.carryForwardAmount > 0 && (
+                          <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 2 }}>
+                            Carry forward included: {entry.currency} {entry.carryForwardAmount.toFixed(2)} · Regular monthly due: {entry.currency} {Math.max((entry.amount ?? 0) - entry.carryForwardAmount, 0).toFixed(2)}
+                          </div>
+                        )}
                         {entry.amountPaid > 0 && (
                           <div style={{ fontSize: 11, color: entry.status === "paid" ? "#16a34a" : V.accent, marginTop: 2 }}>
                             Paid so far: {entry.currency} {entry.amountPaid.toFixed(2)} · Remaining: {entry.currency} {Math.max((entry.amount ?? 0) - entry.amountPaid, 0).toFixed(2)}
@@ -692,6 +737,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                         <div style={{ fontSize: 14, fontWeight: 700, textDecoration: entry.status === "waived" ? "line-through" : "none", color: strike ? V.faint : V.text }}>
                           {entry.currency} {entry.amount?.toLocaleString() ?? ""}
                         </div>
+                        {entry.carryForwardAmount > 0 && <div style={{ fontSize: 11, color: "#f59e0b" }}>Carry fwd {entry.currency} {entry.carryForwardAmount.toFixed(2)}</div>}
+                        {(entry.amountPaid > 0 || entry.carryForwardAmount > 0) && <div style={{ fontSize: 11, color: V.faint }}>Regular due {entry.currency} {Math.max((entry.amount ?? 0) - entry.carryForwardAmount, 0).toFixed(2)}</div>}
                         {entry.currency !== "AED" && entry.amount !== null && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {aed.toFixed(0)}</div>}
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, display: "inline-block", marginTop: 3, background: tone.bg, color: tone.fg }}>{entry.status}</span>
                       </div>
@@ -800,6 +847,21 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
               <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Note <input style={inp} value={newNote} onChange={(e) => setNewNote(e.target.value)} />
               </label>
+              {(() => {
+                const previousMonth = addMonths(newMonth, -1);
+                const previousEntry = entries.find((e) => e.month === previousMonth);
+                const carryForwardAmount = getCarryForwardAmount(previousEntry);
+                const baseAmount = newAmount === "" ? (item.defaultAmount ?? 0) : Number(newAmount || 0);
+                const finalAmount = baseAmount + carryForwardAmount;
+                return (
+                  <div style={{ fontSize: 12, color: V.muted, background: isDark ? "rgba(245,166,35,0.08)" : "rgba(245,166,35,0.08)", border: `1px solid ${V.border}`, borderRadius: 10, padding: "10px 12px" }}>
+                    <div style={{ fontWeight: 800, color: V.text, marginBottom: 4 }}>Carry forward preview</div>
+                    <div>Regular monthly due: {newCurrency} {baseAmount.toFixed(2)}</div>
+                    <div>Carry forward from {fmtMonth(previousMonth)}: {newCurrency} {carryForwardAmount.toFixed(2)}</div>
+                    <div style={{ marginTop: 4, color: V.accent, fontWeight: 800 }}>New total due: {newCurrency} {finalAmount.toFixed(2)}</div>
+                  </div>
+                );
+              })()}
               {stats && stats.missing.length > 0 && (
                 <div style={{ fontSize: 12, color: V.faint }}>
                   Missing: {stats.missing.slice(0, 6).map((m) => (
