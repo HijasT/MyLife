@@ -109,7 +109,7 @@ function pctDiff(prev: number | null, current: number) {
 
 function getEntryRemaining(entry?: DueEntry | null) {
   if (!entry) return 0;
-  return Math.max((entry.amount ?? 0) + (entry.carryForwardAmount ?? 0) - (entry.amountPaid ?? 0), 0);
+  return (entry.amount ?? 0) + (entry.carryForwardAmount ?? 0) - (entry.amountPaid ?? 0);
 }
 
 function getTotalDue(entry?: DueEntry | null) {
@@ -119,17 +119,20 @@ function getTotalDue(entry?: DueEntry | null) {
 
 function getCarryForwardAmount(entry?: DueEntry | null) {
   if (!entry) return 0;
-  if (entry.status === "partial") return getEntryRemaining(entry);
-  if (entry.status === "pending") return Math.max(entry.amount ?? 0, 0);
-  return 0;
+  if (entry.status === "waived") return 0;
+  return getTotalDue(entry) - (entry.amountPaid ?? 0);
 }
 
 function buildCarryForwardNote(previousMonth: string, currency: Currency, carryForwardAmount: number, existingNote?: string | null) {
-  if (carryForwardAmount <= 0) return (existingNote ?? "").trim();
-  const carryLine = `Carry forward from ${fmtMonth(previousMonth)}: ${currency} ${carryForwardAmount.toFixed(2)}`;
+  if (carryForwardAmount === 0) return (existingNote ?? "").trim();
+  const label = carryForwardAmount < 0 ? "Credit carried from" : "Carry forward from";
+  const carryLine = `${label} ${fmtMonth(previousMonth)}: ${currency} ${carryForwardAmount.toFixed(2)}`;
   const cleaned = (existingNote ?? "")
     .split("\n")
-    .filter((line) => line.trim() && !line.trim().startsWith("Carry forward from "))
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed && !trimmed.startsWith("Carry forward from ") && !trimmed.startsWith("Credit carried from ");
+    })
     .join("\n")
     .trim();
   return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
@@ -685,7 +688,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(entry.month)}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 84px 110px", gap: 8 }}>
-                      <input type="number" style={inp} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="This month amount" />
+                      <input type="text" inputMode="decimal" style={inp} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="This month amount" />
                       <select style={inp} value={editCurrency} onChange={(e) => setEditCurrency(e.target.value as Currency)}>
                         <option>AED</option><option>INR</option><option>USD</option>
                       </select>
@@ -714,9 +717,9 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(entry.month)}</div>
                         {entry.note && <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 2, whiteSpace: "pre-line" }}>{entry.note}</div>}
-                        {entry.carryForwardAmount > 0 && (
+                        {entry.carryForwardAmount !== 0 && (
                           <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 2 }}>
-                            Carry forward: {entry.currency} {entry.carryForwardAmount.toFixed(2)} · This month amount: {entry.currency} {(entry.amount ?? 0).toFixed(2)}
+                            {entry.carryForwardAmount < 0 ? "Credit carried" : "Carry forward"}: {entry.currency} {entry.carryForwardAmount.toFixed(2)} · This month amount: {entry.currency} {(entry.amount ?? 0).toFixed(2)}
                           </div>
                         )}
                         {entry.amountPaid > 0 && (
@@ -737,8 +740,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                         <div style={{ fontSize: 14, fontWeight: 700, textDecoration: entry.status === "waived" ? "line-through" : "none", color: strike ? V.faint : V.text }}>
                           {entry.currency} {getTotalDue(entry).toLocaleString()}
                         </div>
-                        {entry.carryForwardAmount > 0 && <div style={{ fontSize: 11, color: "#f59e0b" }}>Carry fwd {entry.currency} {entry.carryForwardAmount.toFixed(2)}</div>}
-                        {(entry.amountPaid > 0 || entry.carryForwardAmount > 0) && <div style={{ fontSize: 11, color: V.faint }}>Regular due {entry.currency} {Math.max((entry.amount ?? 0) - entry.carryForwardAmount, 0).toFixed(2)}</div>}
+                        {entry.carryForwardAmount !== 0 && <div style={{ fontSize: 11, color: entry.carryForwardAmount < 0 ? "#16a34a" : "#f59e0b" }}>{entry.carryForwardAmount < 0 ? "Credit" : "Carry fwd"} {entry.currency} {entry.carryForwardAmount.toFixed(2)}</div>}
+                        {(entry.amountPaid > 0 || entry.carryForwardAmount !== 0) && <div style={{ fontSize: 11, color: V.faint }}>This month amount {entry.currency} {(entry.amount ?? 0).toFixed(2)}</div>}
                         {entry.currency !== "AED" && entry.amount !== null && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {aed.toFixed(0)}</div>}
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, display: "inline-block", marginTop: 3, background: tone.bg, color: tone.fg }}>{entry.status}</span>
                       </div>
@@ -780,7 +783,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
                 <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Total</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModalEntry.currency} {(paymentModalEntry.amount ?? 0).toFixed(2)}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModalEntry.currency} {getTotalDue(paymentModalEntry).toFixed(2)}</div>
                 </div>
                 <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Paid so far</div>
@@ -788,13 +791,13 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                 </div>
                 <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Remaining</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: V.accent }}>{paymentModalEntry.currency} {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2)}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: V.accent }}>{paymentModalEntry.currency} {getEntryRemaining(paymentModalEntry).toFixed(2)}</div>
                 </div>
               </div>
 
               <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Payment amount
-                <input type="number" step="0.01" min="0.01" style={inp} value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} disabled={savingPayment} />
+                <input type="text" inputMode="decimal" style={inp} value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} disabled={savingPayment} />
               </label>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -811,7 +814,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
             </div>
             <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 12, color: V.faint }}>
-                New remaining after this payment: {paymentModalEntry.currency} {Math.max(Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) - (Number(paymentAmount) || 0), 0).toFixed(2)}
+                New remaining after this payment: {paymentModalEntry.currency} {(getEntryRemaining(paymentModalEntry) - (Number(paymentAmount) || 0)).toFixed(2)}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>Cancel</button>
@@ -835,7 +838,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
               </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 84px 110px", gap: 8 }}>
                 <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Amount <input type="number" style={inp} value={newAmount} onChange={(e) => setNewAmount(e.target.value)} placeholder={`Default: ${item.defaultAmount ?? 0}`} />
+                  Amount <input type="text" inputMode="decimal" style={inp} value={newAmount} onChange={(e) => setNewAmount(e.target.value)} placeholder={`Default: ${item.defaultAmount ?? 0}`} />
                 </label>
                 <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                   Cur <select style={inp} value={newCurrency} onChange={(e) => setNewCurrency(e.target.value as Currency)}><option>AED</option><option>INR</option><option>USD</option></select>

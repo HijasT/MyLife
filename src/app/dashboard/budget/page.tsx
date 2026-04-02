@@ -1053,27 +1053,32 @@ export default function DueTrackerPage() {
           const allGroupItems = items.filter((item) => item.group === group);
           let groupTotal = 0;
           let groupPaid = 0;
+          let groupWaived = 0;
 
           for (const item of allGroupItems) {
             const entry = getEntry(item.id);
-            const amount = effectiveAmount(item, entry);
+            const totalDue = effectiveAmount(item, entry);
             const cur = effectiveCurrency(item, entry);
-            if (isIndia) {
-              const inr = cur === "INR" ? amount : toAed(amount, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2);
-              groupTotal += inr;
-              if (isPaid(entry?.status ?? "pending")) groupPaid += inr;
-            } else {
-              const aed = toAed(amount, cur, settings.fxRates);
-              groupTotal += aed;
-              if (isPaid(entry?.status ?? "pending")) groupPaid += aed;
-            }
+            const paidPortion = Math.max(entry?.amountPaid ?? 0, 0);
+            const totalValue = isIndia
+              ? (cur === "INR" ? totalDue : toAed(totalDue, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2))
+              : toAed(totalDue, cur, settings.fxRates);
+            const paidValue = isIndia
+              ? (cur === "INR" ? paidPortion : toAed(paidPortion, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2))
+              : toAed(paidPortion, cur, settings.fxRates);
+
+            groupTotal += totalValue;
+            groupPaid += paidValue;
+            if ((entry?.status ?? "pending") === "waived") groupWaived += totalValue;
           }
 
           if (!isIndia && group === "UAE") {
             groupTotal += remittanceAed;
-            if (isPaid(settings.remittanceStatus)) groupPaid += remittanceAed;
+            if (settings.remittanceStatus === "waived") groupWaived += remittanceAed;
+            else if (settings.remittanceStatus === "paid" || settings.remittanceStatus === "partial") groupPaid += remittanceAed;
           }
 
+          const groupDue = groupTotal - groupPaid - groupWaived;
           const currLabel = isIndia ? "INR" : "AED";
 
           return (
@@ -1087,7 +1092,8 @@ export default function DueTrackerPage() {
                 <div style={{ display: "flex", gap: 14, fontSize: 12, color: V.muted }} onClick={(e) => e.stopPropagation()}>
                   <span>Total: <strong style={{ color: V.text }}>{currLabel} {groupTotal.toFixed(0)}</strong></span>
                   <span style={{ color: "#16a34a" }}>Paid: <strong>{currLabel} {groupPaid.toFixed(0)}</strong></span>
-                  <span style={{ color: "#ef4444" }}>Due: <strong>{currLabel} {(groupTotal - groupPaid).toFixed(0)}</strong></span>
+                  <span style={{ color: "#94a3b8" }}>Waived: <strong>{currLabel} {groupWaived.toFixed(0)}</strong></span>
+                  <span style={{ color: groupDue < 0 ? "#16a34a" : "#ef4444" }}>Due: <strong>{currLabel} {groupDue.toFixed(0)}</strong></span>
                 </div>
               </div>
 
@@ -1205,7 +1211,7 @@ export default function DueTrackerPage() {
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {isEditing ? (
                           <>
-                            <input type="number" defaultValue={getMonthlyAmount(item, entry) || ""} placeholder="This month amount" onBlur={(e) => void updateEntryField(item, "amount", e.target.value ? Number(e.target.value) : null)} style={{ ...inp, width: 130, textAlign: "right" }} />
+                            <input type="text" inputMode="decimal" defaultValue={getMonthlyAmount(item, entry) || ""} placeholder="This month amount" onBlur={(e) => void updateEntryField(item, "amount", e.target.value ? Number(e.target.value) : null)} style={{ ...inp, width: 130, textAlign: "right" }} />
                             <select defaultValue={currency} onChange={(e) => void updateEntryField(item, "currency", e.target.value as Currency)} style={{ ...inp, width: 70 }}>
                               <option>AED</option>
                               <option>INR</option>
@@ -1359,7 +1365,7 @@ export default function DueTrackerPage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
                 <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Total</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModal.entry.currency} {(paymentModal.entry.amount ?? 0).toFixed(2)}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModal.entry.currency} {getTotalDue(paymentModal.item, paymentModal.entry).toFixed(2)}</div>
                 </div>
                 <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Paid so far</div>
@@ -1374,9 +1380,8 @@ export default function DueTrackerPage() {
               <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Payment amount
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
+                  type="text"
+                  inputMode="decimal"
                   max={paymentModal.remaining}
                   style={inp}
                   value={paymentAmount}
@@ -1406,7 +1411,7 @@ export default function DueTrackerPage() {
             </div>
             <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 12, color: V.faint }}>
-                New remaining after this payment: {paymentModal.entry.currency} {Math.max(paymentModal.remaining - (Number(paymentAmount) || 0), 0).toFixed(2)}
+                New remaining after this payment: {paymentModal.entry.currency} {(paymentModal.remaining - (Number(paymentAmount) || 0)).toFixed(2)}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>Cancel</button>
