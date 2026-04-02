@@ -89,6 +89,10 @@ function dbToWear(p: any): WearLog {
   return { id: p.id, perfumeId: p.perfume_id, wornOn: p.worn_on, compliment: !!p.compliment, sprays: p.sprays ?? 0, weatherTag: p.weather_tag ?? "", occasion: p.occasion ?? "", performance: p.performance ?? "" };
 }
 
+function hasWardrobeBottle(item?: Perfume | null) {
+  return !!item?.bottles?.some((b) => b.status === "Wardrobe" || b.status === "In collection");
+}
+
 function Stars({ value, size = 14 }: { value: number | null; size?: number }) {
   if (!value) return <span style={{ fontSize: 11, color: "#9ca3af" }}>–</span>;
   return (
