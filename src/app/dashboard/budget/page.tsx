@@ -254,22 +254,25 @@ function getTotalDue(item: DueItem, entry?: DueEntry) {
 
 function getEntryRemaining(item: DueItem, entry?: DueEntry | null) {
   if (!entry) return 0;
-  return Math.max(getTotalDue(item, entry) - (entry.amountPaid ?? 0), 0);
+  return getTotalDue(item, entry) - (entry.amountPaid ?? 0);
 }
 
 function getCarryForwardAmount(entry?: DueEntry | null) {
   if (!entry) return 0;
-  if (entry.status === "partial") return Math.max((entry.amount ?? 0) + (entry.carryForwardAmount ?? 0) - (entry.amountPaid ?? 0), 0);
-  if (entry.status === "pending") return Math.max((entry.amount ?? 0) + (entry.carryForwardAmount ?? 0), 0);
-  return 0;
+  if (entry.status === "waived") return 0;
+  return (entry.amount ?? 0) + (entry.carryForwardAmount ?? 0) - (entry.amountPaid ?? 0);
 }
 
 function buildCarryForwardNote(previousMonth: string, currency: Currency, carryForwardAmount: number, existingNote?: string | null) {
-  if (carryForwardAmount <= 0) return (existingNote ?? "").trim();
-  const carryLine = `Carry forward from ${fmtMonth(previousMonth)}: ${currency} ${carryForwardAmount.toFixed(2)}`;
+  if (carryForwardAmount === 0) return (existingNote ?? "").trim();
+  const label = carryForwardAmount < 0 ? "Credit carried from" : "Carry forward from";
+  const carryLine = `${label} ${fmtMonth(previousMonth)}: ${currency} ${carryForwardAmount.toFixed(2)}`;
   const cleaned = (existingNote ?? "")
     .split("\n")
-    .filter((line) => line.trim() && !line.trim().startsWith("Carry forward from "))
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed && !trimmed.startsWith("Carry forward from ") && !trimmed.startsWith("Credit carried from ");
+    })
     .join("\n")
     .trim();
   return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
@@ -1199,7 +1202,7 @@ export default function DueTrackerPage() {
                         ) : entry?.note ? (
                           <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 3 }}>{entry.note}</div>
                         ) : null}
-                        {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {Math.max((amount ?? 0) - entry.amountPaid, 0).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt)}` : ""}</div>}
+                        {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {getEntryRemaining(item, entry).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt)}` : ""}</div>}
                         {prev && diffAbs !== null && (
                           <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
                             vs last month: {diffAbs > 0 ? "+" : ""}{currency} {diffAbs.toFixed(0)}
@@ -1224,8 +1227,8 @@ export default function DueTrackerPage() {
                               {currency} {amount.toLocaleString()}
                             </div>
                             {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent }}>Paid {currency} {entry.amountPaid.toFixed(2)}</div>}
-                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: V.faint }}>Left {currency} {Math.max((amount ?? 0) - entry.amountPaid, 0).toFixed(2)}</div>}
-                            {entry?.carryForwardAmount ? <div style={{ fontSize: 11, color: "#f59e0b" }}>Carry forward {currency} {entry.carryForwardAmount.toFixed(2)}</div> : null}
+                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: V.faint }}>{getEntryRemaining(item, entry) < 0 ? "Credit left" : "Left"} {currency} {getEntryRemaining(item, entry).toFixed(2)}</div>}
+                            {entry?.carryForwardAmount ? <div style={{ fontSize: 11, color: "#f59e0b" }}>{entry.carryForwardAmount < 0 ? "Credit carried" : "Carry forward"} {currency} {entry.carryForwardAmount.toFixed(2)}</div> : null}
                             <div style={{ fontSize: 11, color: V.faint }}>This month {currency} {getMonthlyAmount(item, entry).toFixed(2)}</div>
                             {currency !== "AED" && amount > 0 && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {toAed(amount, currency, settings.fxRates).toFixed(0)}</div>}
                           </div>
@@ -1382,7 +1385,6 @@ export default function DueTrackerPage() {
                 <input
                   type="text"
                   inputMode="decimal"
-                  max={paymentModal.remaining}
                   style={inp}
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
@@ -1392,7 +1394,7 @@ export default function DueTrackerPage() {
               </label>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(paymentModal.remaining.toFixed(2))} disabled={savingPayment}>Use remaining</button>
+                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(paymentModal.remaining.toFixed(2))} disabled={savingPayment || paymentModal.remaining <= 0}>Use remaining</button>
                 {paymentModal.remaining > 1 && (
                   <button type="button" style={btn} onClick={() => setPaymentAmount((paymentModal.remaining / 2).toFixed(2))} disabled={savingPayment}>Half</button>
                 )}

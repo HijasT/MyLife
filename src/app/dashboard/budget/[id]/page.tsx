@@ -801,7 +801,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
               </label>
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0).toFixed(2))} disabled={savingPayment}>Use remaining</button>
+                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(getEntryRemaining(paymentModalEntry).toFixed(2))} disabled={savingPayment || getEntryRemaining(paymentModalEntry) <= 0}>Use remaining</button>
                 {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) > 1 && (
                   <button type="button" style={btn} onClick={() => setPaymentAmount((Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) / 2).toFixed(2))} disabled={savingPayment}>Half</button>
                 )}
