@@ -50,6 +50,17 @@ function useDarkMode() {
   return isDark;
 }
 
+function hasWardrobeBottle(item: Perfume) {
+  return item.bottles.some((b) => {
+    const status = String(b.status ?? "").toLowerCase();
+    return status === "wardrobe" || status === "in collection";
+  });
+}
+
+function hasArchivedBottle(item: Perfume) {
+  return item.bottles.some((b) => String(b.status ?? "").toLowerCase() === "archive");
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(row: any): Perfume {
   return {
@@ -147,9 +158,9 @@ export default function PerfumesPage() {
   }, []);
 
   const counts = useMemo(() => ({
-    wardrobe: items.filter(x => x.status === "wardrobe").length,
-    wishlist: items.filter(x => x.status === "wishlist").length,
-    archive: items.filter(x => x.status === "archive").length,
+    wardrobe: items.filter((x) => hasWardrobeBottle(x)).length,
+    wishlist: items.filter((x) => x.status === "wishlist").length,
+    archive: items.filter((x) => hasArchivedBottle(x)).length,
   }), [items]);
 
   const wearByPerfume = useMemo(() => {
@@ -163,7 +174,7 @@ export default function PerfumesPage() {
 
   const topUsed = useMemo(() => {
     const usage = items
-      .filter(p => p.status === "wardrobe")
+      .filter((p) => hasWardrobeBottle(p))
       .map(p => {
         const uniqueDays = new Set((wearByPerfume.get(p.id) ?? []).map(w => w.wornOn)).size;
         return { perfume: p, days: uniqueDays };
@@ -180,9 +191,13 @@ export default function PerfumesPage() {
     const cutoff = thirtyDaysAgo.toISOString().slice(0, 10);
 
     const calc = (status: PerfumeStatus) => {
-      const list = items.filter(x => x.status === status);
-      const ids = new Set(list.map(x => x.id));
-      const paid = purchases.filter(p => ids.has(p.perfumeId) && p.price > 0);
+      const list = items.filter((x) => {
+        if (status === "wardrobe") return hasWardrobeBottle(x);
+        if (status === "archive") return hasArchivedBottle(x);
+        return x.status === status;
+      });
+      const ids = new Set(list.map((x) => x.id));
+      const paid = purchases.filter((p) => ids.has(p.perfumeId) && p.price > 0);
       const total = paid.reduce((s, p) => s + safeNum(p.price), 0);
       const avg = paid.length ? total / paid.length : 0;
       return { count: list.length, total, avg };
@@ -191,16 +206,21 @@ export default function PerfumesPage() {
     // "New" perfume ids — purchased within last 30 days
     const newIds = new Set(purchases.filter(p => p.date >= cutoff && p.price > 0).map(p => p.perfumeId));
 
-    const wardrobeValue = purchases.filter(p => items.find(x => x.id === p.perfumeId)?.status === "wardrobe").reduce((s,p) => s + safeNum(p.price), 0);
+    const wardrobeValue = purchases.filter((p) => hasWardrobeBottle(items.find((x) => x.id === p.perfumeId) ?? { bottles: [] } as Perfume)).reduce((s,p) => s + safeNum(p.price), 0);
     return { wardrobe: calc("wardrobe"), wishlist: calc("wishlist"), archive: calc("archive"), newIds, wardrobeValue };
   }, [items, purchases]);
 
   const tabItems = useMemo(() => {
-    const statusMap: Record<TabKey, PerfumeStatus | null> = { wardrobe: "wardrobe", wishlist: "wishlist", archive: "archive", purchases: null };
-    const s = statusMap[activeTab];
-    if (!s) return [];
-    let list = items.filter(x => x.status === s);
-    if (search.trim()) list = list.filter(x => `${x.brand} ${x.model}`.toLowerCase().includes(search.toLowerCase()));
+    if (activeTab === "purchases") return [];
+
+    let list = items.filter((item) => {
+      if (activeTab === "wardrobe") return hasWardrobeBottle(item);
+      if (activeTab === "archive") return hasArchivedBottle(item);
+      if (activeTab === "wishlist") return item.status === "wishlist";
+      return false;
+    });
+
+    if (search.trim()) list = list.filter((x) => `${x.brand} ${x.model}`.toLowerCase().includes(search.toLowerCase()));
     return [...list].sort((a, b) => {
       if (sortBy === "brand_asc")  return `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`);
       if (sortBy === "brand_desc") return `${b.brand} ${b.model}`.localeCompare(`${a.brand} ${a.model}`);
@@ -320,7 +340,7 @@ export default function PerfumesPage() {
             {s.total > 0 && <span style={{ color:V.muted }}>Total spent: <strong style={{ color:V.accent, fontWeight:700 }}>{fmtMoney(s.total)}</strong></span>}
             {s.avg > 0 && <span style={{ color:V.muted }}>Avg bottle: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(s.avg)}</strong></span>}
             {activeTab === "wardrobe" && tabStats.wardrobeValue > 0 && <span style={{ color:V.muted }}>Wardrobe value: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(tabStats.wardrobeValue)}</strong></span>}
-            {tabStats.newIds.size > 0 && activeTab === "wardrobe" && <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter(id => items.find(x=>x.id===id&&x.status==="wardrobe")).length} added this month</span>}
+            {tabStats.newIds.size > 0 && activeTab === "wardrobe" && <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter((id) => hasWardrobeBottle(items.find((x) => x.id === id) ?? { bottles: [] } as Perfume)).length} added this month</span>}
           </div>
         ) : null;
       })()}
