@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
-type Status = "pending" | "partial" | "paid" | "skipped" | "waived";
+type Status = "pending" | "partial" | "paid" | "waived";
 
 type MonthRecord = {
   month: string;
@@ -26,14 +26,13 @@ function fmtMonth(m: string) {
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
   if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
-  if (status === "skipped") return { bg: "rgba(99,102,241,0.12)", fg: "#6366f1" };
   if (status === "waived") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
 
 function statusFromSettingsRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
   const raw = row.cash_in?.__remittance_status;
-  if (raw === "pending" || raw === "partial" || raw === "paid" || raw === "skipped" || raw === "waived") return raw;
+  if (raw === "pending" || raw === "partial" || raw === "paid" || raw === "waived") return raw;
   return row.remittance_paid ? "paid" : "pending";
 }
 
@@ -106,7 +105,7 @@ export default function RemittancePage() {
             const entry = monthEntries.find((e) => e.due_item_id === item.id);
             const amount = entry?.amount ?? item.default_amount ?? 0;
             const currency = (entry?.currency ?? item.default_currency ?? "INR") as "AED" | "INR" | "USD";
-            if (entry?.status === "waived" || entry?.status === "skipped") return sum;
+            if (entry?.status === "waived") return sum;
             if (currency === "INR") return sum + amount;
             const fxRates = (s.fx_rates as Record<string, number> | null) ?? { INR: 25.2, USD: 3.67 };
             if (currency === "AED") return sum + amount * (fxRates.INR ?? 25.2);
@@ -295,7 +294,7 @@ export default function RemittancePage() {
                         <select style={inp} value={editStatus} onChange={(e) => setEditStatus(e.target.value as Status)}>
                           <option value="pending">Pending</option>
                           <option value="paid">Paid</option>
-                          <option value="skipped">Skipped</option>
+                          
                           <option value="waived">Waived</option>
                         </select>
                       </label>
@@ -331,7 +330,7 @@ export default function RemittancePage() {
                     <select disabled={record.isLocked} value={record.status} onChange={(e) => void updateStatus(record, e.target.value as Status)} style={{ ...inp, padding: "6px 8px", fontSize: 12, borderColor: tone.fg, color: tone.fg }}>
                       <option value="pending">Pending</option>
                       <option value="paid">Paid</option>
-                      <option value="skipped">Skipped</option>
+                      
                       <option value="waived">Waived</option>
                     </select>
                     <button

@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { nowDubai } from "@/lib/timezone";
 
 type Currency = "AED" | "INR" | "USD";
-type Status = "pending" | "partial" | "paid" | "skipped" | "waived";
+type Status = "pending" | "partial" | "paid" | "waived";
 
 type DueItem = {
   id: string;
@@ -94,13 +94,12 @@ function ordinal(n: number) {
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
   if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
-  if (status === "skipped") return { bg: "rgba(99,102,241,0.12)", fg: "#6366f1" };
   if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
 
 function isSettled(status: Status) {
-  return status === "paid" || status === "skipped" || status === "waived";
+  return status === "paid" || status === "waived";
 }
 
 function pctDiff(prev: number | null, current: number) {
@@ -110,7 +109,12 @@ function pctDiff(prev: number | null, current: number) {
 
 function getEntryRemaining(entry?: DueEntry | null) {
   if (!entry) return 0;
-  return Math.max((entry.amount ?? 0) - (entry.amountPaid ?? 0), 0);
+  return Math.max((entry.amount ?? 0) + (entry.carryForwardAmount ?? 0) - (entry.amountPaid ?? 0), 0);
+}
+
+function getTotalDue(entry?: DueEntry | null) {
+  if (!entry) return 0;
+  return (entry.amount ?? 0) + (entry.carryForwardAmount ?? 0);
 }
 
 function getCarryForwardAmount(entry?: DueEntry | null) {
@@ -408,14 +412,13 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     const previousEntry = entries.find((e) => e.month === previousMonth);
     const baseAmount = newAmount === "" ? (item.defaultAmount ?? 0) : Number(newAmount);
     const carryForwardAmount = getCarryForwardAmount(previousEntry);
-    const finalAmount = baseAmount + carryForwardAmount;
     const finalNote = buildCarryForwardNote(previousMonth, newCurrency, carryForwardAmount, newNote);
 
     const { data, error } = await supabase.from("due_entries").insert({
       user_id: userId,
       due_item_id: item.id,
       month: newMonth,
-      amount: finalAmount,
+      amount: baseAmount,
       currency: newCurrency,
       status: newStatus,
       note: finalNote,
@@ -479,7 +482,6 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     const settled = entries.filter((e) => isSettled(e.status));
     const paid = entries.filter((e) => e.amountPaid > 0);
     const waived = entries.filter((e) => e.status === "waived").length;
-    const skipped = entries.filter((e) => e.status === "skipped").length;
 
     let totalNative = 0;
     for (const e of paid) {
@@ -500,7 +502,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       cursor = addMonths(cursor, 1);
     }
     const missing = allMonths.filter((m) => !existingMonths.has(m));
-    return { totalNative, avg, paidCount: paid.length, settledCount: settled.length, waived, skipped, missing };
+    return { totalNative, avg, paidCount: paid.length, settledCount: settled.length, waived, missing };
   }, [entries, item, fxByMonth, nativeCurrency]);
 
   const chart = useMemo(() => {
@@ -608,7 +610,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
               { label: `Total paid (${nativeCurrency})`, value: `${nativeCurrency} ${stats.totalNative.toFixed(0)}`, color: V.accent },
               { label: "Months paid", value: stats.paidCount, color: "#16a34a" },
               { label: "Settled", value: stats.settledCount, color: V.muted },
-              { label: "Skipped / Waived", value: `${stats.skipped}/${stats.waived}`, color: V.faint },
+              { label: "Waived", value: stats.waived, color: V.faint },
             ].map((card) => (
               <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 12, padding: "11px 14px" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{card.label}</div>
@@ -683,7 +685,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(entry.month)}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 84px 110px", gap: 8 }}>
-                      <input type="number" style={inp} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="Amount" />
+                      <input type="number" style={inp} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="This month amount" />
                       <select style={inp} value={editCurrency} onChange={(e) => setEditCurrency(e.target.value as Currency)}>
                         <option>AED</option><option>INR</option><option>USD</option>
                       </select>
@@ -691,7 +693,6 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                         <option value="pending">Pending</option>
                         <option value="partial" disabled>Partial (from payments)</option>
                         <option value="paid" disabled>Paid (from payments)</option>
-                        <option value="skipped">Skipped</option>
                         <option value="waived">Waived</option>
                       </select>
                     </div>
@@ -708,7 +709,6 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                         <option value="pending">Pending</option>
                         <option value="partial">Partial</option>
                         <option value="paid">Paid</option>
-                        <option value="skipped">Skipped</option>
                         <option value="waived">Waived</option>
                       </select>
                       <div>
@@ -716,12 +716,12 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                         {entry.note && <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 2, whiteSpace: "pre-line" }}>{entry.note}</div>}
                         {entry.carryForwardAmount > 0 && (
                           <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 2 }}>
-                            Carry forward included: {entry.currency} {entry.carryForwardAmount.toFixed(2)} · Regular monthly due: {entry.currency} {Math.max((entry.amount ?? 0) - entry.carryForwardAmount, 0).toFixed(2)}
+                            Carry forward: {entry.currency} {entry.carryForwardAmount.toFixed(2)} · This month amount: {entry.currency} {(entry.amount ?? 0).toFixed(2)}
                           </div>
                         )}
                         {entry.amountPaid > 0 && (
                           <div style={{ fontSize: 11, color: entry.status === "paid" ? "#16a34a" : V.accent, marginTop: 2 }}>
-                            Paid so far: {entry.currency} {entry.amountPaid.toFixed(2)} · Remaining: {entry.currency} {Math.max((entry.amount ?? 0) - entry.amountPaid, 0).toFixed(2)}
+                            Paid so far: {entry.currency} {entry.amountPaid.toFixed(2)} · Remaining: {entry.currency} {getEntryRemaining(entry).toFixed(2)}
                             {entry.lastPaidAt ? ` · Last: ${fmtDateTime(entry.lastPaidAt)}` : ""}
                           </div>
                         )}
@@ -735,7 +735,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 14, fontWeight: 700, textDecoration: entry.status === "waived" ? "line-through" : "none", color: strike ? V.faint : V.text }}>
-                          {entry.currency} {entry.amount?.toLocaleString() ?? ""}
+                          {entry.currency} {getTotalDue(entry).toLocaleString()}
                         </div>
                         {entry.carryForwardAmount > 0 && <div style={{ fontSize: 11, color: "#f59e0b" }}>Carry fwd {entry.currency} {entry.carryForwardAmount.toFixed(2)}</div>}
                         {(entry.amountPaid > 0 || entry.carryForwardAmount > 0) && <div style={{ fontSize: 11, color: V.faint }}>Regular due {entry.currency} {Math.max((entry.amount ?? 0) - entry.carryForwardAmount, 0).toFixed(2)}</div>}
@@ -841,7 +841,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                   Cur <select style={inp} value={newCurrency} onChange={(e) => setNewCurrency(e.target.value as Currency)}><option>AED</option><option>INR</option><option>USD</option></select>
                 </label>
                 <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Status <select style={inp} value={newStatus} onChange={(e) => setNewStatus(e.target.value as Status)}><option value="pending">Pending</option><option value="skipped">Skipped</option><option value="waived">Waived</option></select>
+                  Status <select style={inp} value={newStatus} onChange={(e) => setNewStatus(e.target.value as Status)}><option value="pending">Pending</option><option value="waived">Waived</option></select>
                 </label>
               </div>
               <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -852,13 +852,12 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
                 const previousEntry = entries.find((e) => e.month === previousMonth);
                 const carryForwardAmount = getCarryForwardAmount(previousEntry);
                 const baseAmount = newAmount === "" ? (item.defaultAmount ?? 0) : Number(newAmount || 0);
-                const finalAmount = baseAmount + carryForwardAmount;
-                return (
+                                return (
                   <div style={{ fontSize: 12, color: V.muted, background: isDark ? "rgba(245,166,35,0.08)" : "rgba(245,166,35,0.08)", border: `1px solid ${V.border}`, borderRadius: 10, padding: "10px 12px" }}>
                     <div style={{ fontWeight: 800, color: V.text, marginBottom: 4 }}>Carry forward preview</div>
-                    <div>Regular monthly due: {newCurrency} {baseAmount.toFixed(2)}</div>
+                    <div>This month amount: {newCurrency} {baseAmount.toFixed(2)}</div>
                     <div>Carry forward from {fmtMonth(previousMonth)}: {newCurrency} {carryForwardAmount.toFixed(2)}</div>
-                    <div style={{ marginTop: 4, color: V.accent, fontWeight: 800 }}>New total due: {newCurrency} {finalAmount.toFixed(2)}</div>
+                    <div style={{ marginTop: 4, color: V.accent, fontWeight: 800 }}>New total due: {newCurrency} {(baseAmount + carryForwardAmount).toFixed(2)}</div>
                   </div>
                 );
               })()}
