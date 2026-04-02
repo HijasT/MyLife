@@ -206,7 +206,7 @@ export default function PerfumesPage() {
     // "New" perfume ids — purchased within last 30 days
     const newIds = new Set(purchases.filter(p => p.date >= cutoff && p.price > 0).map(p => p.perfumeId));
 
-    const wardrobeValue = purchases.filter((p) => hasWardrobeBottle(items.find((x) => x.id === p.perfumeId) ?? { bottles: [] } as Perfume)).reduce((s,p) => s + safeNum(p.price), 0);
+    const wardrobeValue = purchases.fi`lter((p) => hasWardrobeBottle(items.find((x) => x.id === p.perfumeId) ?? { bottles: [] } as Perfume)).reduce((s,p) => s + safeNum(p.price), 0);
     return { wardrobe: calc("wardrobe"), wishlist: calc("wishlist"), archive: calc("archive"), newIds, wardrobeValue };
   }, [items, purchases]);
 
@@ -291,7 +291,7 @@ export default function PerfumesPage() {
     }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv" }));
-    a.download = `aromatica-${nowIso()}.csv`; a.click();
+    a.download = `aromaticabkp-${nowIso()}.csv`; a.click();
     toast("CSV downloaded");
   }
 
