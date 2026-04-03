@@ -33,7 +33,7 @@ type AddForm = {
 
 function uid() { return `id-${Math.random().toString(16).slice(2)}-${Date.now()}`; }
 function safeNum(x: unknown, fb = 0) { const n = typeof x === "number" ? x : Number(x); return Number.isFinite(n) ? n : fb; }
-function nowIso() { return new Date().toISOString().slice(0, 10); }
+function nowIso() { return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" }); }
 function monthKey(d: string) { return d.slice(0, 7); }
 function fmtMoney(a: number) { return `AED ${a.toFixed(2)}`; }
 function normalizeName(v: string) { return v.trim().toLowerCase().replace(/\s+/g, " "); }
@@ -50,6 +50,27 @@ function useDarkMode() {
   return isDark;
 }
 
+// ── Bottle-based helpers (the source of truth) ─────────────────────────────
+const ACTIVE_STATUSES = new Set(["In collection", "in collection"]);
+function hasActiveBottle(p: Perfume): boolean {
+  return p.bottles.some(b => ACTIVE_STATUSES.has(b.status));
+}
+function hasArchivedBottle(p: Perfume): boolean {
+  return p.bottles.some(b => !ACTIVE_STATUSES.has(b.status));
+}
+function isWardrobeItem(p: Perfume): boolean {
+  // Must have at least one active bottle
+  return hasActiveBottle(p);
+}
+function isArchiveItem(p: Perfume): boolean {
+  // Has at least one archived bottle (can overlap with wardrobe for mixed state)
+  return hasArchivedBottle(p);
+}
+function isWishlistItem(p: Perfume): boolean {
+  // Wishlist = no bottles yet (or perfume.status === wishlist with no active bottles)
+  return p.status === "wishlist" && !hasActiveBottle(p);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(row: any): Perfume {
   return {
@@ -60,12 +81,18 @@ function dbToItem(row: any): Perfume {
     longevity: row.longevity ?? "", sillage: row.sillage ?? "",
     value: row.value_rating ?? "Neutral", cloneSimilar: row.clone_similar ?? "",
     notesText: row.notes_text ?? "",
-    purchasePriority: row.purchase_priority ?? "Medium", targetPriceAed: row.target_price_aed ?? null, preferredShop: row.preferred_shop ?? "",
-    archivedAt: row.archived_at ?? null, resalePriceAed: row.resale_price_aed ?? null, archiveNotes: row.archive_notes ?? "",
+    purchasePriority: row.purchase_priority ?? "Medium",
+    targetPriceAed: row.target_price_aed ?? null,
+    preferredShop: row.preferred_shop ?? "",
+    archivedAt: row.archived_at ?? null,
+    resalePriceAed: row.resale_price_aed ?? null,
+    archiveNotes: row.archive_notes ?? "",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bottles: (row.perfume_bottles ?? []).map((b: any): Bottle => ({
-      id: b.id, bottleSizeMl: b.bottle_size_ml ?? 100, bottleType: b.bottle_type ?? "Full bottle",
-      status: b.status ?? "In collection", usage: b.usage ?? "",
+      id: b.id, bottleSizeMl: b.bottle_size_ml ?? 100,
+      bottleType: b.bottle_type ?? "Full bottle",
+      status: b.status ?? "In collection",
+      usage: b.usage ?? "",
     })),
     archiveReason: row.archive_reason ?? undefined,
   };
@@ -74,6 +101,7 @@ function dbToItem(row: any): Perfume {
 function dbToPurchase(p: any): Purchase {
   return { id: p.id, perfumeId: p.perfume_id, bottleId: p.bottle_id ?? "none", date: p.date, ml: p.ml ?? 0, price: p.price ?? 0, shopName: p.shop_name ?? "Unknown", shopLink: p.shop_link ?? undefined };
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToWear(p: any): WearLog {
   return { id: p.id, perfumeId: p.perfume_id, wornOn: p.worn_on, compliment: !!p.compliment, sprays: p.sprays ?? 0, weatherTag: p.weather_tag ?? "", occasion: p.occasion ?? "", performance: p.performance ?? "" };
 }
@@ -104,6 +132,7 @@ export default function PerfumesPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [wearLogs, setWearLogs] = useState<WearLog[]>([]);
   const [brandFocus, setBrandFocus] = useState<string | null>(null);
+  const [dubaiTemp, setDubaiTemp] = useState<number | null>(null);
   const [af, setAf] = useState<AddForm>({
     status: "wardrobe", brand: "", model: "", imageDataUrl: "", rating: 4,
     bottleType: "Full bottle", sizeMl: "100",
@@ -131,7 +160,6 @@ export default function PerfumesPage() {
       ]);
       if (pr.error) toast(pr.error.message, "error");
       if (pur.error) toast(pur.error.message, "error");
-      if (wear.error) toast(wear.error.message, "error");
       const loaded = (pr.data ?? []).map(dbToItem);
       const loadedPur = (pur.data ?? []).map(dbToPurchase);
       const loadedWear = (wear.data ?? []).map(dbToWear);
@@ -142,14 +170,22 @@ export default function PerfumesPage() {
       saveToCache("purchases", loadedPur);
       markSynced();
       setLoading(false);
+      // Dubai weather for seasonal suggestions
+      try {
+        const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m&timezone=Asia%2FDubai");
+        const data = await r.json();
+        const temp = data?.current?.temperature_2m ?? null;
+        if (temp !== null) setDubaiTemp(temp);
+      } catch { /* skip */ }
     }
     load();
   }, []);
 
+  // ── Counts based on bottle state ──────────────────────────────────────────
   const counts = useMemo(() => ({
-    wardrobe: items.filter(x => x.status === "wardrobe").length,
-    wishlist: items.filter(x => x.status === "wishlist").length,
-    archive: items.filter(x => x.status === "archive").length,
+    wardrobe: items.filter(isWardrobeItem).length,
+    wishlist:  items.filter(isWishlistItem).length,
+    archive:   items.filter(isArchiveItem).length,
   }), [items]);
 
   const wearByPerfume = useMemo(() => {
@@ -162,8 +198,8 @@ export default function PerfumesPage() {
   }, [wearLogs]);
 
   const topUsed = useMemo(() => {
-    const usage = items
-      .filter(p => p.status === "wardrobe")
+    return items
+      .filter(isWardrobeItem)
       .map(p => {
         const uniqueDays = new Set((wearByPerfume.get(p.id) ?? []).map(w => w.wornOn)).size;
         return { perfume: p, days: uniqueDays };
@@ -171,16 +207,16 @@ export default function PerfumesPage() {
       .filter(x => x.days > 0)
       .sort((a, b) => b.days - a.days || (b.perfume.ratingStars ?? 0) - (a.perfume.ratingStars ?? 0))
       .slice(0, 3);
-    return usage;
   }, [items, wearByPerfume]);
 
+  // ── Stats based on bottle state ───────────────────────────────────────────
   const tabStats = useMemo(() => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const cutoff = thirtyDaysAgo.toISOString().slice(0, 10);
 
-    const calc = (status: PerfumeStatus) => {
-      const list = items.filter(x => x.status === status);
+    const calcFor = (filterFn: (p: Perfume) => boolean) => {
+      const list = items.filter(filterFn);
       const ids = new Set(list.map(x => x.id));
       const paid = purchases.filter(p => ids.has(p.perfumeId) && p.price > 0);
       const total = paid.reduce((s, p) => s + safeNum(p.price), 0);
@@ -188,27 +224,54 @@ export default function PerfumesPage() {
       return { count: list.length, total, avg };
     };
 
-    // "New" perfume ids — purchased within last 30 days
-    const newIds = new Set(purchases.filter(p => p.date >= cutoff && p.price > 0).map(p => p.perfumeId));
+    const newIds = new Set(
+      purchases.filter(p => p.date >= cutoff && p.price > 0).map(p => p.perfumeId)
+    );
 
-    const wardrobeValue = purchases.filter(p => items.find(x => x.id === p.perfumeId)?.status === "wardrobe").reduce((s,p) => s + safeNum(p.price), 0);
-    return { wardrobe: calc("wardrobe"), wishlist: calc("wishlist"), archive: calc("archive"), newIds, wardrobeValue };
+    const wardrobeIds = new Set(items.filter(isWardrobeItem).map(x => x.id));
+    const wardrobeValue = purchases
+      .filter(p => wardrobeIds.has(p.perfumeId))
+      .reduce((s, p) => s + safeNum(p.price), 0);
+
+    return {
+      wardrobe: calcFor(isWardrobeItem),
+      wishlist:  calcFor(isWishlistItem),
+      archive:   calcFor(isArchiveItem),
+      newIds,
+      wardrobeValue,
+    };
   }, [items, purchases]);
 
+  // ── Tab items — bottle-based filtering ────────────────────────────────────
   const tabItems = useMemo(() => {
-    const statusMap: Record<TabKey, PerfumeStatus | null> = { wardrobe: "wardrobe", wishlist: "wishlist", archive: "archive", purchases: null };
-    const s = statusMap[activeTab];
-    if (!s) return [];
-    let list = items.filter(x => x.status === s);
-    if (search.trim()) list = list.filter(x => `${x.brand} ${x.model}`.toLowerCase().includes(search.toLowerCase()));
+    let list: Perfume[];
+    if (activeTab === "wardrobe")  list = items.filter(isWardrobeItem);
+    else if (activeTab === "wishlist") list = items.filter(isWishlistItem);
+    else if (activeTab === "archive")  list = items.filter(isArchiveItem);
+    else return []; // purchases tab handled separately
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(x => `${x.brand} ${x.model}`.toLowerCase().includes(q));
+    }
     return [...list].sort((a, b) => {
-      if (sortBy === "brand_asc")  return `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`);
-      if (sortBy === "brand_desc") return `${b.brand} ${b.model}`.localeCompare(`${a.brand} ${a.model}`);
+      if (sortBy === "brand_asc")   return `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`);
+      if (sortBy === "brand_desc")  return `${b.brand} ${b.model}`.localeCompare(`${a.brand} ${a.model}`);
       if (sortBy === "rating_desc") return (b.ratingStars ?? 0) - (a.ratingStars ?? 0);
       if (sortBy === "rating_asc")  return (a.ratingStars ?? 0) - (b.ratingStars ?? 0);
       return 0;
     });
   }, [items, activeTab, search, sortBy]);
+
+  // ── Weather suggestions ───────────────────────────────────────────────────
+  const weatherSuggestions = useMemo(() => {
+    if (dubaiTemp === null) return [];
+    const tag = dubaiTemp < 22 ? "Cold" : dubaiTemp > 32 ? "Hot" : "Moderate";
+    return items
+      .filter(isWardrobeItem)
+      .filter(p => p.weatherTags.includes(tag) || p.weatherTags.includes("All Season"))
+      .slice(0, 4);
+  }, [items, dubaiTemp]);
 
   const purchaseHistory = useMemo(() => [...purchases].sort((a, b) => b.date.localeCompare(a.date)), [purchases]);
 
@@ -238,7 +301,7 @@ export default function PerfumesPage() {
     if (dupe) { toast("This perfume already exists in Aromatica", "error"); router.push(`/dashboard/perfumes/${dupe.id}`); return; }
     const size = safeNum(af.sizeMl, 100);
     const price = safeNum(af.price, 0);
-    if (af.status === "wardrobe" && price <= 0) { toast("Enter bottle price in AED", "error"); return; }
+    if (af.status === "wardrobe" && price <= 0) { toast("Enter bottle price", "error"); return; }
     const { data: pd, error } = await supabase.from("perfumes").insert({
       user_id: userId, brand, model, status: af.status,
       image_url: af.imageDataUrl || "", rating_stars: af.rating,
@@ -262,17 +325,6 @@ export default function PerfumesPage() {
     }
     setShowAdd(false);
     router.push(`/dashboard/perfumes/${pd.id}`);
-  }
-
-  function downloadCsv() {
-    const rows = [["Brand","Model","Status","Rating","Notes","Weather","Longevity","Sillage","Value","Clone"].join(",")];
-    for (const it of items) {
-      rows.push([it.brand, it.model, it.status, it.ratingStars ?? "", it.notesTags.join("|"), it.weatherTags.join("|"), it.cloneSimilar].map(v => `"${String(v).replaceAll('"','""')}"`).join(","));
-    }
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([rows.join("\n")], { type: "text/csv" }));
-    a.download = `aromatica-${nowIso()}.csv`; a.click();
-    toast("CSV downloaded");
   }
 
   const V = {
@@ -320,18 +372,56 @@ export default function PerfumesPage() {
             {s.total > 0 && <span style={{ color:V.muted }}>Total spent: <strong style={{ color:V.accent, fontWeight:700 }}>{fmtMoney(s.total)}</strong></span>}
             {s.avg > 0 && <span style={{ color:V.muted }}>Avg bottle: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(s.avg)}</strong></span>}
             {activeTab === "wardrobe" && tabStats.wardrobeValue > 0 && <span style={{ color:V.muted }}>Wardrobe value: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(tabStats.wardrobeValue)}</strong></span>}
-            {tabStats.newIds.size > 0 && activeTab === "wardrobe" && <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter(id => items.find(x=>x.id===id&&x.status==="wardrobe")).length} added this month</span>}
+            {tabStats.newIds.size > 0 && activeTab === "wardrobe" && (
+              <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter(id => {
+                const p = items.find(x => x.id === id);
+                return p && isWardrobeItem(p);
+              }).length} added this month</span>
+            )}
           </div>
         ) : null;
       })()}
-      {activeTab === "wardrobe" && topUsed.length > 0 && (
-        <div style={{ margin:"12px 24px 0", padding:"14px 16px", background:V.card, border:`1px solid ${V.border}`, borderRadius:14 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", gap:12, flexWrap:"wrap", marginBottom:10 }}>
+
+      {/* Archive mixed-state note */}
+      {activeTab === "archive" && (
+        <div style={{ margin:"6px 24px 0", fontSize:12, color:V.faint }}>
+          Perfumes with at least one archived bottle. Some may also appear in Wardrobe if they have active bottles too.
+        </div>
+      )}
+
+      {/* Weather suggestions */}
+      {activeTab === "wardrobe" && weatherSuggestions.length > 0 && dubaiTemp !== null && (
+        <div style={{ margin:"10px 24px 0", padding:"14px 16px", background:isDark?"rgba(99,102,241,0.08)":"rgba(99,102,241,0.04)", border:"1px solid rgba(99,102,241,0.2)", borderRadius:14 }}>
+          <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:10 }}>
+            <span style={{ fontSize:18 }}>{dubaiTemp > 32 ? "🌡️" : dubaiTemp < 22 ? "❄️" : "🌤️"}</span>
             <div>
-              <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint }}>Most used</div>
-              <div style={{ fontSize:14, fontWeight:700 }}>Top 3 perfumes by number of days worn</div>
+              <span style={{ fontSize:13, fontWeight:700, color:"#6366f1" }}>
+                {dubaiTemp > 32 ? "It's hot out" : dubaiTemp < 22 ? "Cool weather today" : "Nice weather"} · {dubaiTemp.toFixed(0)}°C in Dubai
+              </span>
+              <span style={{ fontSize:11, color:V.faint, marginLeft:8 }}>
+                {dubaiTemp > 32 ? "Light, fresh scents" : dubaiTemp < 22 ? "Rich, warm fragrances" : "Moderate projection"}
+              </span>
             </div>
           </div>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {weatherSuggestions.map(item => (
+              <button key={item.id} onClick={() => router.push(`/dashboard/perfumes/${item.id}`)}
+                style={{ padding:"8px 12px", borderRadius:10, border:"1px solid rgba(99,102,241,0.2)", background:isDark?"rgba(99,102,241,0.1)":"rgba(99,102,241,0.06)", cursor:"pointer", textAlign:"left" }}>
+                <div style={{ fontSize:10, fontWeight:700, color:"#6366f1" }}>{item.brand}</div>
+                <div style={{ fontSize:12, fontWeight:800, color:V.text }}>{item.model}</div>
+                <div style={{ display:"flex", gap:3, marginTop:3 }}>
+                  {item.weatherTags.slice(0,2).map(w => <span key={w} style={{ fontSize:9, fontWeight:700, padding:"1px 5px", borderRadius:999, background:"rgba(99,102,241,0.15)", color:"#6366f1" }}>{w}</span>)}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Top used */}
+      {activeTab === "wardrobe" && topUsed.length > 0 && (
+        <div style={{ margin:"12px 24px 0", padding:"14px 16px", background:V.card, border:`1px solid ${V.border}`, borderRadius:14 }}>
+          <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint, marginBottom:8 }}>Most used</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
             {topUsed.map(({ perfume, days }) => (
               <button key={perfume.id} onClick={() => router.push(`/dashboard/perfumes/${perfume.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
@@ -344,6 +434,7 @@ export default function PerfumesPage() {
         </div>
       )}
 
+      {/* Brand modal */}
       {brandFocus && (() => {
         const brandItems = items.filter(x => x.brand === brandFocus);
         const brandIds = new Set(brandItems.map(x => x.id));
@@ -354,22 +445,31 @@ export default function PerfumesPage() {
           <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:70, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={() => setBrandFocus(null)}>
             <div onClick={e => e.stopPropagation()} style={{ width:"min(700px,100%)", background:V.card, border:`1px solid ${V.border}`, borderRadius:18, padding:20 }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-                <div><div style={{ fontSize:20, fontWeight:800 }}>{brandFocus}</div><div style={{ fontSize:12, color:V.muted }}>Brand page with spend, rating, and lineup.</div></div>
+                <div><div style={{ fontSize:20, fontWeight:800 }}>{brandFocus}</div><div style={{ fontSize:12, color:V.muted }}>Brand overview</div></div>
                 <button style={btn} onClick={() => setBrandFocus(null)}>Close</button>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(4,minmax(0,1fr))", gap:10, marginBottom:14 }}>
                 <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Perfumes</div><div style={{ fontSize:16, fontWeight:800 }}>{brandItems.length}</div></div>
-                <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Wardrobe</div><div style={{ fontSize:16, fontWeight:800 }}>{brandItems.filter(x => x.status === "wardrobe").length}</div></div>
+                <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Wardrobe</div><div style={{ fontSize:16, fontWeight:800 }}>{brandItems.filter(isWardrobeItem).length}</div></div>
                 <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Avg rating</div><div style={{ fontSize:16, fontWeight:800 }}>{avgRating ? avgRating.toFixed(1) : "—"}</div></div>
                 <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Spent</div><div style={{ fontSize:16, fontWeight:800 }}>{fmtMoney(spend)}</div></div>
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
-                {brandItems.map(x => <button key={x.id} onClick={() => router.push(`/dashboard/perfumes/${x.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}><div style={{ fontSize:14, fontWeight:800 }}>{x.model}</div><div style={{ fontSize:12, color:V.muted }}>{x.status} · {x.purchasePriority || "Medium"}</div></button>)}
+                {brandItems.map(x => (
+                  <button key={x.id} onClick={() => router.push(`/dashboard/perfumes/${x.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
+                    <div style={{ fontSize:14, fontWeight:800 }}>{x.model}</div>
+                    <div style={{ fontSize:11, color:V.muted, marginTop:3 }}>
+                      {isWardrobeItem(x) ? "Wardrobe" : isWishlistItem(x) ? "Wishlist" : "Archive"}
+                      {x.bottles.length > 0 && ` · ${x.bottles.length} bottle${x.bottles.length > 1 ? "s" : ""}`}
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
         );
       })()}
+
       {/* Search + sort */}
       {activeTab !== "purchases" && (
         <div style={{ padding:"14px 24px", display:"flex", gap:10, flexWrap:"wrap" }}>
@@ -390,32 +490,39 @@ export default function PerfumesPage() {
           : tabItems.length === 0
             ? <div style={{ padding:"60px 24px", textAlign:"center" }}>
                 <div style={{ fontSize:48, marginBottom:12 }}>🌿</div>
-                <div style={{ fontSize:16, fontWeight:600, color:V.muted }}>{items.length === 0 ? "Your collection is empty" : search ? "No results" : "Nothing here yet"}</div>
+                <div style={{ fontSize:16, fontWeight:600, color:V.muted }}>{search ? "No results" : activeTab === "wardrobe" ? "No active bottles yet" : activeTab === "archive" ? "No archived bottles yet" : "Wishlist is empty"}</div>
                 {items.length === 0 && <div style={{ fontSize:13, color:V.faint, marginTop:6 }}>Click + Add to get started</div>}
               </div>
             : <div style={{ padding:"0 24px 24px", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:14 }}>
-                {tabItems.map(item => (
-                  <button key={item.id} onClick={() => router.push(`/dashboard/perfumes/${item.id}`)}
-                    style={{ borderRadius:14, border:`1px solid ${V.border}`, background:V.card, cursor:"pointer", padding:0, textAlign:"left", color:V.text, transition:"transform 0.15s,box-shadow 0.15s,border-color 0.15s" }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform="translateY(-2px)"; (e.currentTarget as HTMLButtonElement).style.boxShadow="0 8px 32px rgba(0,0,0,0.12)"; (e.currentTarget as HTMLButtonElement).style.borderColor="rgba(245,166,35,0.4)"; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform=""; (e.currentTarget as HTMLButtonElement).style.boxShadow=""; (e.currentTarget as HTMLButtonElement).style.borderColor=V.border; }}>
-                    {item.imageUrl
-                      ? <img src={item.imageUrl} alt="" style={{ width:"100%", height:160, objectFit:"cover", borderRadius:"14px 14px 0 0", display:"block" }} />
-                      : <div style={{ width:"100%", height:160, borderRadius:"14px 14px 0 0", background:V.input, display:"flex", alignItems:"center", justifyContent:"center", fontSize:36 }}>🌸</div>
-                    }
-                    <div style={{ padding:"10px 12px 12px" }}>
-                      <button onClick={(e) => { e.stopPropagation(); setBrandFocus(item.brand); }} style={{ background:"none", border:"none", padding:0, fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:V.faint, marginBottom:1, cursor:"pointer" }}>{item.brand}</button>
-                      <div style={{ fontSize:13, fontWeight:700, marginBottom:6, lineHeight:1.3 }}>{item.model}</div>
-                      <div style={{ marginBottom:5 }}><Stars value={item.ratingStars} size={11} /></div>
-                      <div style={{ display:"flex", gap:3, flexWrap:"wrap", alignItems:"center" }}>
-                        {tabStats.newIds.has(item.id) && <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:999, background:"rgba(22,163,74,0.12)", color:"#16a34a", textTransform:"uppercase", letterSpacing:"0.06em" }}>New</span>}
-                        {item.weatherTags.slice(0,2).map(w => (
-                          <span key={w} style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:999, background:"rgba(99,102,241,0.1)", color:"#6366f1" }}>{w}</span>
-                        ))}
+                {tabItems.map(item => {
+                  // For archive tab: show how many bottles are archived
+                  const archivedBottleCount = item.bottles.filter(b => !ACTIVE_STATUSES.has(b.status)).length;
+                  const activeBottleCount   = item.bottles.filter(b => ACTIVE_STATUSES.has(b.status)).length;
+                  const isMixed = activeBottleCount > 0 && archivedBottleCount > 0;
+                  return (
+                    <button key={item.id} onClick={() => router.push(`/dashboard/perfumes/${item.id}`)}
+                      style={{ borderRadius:14, border:`1px solid ${V.border}`, background:V.card, cursor:"pointer", padding:0, textAlign:"left", color:V.text, transition:"transform 0.15s,box-shadow 0.15s,border-color 0.15s" }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform="translateY(-2px)"; (e.currentTarget as HTMLButtonElement).style.boxShadow="0 8px 32px rgba(0,0,0,0.12)"; (e.currentTarget as HTMLButtonElement).style.borderColor="rgba(245,166,35,0.4)"; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform=""; (e.currentTarget as HTMLButtonElement).style.boxShadow=""; (e.currentTarget as HTMLButtonElement).style.borderColor=V.border; }}>
+                      {item.imageUrl
+                        ? <img src={item.imageUrl} alt="" style={{ width:"100%", height:160, objectFit:"cover", borderRadius:"14px 14px 0 0", display:"block" }} />
+                        : <div style={{ width:"100%", height:160, borderRadius:"14px 14px 0 0", background:V.input, display:"flex", alignItems:"center", justifyContent:"center", fontSize:36 }}>🌸</div>
+                      }
+                      <div style={{ padding:"10px 12px 12px" }}>
+                        <button onClick={(e) => { e.stopPropagation(); setBrandFocus(item.brand); }} style={{ background:"none", border:"none", padding:0, fontSize:10, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:V.faint, marginBottom:1, cursor:"pointer" }}>{item.brand}</button>
+                        <div style={{ fontSize:13, fontWeight:700, marginBottom:6, lineHeight:1.3 }}>{item.model}</div>
+                        <div style={{ marginBottom:5 }}><Stars value={item.ratingStars} size={11} /></div>
+                        <div style={{ display:"flex", gap:3, flexWrap:"wrap", alignItems:"center" }}>
+                          {tabStats.newIds.has(item.id) && <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:999, background:"rgba(22,163,74,0.12)", color:"#16a34a", textTransform:"uppercase", letterSpacing:"0.06em" }}>New</span>}
+                          {isMixed && <span style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:999, background:"rgba(245,166,35,0.12)", color:"#d97706" }}>Mixed</span>}
+                          {item.weatherTags.slice(0,2).map(w => (
+                            <span key={w} style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:999, background:"rgba(99,102,241,0.1)", color:"#6366f1" }}>{w}</span>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
       )}
 
@@ -472,16 +579,14 @@ export default function PerfumesPage() {
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Collection
                 <select style={inputSt} value={af.status} onChange={e => setAf(f => ({ ...f, status: e.target.value as PerfumeStatus }))}>
-                  <option value="wardrobe">Wardrobe</option><option value="wishlist">Wishlist</option><option value="archive">Archive</option>
+                  <option value="wardrobe">Wardrobe</option><option value="wishlist">Wishlist</option>
                 </select>
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Brand
-                <input style={inputSt} value={af.brand} onChange={e => setAf(f => ({ ...f, brand: e.target.value }))} placeholder="e.g. Lattafa" />
+                Brand <input style={inputSt} value={af.brand} onChange={e => setAf(f => ({ ...f, brand: e.target.value }))} placeholder="e.g. Lattafa" />
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Model
-                <input style={inputSt} value={af.model} onChange={e => setAf(f => ({ ...f, model: e.target.value }))} placeholder="e.g. Asad" />
+                Model <input style={inputSt} value={af.model} onChange={e => setAf(f => ({ ...f, model: e.target.value }))} placeholder="e.g. Asad" />
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Rating
@@ -490,41 +595,39 @@ export default function PerfumesPage() {
                 </div>
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", gridColumn:"1/-1" }}>
-                Image URL (optional)
-                <input style={inputSt} value={af.imageDataUrl} onChange={e => setAf(f => ({ ...f, imageDataUrl: e.target.value }))} placeholder="https://…" />
+                Image URL (optional) <input style={inputSt} value={af.imageDataUrl} onChange={e => setAf(f => ({ ...f, imageDataUrl: e.target.value }))} placeholder="https://…" />
               </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Bottle type
-                <select style={inputSt} value={af.bottleType} onChange={e => setAf(f => ({ ...f, bottleType: e.target.value as BottleType }))}>
-                  <option>Full bottle</option><option>Decant</option><option>Sample</option><option>Tester</option>
-                </select>
-              </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Size (ml)
-                <input style={inputSt} value={af.sizeMl} onChange={e => setAf(f => ({ ...f, sizeMl: e.target.value }))} />
-              </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Purchase date
-                <input style={inputSt} type="date" value={af.date} onChange={e => setAf(f => ({ ...f, date: e.target.value }))} />
-              </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Price
-                <input style={inputSt} value={af.price} onChange={e => setAf(f => ({ ...f, price: e.target.value }))} />
-              </label>
-              {af.status === "wishlist" && <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Wishlist priority
-                <select style={inputSt} value={af.priority} onChange={e => setAf(f => ({ ...f, priority: e.target.value }))}>
-                  <option>Low</option><option>Medium</option><option>High</option><option>Must buy</option>
-                </select>
-              </label>}
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Shop name
-                <input style={inputSt} value={af.shop} onChange={e => setAf(f => ({ ...f, shop: e.target.value }))} />
-              </label>
-              <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
-                Shop link (optional)
-                <input style={inputSt} value={af.shopLink} onChange={e => setAf(f => ({ ...f, shopLink: e.target.value }))} placeholder="https://…" />
-              </label>
+              {af.status === "wardrobe" && <>
+                <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                  Bottle type
+                  <select style={inputSt} value={af.bottleType} onChange={e => setAf(f => ({ ...f, bottleType: e.target.value as BottleType }))}>
+                    <option>Full bottle</option><option>Decant</option><option>Sample</option><option>Tester</option>
+                  </select>
+                </label>
+                <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                  Size (ml) <input style={inputSt} value={af.sizeMl} onChange={e => setAf(f => ({ ...f, sizeMl: e.target.value }))} />
+                </label>
+                <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                  Purchase date <input style={inputSt} type="date" value={af.date} onChange={e => setAf(f => ({ ...f, date: e.target.value }))} />
+                </label>
+                <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                  Price (AED) <input style={inputSt} value={af.price} onChange={e => setAf(f => ({ ...f, price: e.target.value }))} />
+                </label>
+                <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                  Shop name <input style={inputSt} value={af.shop} onChange={e => setAf(f => ({ ...f, shop: e.target.value }))} />
+                </label>
+                <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                  Shop link (optional) <input style={inputSt} value={af.shopLink} onChange={e => setAf(f => ({ ...f, shopLink: e.target.value }))} placeholder="https://…" />
+                </label>
+              </>}
+              {af.status === "wishlist" && (
+                <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                  Priority
+                  <select style={inputSt} value={af.priority} onChange={e => setAf(f => ({ ...f, priority: e.target.value }))}>
+                    <option>Low</option><option>Medium</option><option>High</option><option>Must buy</option>
+                  </select>
+                </label>
+              )}
             </div>
             <div style={{ padding:"0 20px 20px", display:"flex", justifyContent:"flex-end", gap:8 }}>
               <button style={btn} onClick={() => setShowAdd(false)}>Cancel</button>
