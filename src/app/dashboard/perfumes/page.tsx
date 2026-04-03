@@ -51,23 +51,31 @@ function useDarkMode() {
 }
 
 // ── Bottle-based helpers (the source of truth) ─────────────────────────────
-const ACTIVE_STATUSES = new Set(["In collection", "in collection"]);
+const ACTIVE_STATUSES  = new Set(["In collection", "in collection", "active", "Active"]);
+const ARCHIVE_STATUSES = new Set(["Emptied", "emptied", "Sold", "sold", "Gifted", "gifted", "Lost", "lost", "archive", "Archive", "archived"]);
+
 function hasActiveBottle(p: Perfume): boolean {
-  return p.bottles.some(b => ACTIVE_STATUSES.has(b.status));
+  if (p.bottles.length === 0) return false;
+  // Active = explicitly active OR not explicitly archived (default assumption)
+  return p.bottles.some(b =>
+    ACTIVE_STATUSES.has(b.status) ||
+    (!ARCHIVE_STATUSES.has(b.status) && b.status !== "")
+  );
 }
 function hasArchivedBottle(p: Perfume): boolean {
-  return p.bottles.some(b => !ACTIVE_STATUSES.has(b.status));
+  return p.bottles.some(b => ARCHIVE_STATUSES.has(b.status));
 }
 function isWardrobeItem(p: Perfume): boolean {
-  // Must have at least one active bottle
+  if (p.status === "wishlist") return false;
   return hasActiveBottle(p);
 }
 function isArchiveItem(p: Perfume): boolean {
-  // Has at least one archived bottle (can overlap with wardrobe for mixed state)
-  return hasArchivedBottle(p);
+  if (p.status === "wishlist") return false;
+  // Only show in archive if ALL bottles are archived
+  // (mixed = show in wardrobe only, with a badge)
+  return p.bottles.length > 0 && !hasActiveBottle(p) && hasArchivedBottle(p);
 }
 function isWishlistItem(p: Perfume): boolean {
-  // Wishlist = no bottles yet (or perfume.status === wishlist with no active bottles)
   return p.status === "wishlist" && !hasActiveBottle(p);
 }
 
@@ -496,8 +504,8 @@ export default function PerfumesPage() {
             : <div style={{ padding:"0 24px 24px", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:14 }}>
                 {tabItems.map(item => {
                   // For archive tab: show how many bottles are archived
-                  const archivedBottleCount = item.bottles.filter(b => !ACTIVE_STATUSES.has(b.status)).length;
-                  const activeBottleCount   = item.bottles.filter(b => ACTIVE_STATUSES.has(b.status)).length;
+                  const archivedBottleCount = item.bottles.filter(b => ARCHIVE_STATUSES.has(b.status)).length;
+                  const activeBottleCount   = item.bottles.filter(b => !ARCHIVE_STATUSES.has(b.status)).length;
                   const isMixed = activeBottleCount > 0 && archivedBottleCount > 0;
                   return (
                     <button key={item.id} onClick={() => router.push(`/dashboard/perfumes/${item.id}`)}
