@@ -129,7 +129,7 @@ export default function EntertainmentPage() {
   const [deviceCode, setDeviceCode]         = useState<DeviceCode | null>(null);
   const [authPolling, setAuthPolling]       = useState(false);
   const [addingItem, setAddingItem]         = useState<string | null>(null);
-  const [addedItems, setAddedItems]         = useState<Set<string>>(new Set());
+  const [authError, setAuthError] = useState("");
   const [toast, setToast]                   = useState("");
 
   // Load config from DB
@@ -293,20 +293,21 @@ export default function EntertainmentPage() {
       const data = await res.json();
       if (!res.ok) {
         setShowAuth(false);
-        showMsg(`Auth failed: ${data.error ?? res.status} — Check your Client ID is correct`, true);
+        setAuthError(`Trakt error: ${JSON.stringify(data)}`);
         return;
       }
       if (!data.device_code || !data.user_code) {
         setShowAuth(false);
-        showMsg("Unexpected response from Trakt — is your Client ID correct?", true);
+        setAuthError(`Unexpected Trakt response: ${JSON.stringify(data)}`);
         return;
       }
+      setAuthError("");
       setDeviceCode(data);
       setAuthPolling(true);
       pollForToken(data.device_code, data.interval ?? 5);
     } catch (e) {
       setShowAuth(false);
-      showMsg(`Network error: ${String(e)}`, true);
+      setAuthError(`Network error: ${String(e)}`);
     }
   }
 
@@ -404,6 +405,14 @@ export default function EntertainmentPage() {
           <button style={btn} onClick={() => setShowSetup(v => !v)}>⚙ Setup</button>
         </div>
       </div>
+
+      {/* Persistent auth error */}
+      {authError && (
+        <div style={{ margin:"12px 24px 0", padding:"12px 16px", background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.3)", borderRadius:12, color:"#ef4444", fontSize:13, display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
+          <div style={{ wordBreak:"break-all", lineHeight:1.6 }}><strong>Auth error:</strong> {authError}</div>
+          <button onClick={() => setAuthError("")} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", flexShrink:0, fontSize:16 }}>✕</button>
+        </div>
+      )}
 
       {/* Setup panel */}
       {showSetup && (
