@@ -169,7 +169,7 @@ function Stars({ value, size = 16 }: { value: number | null; size?: number }) {
   );
 }
 
-export default function PerfumeDetailPage({ params }: { params: { id: string } }) {
+export default function PerfumeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const supabase = createClient();
   const router = useRouter();

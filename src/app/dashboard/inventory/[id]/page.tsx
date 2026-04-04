@@ -35,7 +35,7 @@ function daysLeft(d: string | null) {
   return Math.ceil((new Date(d).getTime() - new Date(todayDubai()).getTime()) / 86400000);
 }
 
-export default function InventoryDetailPage({ params }: { params: { id: string } }) {
+export default function InventoryDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const supabase = createClient();
   const router = useRouter();

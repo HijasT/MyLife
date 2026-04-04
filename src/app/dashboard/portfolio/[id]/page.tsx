@@ -210,7 +210,7 @@ function dbToAlert(r: any): PortfolioAlert {
 export default function PortfolioItemPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
   const supabase = createClient();

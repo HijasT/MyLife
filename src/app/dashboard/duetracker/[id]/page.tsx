@@ -138,7 +138,7 @@ function buildCarryForwardNote(previousMonth: string, currency: Currency, carryF
   return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
 }
 
-export default function DueItemDetailPage({ params }: { params: { id: string } }) {
+export default function DueItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const supabase = createClient();
   const router = useRouter();
