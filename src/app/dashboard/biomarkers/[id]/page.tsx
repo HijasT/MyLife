@@ -117,7 +117,7 @@ function TrendChart({ points, refMin, refMax }: { points: { x: string; y: number
 }
 
 export default function BiomarkerDetailPage({ params }: { params: { id: string } }) {
-  const client = createClient();
+  const client = await createClient();
   const router = useRouter();
   const [test, setTest] = useState<BiomarkerTest | null>(null);
   const [results, setResults] = useState<BiomarkerResult[]>([]);

@@ -9,7 +9,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const {
     data: { user },
@@ -41,7 +41,6 @@ export default async function DashboardLayout({
           background: "var(--main-bg)",
         }}
       >
-        {/* Desktop: content should shift and resize with sidebar */}
         <div
           className="hidden lg:block"
           style={{
@@ -53,7 +52,6 @@ export default async function DashboardLayout({
           <div className="page-enter min-h-screen">{children}</div>
         </div>
 
-        {/* Mobile: sidebar is overlay only, content stays full width */}
         <div className="lg:hidden">
           <div className="page-enter min-h-screen">{children}</div>
         </div>

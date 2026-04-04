@@ -18,27 +18,17 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
           </span>
         )}
       </div>
-
-      <p className="font-semibold text-[var(--text-primary)] mb-1">
-        {module.label}
-      </p>
+      <p className="font-semibold text-[var(--text-primary)] mb-1">{module.label}</p>
       <p className="text-sm text-[var(--text-muted)]">{module.description}</p>
-
       {!isComingSoon && (
-        <div
-          className="mt-4 h-0.5 w-8 rounded-full"
-          style={{ background: module.color }}
-        />
+        <div className="mt-4 h-0.5 w-8 rounded-full" style={{ background: module.color }} />
       )}
     </>
   );
 
   if (isComingSoon) {
     return (
-      <div
-        className={`${cardClass} cursor-default opacity-80`}
-        aria-disabled="true"
-      >
+      <div className={`${cardClass} cursor-default opacity-80`} aria-disabled="true">
         {content}
       </div>
     );
@@ -52,7 +42,7 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
 }
 
 export default async function DashboardPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const {
     data: { user },
@@ -107,6 +97,32 @@ export default async function DashboardPage() {
       hour12: false,
     }).format(now)
   );
+
+  // Dubai weather
+  let dubaiTemp: number | null = null;
+  let weatherCode: number | null = null;
+  try {
+    const wRes = await fetch(
+      "https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,weather_code&timezone=Asia%2FDubai",
+      { next: { revalidate: 1800 } }
+    );
+    const wData = await wRes.json();
+    dubaiTemp = wData?.current?.temperature_2m ?? null;
+    weatherCode = wData?.current?.weather_code ?? null;
+  } catch { /* skip */ }
+
+  function weatherEmoji(code: number | null, hr: number): string {
+    if (code === null) return "";
+    const isNight = hr < 6 || hr >= 19;
+    if (code === 0) return isNight ? "🌙" : "☀️";
+    if (code <= 2)  return isNight ? "🌙" : "🌤️";
+    if (code <= 3)  return "⛅";
+    if (code <= 49) return "🌫️";
+    if (code <= 69) return "🌧️";
+    if (code <= 79) return "🌨️";
+    if (code <= 99) return "⛈️";
+    return "🌤️";
+  }
 
   const greeting =
     hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
@@ -178,17 +194,12 @@ export default async function DashboardPage() {
     const stats = (statRes.data ?? []) as PortfolioStatRow[];
 
     const statMap = new Map<string, number>();
-
     for (const row of stats) {
       const tx =
         row.transaction_type ??
-        ((Number(row.units) || 0) < 0 || (Number(row.total_paid) || 0) < 0
-          ? "sell"
-          : "buy");
-
+        ((Number(row.units) || 0) < 0 || (Number(row.total_paid) || 0) < 0 ? "sell" : "buy");
       const absUnits = Math.abs(Number(row.units) || 0);
       const existing = statMap.get(row.item_id) ?? 0;
-
       statMap.set(row.item_id, tx === "buy" ? existing + absUnits : existing - absUnits);
     }
 
@@ -216,70 +227,47 @@ export default async function DashboardPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-10">
-        <h1
-          className="font-display text-3xl mb-1"
-          style={{ color: "var(--text-primary)" }}
-        >
+        <h1 className="font-display text-3xl mb-1" style={{ color: "var(--text-primary)" }}>
           {greeting}, <span className="text-accent italic">{firstName}.</span>
         </h1>
 
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          {dateLong} ·{" "}
-          <span style={{ color: "var(--text-primary)" }}>{timeNow}</span>
+          {dateLong} · <span style={{ color: "var(--text-primary)" }}>{timeNow}</span>
+          {dubaiTemp !== null && (
+            <span style={{ color: "var(--text-muted)" }}>
+              {" "}· {weatherEmoji(weatherCode, hour)}{" "}
+              <span style={{ color: "var(--text-primary)" }}>{dubaiTemp.toFixed(0)}°C</span>
+            </span>
+          )}
         </p>
 
         <div
           className="mt-5 rounded-2xl border overflow-hidden"
-          style={{
-            background: "var(--card-bg)",
-            borderColor: "var(--card-border)",
-          }}
+          style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
         >
           <div
             className="px-4 py-3 border-b"
-            style={{
-              borderColor: "var(--card-border)",
-              background: "var(--main-bg2)",
-            }}
+            style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
           >
-            <span
-              className="text-xs font-bold tracking-widest uppercase"
-              style={{ color: "var(--text-muted)" }}
-            >
+            <span className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
               Daily snapshot
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
-            <div
-              className="p-4 border-b md:border-b-0 md:border-r"
-              style={{ borderColor: "var(--card-border)" }}
-            >
-              <div
-                className="text-[11px] font-bold tracking-widest uppercase mb-2"
-                style={{ color: "var(--text-muted)" }}
-              >
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
                 Today&apos;s work
               </div>
-
               {workToday.length > 0 ? (
                 <div className="flex flex-col gap-2">
                   {workToday.map((ev) => (
                     <div key={ev.id}>
-                      <div
-                        className="text-sm font-semibold"
-                        style={{ color: "var(--text-primary)" }}
-                      >
-                        {ev.title.startsWith("Work:")
-                          ? ev.title.replace("Work:", "")
-                          : ev.title}
+                      <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                        {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "") : ev.title}
                       </div>
-
                       {ev.work_start && ev.work_end && (
-                        <div
-                          className="text-xs"
-                          style={{ color: "var(--text-muted)" }}
-                        >
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
                           {fmt12(ev.work_start)} to {fmt12(ev.work_end)}
                         </div>
                       )}
@@ -287,76 +275,38 @@ export default async function DashboardPage() {
                   ))}
                 </div>
               ) : (
-                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  No work logged today
-                </div>
+                <div className="text-sm" style={{ color: "var(--text-muted)" }}>No work logged today</div>
               )}
             </div>
 
-            <div
-              className="p-4 border-b md:border-b-0 md:border-r"
-              style={{ borderColor: "var(--card-border)" }}
-            >
-              <div
-                className="text-[11px] font-bold tracking-widest uppercase mb-2"
-                style={{ color: "var(--text-muted)" }}
-              >
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
                 Events & portfolio
               </div>
-
               <div className="flex flex-col gap-2">
                 {otherToday.slice(0, 2).map((ev) => (
-                  <div
-                    key={ev.id}
-                    className="text-sm"
-                    style={{ color: "var(--text-primary)" }}
-                  >
-                    {ev.title}
-                  </div>
+                  <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>{ev.title}</div>
                 ))}
-
                 {todayPortfolio.slice(0, 2).map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="text-sm"
-                    style={{ color: "var(--text-primary)" }}
-                  >
-                    Portfolio:{" "}
-                    {tx.transaction_type === "sell" ? "Sold" : "Purchased"}{" "}
+                  <div key={tx.id} className="text-sm" style={{ color: "var(--text-primary)" }}>
+                    Portfolio: {tx.transaction_type === "sell" ? "Sold" : "Purchased"}{" "}
                     {tx.portfolio_items?.symbol ?? "Asset"}
                   </div>
                 ))}
-
                 {otherToday.length === 0 && todayPortfolio.length === 0 && (
-                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    Quiet day so far
-                  </div>
+                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>Quiet day so far</div>
                 )}
               </div>
             </div>
 
             <div className="p-4">
-              <div
-                className="text-[11px] font-bold tracking-widest uppercase mb-2"
-                style={{ color: "var(--text-muted)" }}
-              >
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
                 Portfolio snapshot
               </div>
-
-              <div
-                className="text-2xl font-bold"
-                style={{ color: "var(--text-primary)" }}
-              >
-                AED{" "}
-                {portfolioCurrentAed.toLocaleString("en-AE", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+              <div className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
+                AED {portfolioCurrentAed.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-
-              <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                Current portfolio value
-              </div>
+              <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Current portfolio value</div>
             </div>
           </div>
         </div>
@@ -367,20 +317,13 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-3 mb-4">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-accent hub-pulse" />
-              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">
-                Finance Hub
-              </h2>
+              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">Finance Hub</h2>
             </div>
             <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              These modules share a financial ledger
-            </p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>These modules share a financial ledger</p>
           </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {financeModules.map((m) => (
-              <ModuleCard key={m.id} module={m} />
-            ))}
+            {financeModules.map((m) => <ModuleCard key={m.id} module={m} />)}
           </div>
         </section>
       )}
@@ -388,19 +331,13 @@ export default async function DashboardPage() {
       {lifestyleModules.length > 0 && (
         <section className="mb-10">
           <div className="flex items-center gap-3 mb-4">
-            <h2
-              className="text-xs font-bold tracking-widest uppercase"
-              style={{ color: "var(--text-muted)" }}
-            >
+            <h2 className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
               Lifestyle
             </h2>
             <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
           </div>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {lifestyleModules.map((m) => (
-              <ModuleCard key={m.id} module={m} />
-            ))}
+            {lifestyleModules.map((m) => <ModuleCard key={m.id} module={m} />)}
           </div>
         </section>
       )}

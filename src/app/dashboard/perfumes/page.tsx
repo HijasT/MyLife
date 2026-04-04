@@ -127,7 +127,7 @@ function Stars({ value, size = 14 }: { value: number | null; size?: number }) {
 }
 
 export default function PerfumesPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

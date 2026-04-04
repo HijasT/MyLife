@@ -34,7 +34,7 @@ type BannerState = {
 } | null;
 
 export default function SettingsPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);

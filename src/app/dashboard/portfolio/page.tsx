@@ -250,7 +250,7 @@ const dbToPurchase = (r: any): Purchase => ({
 });
 
 export default function PortfolioPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);

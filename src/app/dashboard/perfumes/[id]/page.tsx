@@ -170,7 +170,7 @@ function Stars({ value, size = 16 }: { value: number | null; size?: number }) {
 }
 
 export default function PerfumeDetailPage({ params }: { params: { id: string } }) {
-  const supabase = createClient();
+  const supabase = await createClient();
   const router = useRouter();
   const isDark = useDarkMode();
 

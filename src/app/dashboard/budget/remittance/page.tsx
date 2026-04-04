@@ -37,7 +37,7 @@ function statusFromSettingsRow(row: { remittance_paid?: boolean | null; cash_in?
 }
 
 export default function RemittancePage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [records, setRecords] = useState<MonthRecord[]>([]);
