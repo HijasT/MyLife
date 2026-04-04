@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [resetSent, setResetSent] = useState(false);
   const router = useRouter();
-  const supabase = await createClient();
+  const supabase = createClient();
 
   const handleLogin = async () => {
     if (!email || !password) return;

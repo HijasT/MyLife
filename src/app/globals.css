@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: var(--font-dm-sans), sans-serif;
+  --font-display: var(--font-playfair), serif;
+  --color-sidebar: #0E1015;
+  --color-sidebar-hover: #1A1D24;
+  --color-sidebar-border: #1F2229;
+  --color-sidebar-text: #8B8FA8;
+  --color-sidebar-active: #F5A623;
+  --color-surface: #F8F7F4;
+  --color-surface-2: #EFEDE8;
+  --color-accent: #F5A623;
+  --color-accent-dim: #F5A62320;
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+}
+
+
 :root {
   --sidebar-width: 240px;
 

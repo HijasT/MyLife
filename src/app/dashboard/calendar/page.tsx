@@ -362,7 +362,7 @@ const dbToEvent = (r: any): CalEvent => {
 };
 
 export default function CalendarPage() {
-  const supabase = await createClient();
+  const supabase = createClient();
 
   const [userId, setUserId] = useState<string | null>(null);
   const [timezone, setTimezone] = useState("UTC");

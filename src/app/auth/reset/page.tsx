@@ -11,7 +11,7 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const router = useRouter();
-  const supabase = await createClient();
+  const supabase = createClient();
 
   // Supabase puts the session in the URL hash after redirect
   useEffect(() => {

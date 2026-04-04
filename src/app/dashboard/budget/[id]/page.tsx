@@ -139,7 +139,7 @@ function buildCarryForwardNote(previousMonth: string, currency: Currency, carryF
 }
 
 export default function DueItemDetailPage({ params }: { params: { id: string } }) {
-  const supabase = await createClient();
+  const supabase = createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [item, setItem] = useState<DueItem | null>(null);

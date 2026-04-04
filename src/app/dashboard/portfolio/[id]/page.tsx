@@ -212,7 +212,7 @@ export default function PortfolioItemPage({
 }: {
   params: { id: string };
 }) {
-  const supabase = await createClient();
+  const supabase = createClient();
   const router = useRouter();
 
   const [item, setItem] = useState<PortfolioItem | null>(null);

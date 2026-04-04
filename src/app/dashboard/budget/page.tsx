@@ -319,7 +319,7 @@ function dbToEntry(r: any): DueEntry {
 }
 
 export default function DueTrackerPage() {
-  const supabase = await createClient();
+  const supabase = createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
