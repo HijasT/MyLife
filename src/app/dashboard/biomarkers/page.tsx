@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { nowDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
+import { searchBiomarkerRefs, findBiomarkerRef, type BiomarkerRef } from "@/lib/biomarkers_db";
 
 const supabase = createClient;
 
@@ -274,6 +275,8 @@ export default function BiomarkersPage() {
   const [compareRight, setCompareRight] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [testForm, setTestForm] = useState({ name: "", groupName: "", newGroupName: "", method: "", unit: "", refMin: "", refMax: "", sortOrder: "0" });
+  const [dbSuggestions, setDbSuggestions] = useState<BiomarkerRef[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   const V = {

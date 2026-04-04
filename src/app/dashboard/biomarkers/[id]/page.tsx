@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { findBiomarkerRef } from "@/lib/biomarkers_db";
 
 type BiomarkerTest = {
   id: string;
@@ -280,6 +281,34 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
             <div style={{ fontSize: 12, color: V.muted }}>{overdueDays != null && overdueDays > 180 ? "Probably time for a retest" : "Still reasonably fresh"}</div>
           </div>
         </div>
+
+        {/* What does this mean? — explanation panel from biomarkers DB */}
+        {(() => {
+          const ref = test ? findBiomarkerRef(test.name) : null;
+          if (!ref) return null;
+          const isOutOfRange = status === "high" || status === "low";
+          const causeText = status === "high" ? ref.highCauses : status === "low" ? ref.lowCauses : null;
+          return (
+            <div style={{ ...section, padding: 0, overflow: "hidden" }}>
+              <div style={{ padding: "12px 16px", borderBottom: `1px solid ${V.border}`, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, letterSpacing: "0.08em" }}>What is this test?</div>
+                <span style={{ fontSize: 10, color: V.faint }}>Source: awesome-biomarkers</span>
+              </div>
+              <div style={{ padding: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: V.text, marginBottom: 6 }}>{ref.oneLiner}</div>
+                <div style={{ fontSize: 13, color: V.muted, lineHeight: 1.6, marginBottom: isOutOfRange ? 14 : 0 }}>{ref.description}</div>
+                {isOutOfRange && causeText && (
+                  <div style={{ padding: "12px 14px", borderRadius: 10, background: status === "high" ? "rgba(239,68,68,0.07)" : "rgba(59,130,246,0.07)", border: `1px solid ${status === "high" ? "rgba(239,68,68,0.2)" : "rgba(59,130,246,0.2)"}` }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: status === "high" ? "#dc2626" : "#2563eb", marginBottom: 6 }}>
+                      {status === "high" ? "⬆ Common reasons for high value" : "⬇ Common reasons for low value"}
+                    </div>
+                    <div style={{ fontSize: 13, color: V.muted, lineHeight: 1.6 }}>{causeText}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {editMode && (
           <div style={{ ...section, padding: 16 }}>
