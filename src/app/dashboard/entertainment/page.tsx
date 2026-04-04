@@ -281,16 +281,30 @@ export default function EntertainmentPage() {
     if (!traktClientId) { showMsg("Enter your Trakt Client ID in setup first"); return; }
     setShowAuth(true);
     setDeviceCode(null);
-    const res = await fetch("/api/trakt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "device_init", clientId: traktClientId }),
-    });
-    if (!res.ok) { showMsg("Failed to start auth"); return; }
-    const data = await res.json();
-    setDeviceCode(data);
-    setAuthPolling(true);
-    pollForToken(data.device_code, data.interval ?? 5);
+    try {
+      const res = await fetch("/api/trakt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "device_init", clientId: traktClientId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setShowAuth(false);
+        showMsg(`Auth failed: ${data.error ?? res.status} — Check your Client ID is correct`);
+        return;
+      }
+      if (!data.device_code || !data.user_code) {
+        setShowAuth(false);
+        showMsg("Unexpected response from Trakt — is your Client ID correct?");
+        return;
+      }
+      setDeviceCode(data);
+      setAuthPolling(true);
+      pollForToken(data.device_code, data.interval ?? 5);
+    } catch (e) {
+      setShowAuth(false);
+      showMsg(`Network error: ${String(e)}`);
+    }
   }
 
   async function pollForToken(dc: string, interval: number) {

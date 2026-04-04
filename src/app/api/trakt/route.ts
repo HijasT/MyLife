@@ -57,8 +57,12 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: clientId }),
     });
-    if (!res.ok) return NextResponse.json({ error: `Trakt ${res.status}` }, { status: res.status });
-    return NextResponse.json(await res.json());
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("Trakt device_init failed:", res.status, data);
+      return NextResponse.json({ error: `Trakt ${res.status}: ${JSON.stringify(data)}` }, { status: res.status });
+    }
+    return NextResponse.json(data);
   }
 
   // ── Poll device auth ──────────────────────────────────────────────────
