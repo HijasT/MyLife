@@ -1111,7 +1111,7 @@ export default function DueTrackerPage() {
                     </select>
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 14, fontWeight: 700, color: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? V.faint : V.text, textDecoration: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? "line-through" : "none" }}>
+                        <button onClick={() => router.push("/dashboard/duetracker/remittance")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 14, fontWeight: 700, color: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? V.faint : V.text, textDecoration: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? "line-through" : "none" }}>
                           Remittance
                         </button>
                         <select
@@ -1153,7 +1153,7 @@ export default function DueTrackerPage() {
                     </div>
                     <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                       <span style={{ fontSize: 14, fontWeight: 700, color: remittanceAed > 0 ? V.accent : V.faint, textDecoration: settings.remittanceStatus === "waived" ? "line-through" : "none" }}>AED {remittanceAed.toFixed(0)}</span>
-                      <button onClick={() => router.push("/dashboard/budget/remittance")} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>History</button>
+                      <button onClick={() => router.push("/dashboard/duetracker/remittance")} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>History</button>
                       <button disabled={settings.isLocked} onClick={() => void (remittanceEditMode ? saveRemittance() : Promise.resolve(setRemittanceEditMode(true)))} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: remittanceEditMode ? V.accent : V.muted, opacity: settings.isLocked ? 0.6 : 1 }}>{remittanceEditMode ? "Save" : "Edit"}</button>
                     </div>
                   </div>
@@ -1237,7 +1237,7 @@ export default function DueTrackerPage() {
 
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                         <button onClick={() => void openPaymentModal(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>{entry && entry.amountPaid > 0 ? "Add payment" : "Pay"}</button>
-                        <button onClick={() => router.push(`/dashboard/budget/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
+                        <button onClick={() => router.push(`/dashboard/duetracker/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
                         <button onClick={() => setEditItemId(isEditing ? null : item.id)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: isEditing ? V.accent : V.muted }}>{isEditing ? "Done" : "Edit"}</button>
                         <button onClick={() => void toggleHide(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.faint }}>{item.isHidden ? "Show" : "Hide"}</button>
                       </div>

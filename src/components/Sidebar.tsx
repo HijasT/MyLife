@@ -19,8 +19,8 @@ type BackupMode = "export" | "restore";
 
 type ModuleCountMap = Record<string, number | null>;
 type BackupModuleKey =
-  | "perfumes"
-  | "budget"
+  | "aromatica"
+  | "duetracker"
   | "portfolio"
   | "calendar"
   | "biomarkers";
@@ -505,7 +505,7 @@ function BackupModal({
           biomarkersRes,
         ] = await Promise.all([
           supabase
-            .from("perfumes")
+            .from("aromatica")
             .select("*", { count: "exact", head: true })
             .eq("user_id", user.id),
           supabase
@@ -614,22 +614,22 @@ function BackupModal({
         modules: {},
       };
 
-      if (selected.includes("perfumes")) {
+      if (selected.includes("aromatica")) {
         const [{ data: perfumes }, { data: purchases }, { data: bottles }] =
           await Promise.all([
-            supabase.from("perfumes").select("*").eq("user_id", user.id),
+            supabase.from("aromatica").select("*").eq("user_id", user.id),
             supabase.from("perfume_purchases").select("*").eq("user_id", user.id),
             supabase.from("perfume_bottles").select("*").eq("user_id", user.id),
           ]);
 
-        backup.modules.perfumes = {
+        backup.modules.aromatica = {
           perfumes: perfumes ?? [],
           perfume_purchases: purchases ?? [],
           perfume_bottles: bottles ?? [],
         };
       }
 
-      if (selected.includes("budget")) {
+      if (selected.includes("duetracker")) {
         const [{ data: items }, { data: entries }, { data: settings }] =
           await Promise.all([
             supabase.from("due_items").select("*").eq("user_id", user.id),
@@ -640,7 +640,7 @@ function BackupModal({
               .eq("user_id", user.id),
           ]);
 
-        backup.modules.budget = {
+        backup.modules.duetracker = {
           due_items: items ?? [],
           due_entries: entries ?? [],
           due_month_settings: settings ?? [],
@@ -711,9 +711,9 @@ function BackupModal({
 
       const parts: string[] = [];
 
-      if (selected.includes("perfumes")) {
-        const perfumes = (backup.modules.perfumes?.perfumes as any[]) ?? [];
-        parts.push(`=== perfumes ===`);
+      if (selected.includes("aromatica")) {
+        const perfumes = (backup.modules.aromatica?.perfumes as any[]) ?? [];
+        parts.push(`=== aromatica ===`);
         parts.push(
           [
             "brand",
@@ -750,9 +750,9 @@ function BackupModal({
         parts.push("");
       }
 
-      if (selected.includes("budget")) {
-        const items = (backup.modules.budget?.due_items as any[]) ?? [];
-        const entries = (backup.modules.budget?.due_entries as any[]) ?? [];
+      if (selected.includes("duetracker")) {
+        const items = (backup.modules.duetracker?.due_items as any[]) ?? [];
+        const entries = (backup.modules.duetracker?.due_entries as any[]) ?? [];
 
         parts.push(`=== due_items ===`);
         parts.push(
@@ -971,12 +971,12 @@ function BackupModal({
         );
       }
 
-      if (restoreSelected.includes("perfumes")) {
-        const mod = restoreBackup.modules.perfumes;
+      if (restoreSelected.includes("aromatica")) {
+        const mod = restoreBackup.modules.aromatica;
         if (mod) {
           if (Array.isArray(mod.perfumes) && mod.perfumes.length) {
             await supabase
-              .from("perfumes")
+              .from("aromatica")
               .upsert(sanitizeRows(mod.perfumes, user.id), { onConflict: "id" });
           }
           if (Array.isArray(mod.perfume_purchases) && mod.perfume_purchases.length) {
@@ -996,8 +996,8 @@ function BackupModal({
         }
       }
 
-      if (restoreSelected.includes("budget")) {
-        const mod = restoreBackup.modules.budget;
+      if (restoreSelected.includes("duetracker")) {
+        const mod = restoreBackup.modules.duetracker;
         if (mod) {
           if (Array.isArray(mod.due_items) && mod.due_items.length) {
             await supabase

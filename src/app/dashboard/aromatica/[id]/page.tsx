@@ -491,7 +491,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
     );
     if (existing) {
       showToast("Wishlist entry already exists");
-      router.push(`/dashboard/perfumes/${existing.id}`);
+      router.push(`/dashboard/aromatica/${existing.id}`);
       return;
     }
     const { data, error } = await supabase
@@ -520,7 +520,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
       return;
     }
     showToast("Added to wishlist ✓");
-    router.push(`/dashboard/perfumes/${data.id}`);
+    router.push(`/dashboard/aromatica/${data.id}`);
   }
 
   const priceStats = useMemo(() => {
@@ -551,7 +551,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
   if (!item) {
     return (
       <div style={{ minHeight: "60vh", display: "grid", placeItems: "center", background: V.bg, color: V.text }}>
-        <Link href="/dashboard/perfumes">Back to Aromatica</Link>
+        <Link href="/dashboard/aromatica">Back to Aromatica</Link>
       </div>
     );
   }
@@ -662,7 +662,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
           gap: 12,
         }}
       >
-        <Link href="/dashboard/perfumes" style={{ color: V.muted, textDecoration: "none", fontWeight: 700 }}>
+        <Link href="/dashboard/aromatica" style={{ color: V.muted, textDecoration: "none", fontWeight: 700 }}>
           ← Aromatica
         </Link>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -916,7 +916,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 120, display: "grid", placeItems: "center", padding: 16 }} onClick={() => setBrandView(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,100%)", background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, padding: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}><div><div style={{ fontSize: 20, fontWeight: 800 }}>{item.brand}</div><div style={{ fontSize: 12, color: V.muted }}>Brand page with your lineup and priorities.</div></div><button style={btnStyle} onClick={() => setBrandView(false)}>Close</button></div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>{sameBrandItems.map((s) => <button key={s.id} onClick={() => router.push(`/dashboard/perfumes/${s.id}`)} style={{ textAlign: "left", border: `1px solid ${V.border}`, background: V.inputBg, borderRadius: 12, padding: 12, cursor: "pointer" }}><div style={{ fontSize: 14, fontWeight: 800 }}>{s.model}</div><div style={{ fontSize: 12, color: V.muted }}>{s.status}{s.status === "wishlist" ? ` · ${s.purchasePriority || "Medium"}` : ""}</div></button>)}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>{sameBrandItems.map((s) => <button key={s.id} onClick={() => router.push(`/dashboard/aromatica/${s.id}`)} style={{ textAlign: "left", border: `1px solid ${V.border}`, background: V.inputBg, borderRadius: 12, padding: 12, cursor: "pointer" }}><div style={{ fontSize: 14, fontWeight: 800 }}>{s.model}</div><div style={{ fontSize: 12, color: V.muted }}>{s.status}{s.status === "wishlist" ? ` · ${s.purchasePriority || "Medium"}` : ""}</div></button>)}</div>
           </div>
         </div>
       )}

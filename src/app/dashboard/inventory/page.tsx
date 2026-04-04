@@ -49,7 +49,7 @@ const CAT_META: Record<Category, { icon: string; color: string; subcategories: s
 };
 
 // Aromatica is a special linked module within Inventory
-const AROMATICA_META = { icon:"🌸", color:"#D85A30", label:"Aromatica", description:"Fragrance collection · Bottles · Wear logs", href:"/dashboard/perfumes" };
+const AROMATICA_META = { icon:"🌸", color:"#D85A30", label:"Aromatica", description:"Fragrance collection · Bottles · Wear logs", href:"/dashboard/aromatica" };
 
 function daysUntilExpiry(d: string | null): number | null {
   if (!d) return null;

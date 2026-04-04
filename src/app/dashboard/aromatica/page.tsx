@@ -306,7 +306,7 @@ export default function PerfumesPage() {
     const model = af.model.trim();
     if (!brand || !model) { toast("Brand and model required", "error"); return; }
     const dupe = items.find(x => normalizeName(x.brand) === normalizeName(brand) && normalizeName(x.model) === normalizeName(model));
-    if (dupe) { toast("This perfume already exists in Aromatica", "error"); router.push(`/dashboard/perfumes/${dupe.id}`); return; }
+    if (dupe) { toast("This perfume already exists in Aromatica", "error"); router.push(`/dashboard/aromatica/${dupe.id}`); return; }
     const size = safeNum(af.sizeMl, 100);
     const price = safeNum(af.price, 0);
     if (af.status === "wardrobe" && price <= 0) { toast("Enter bottle price", "error"); return; }
@@ -332,7 +332,7 @@ export default function PerfumesPage() {
       if (pErr) { toast(pErr.message, "error"); return; }
     }
     setShowAdd(false);
-    router.push(`/dashboard/perfumes/${pd.id}`);
+    router.push(`/dashboard/aromatica/${pd.id}`);
   }
 
   const V = {
@@ -413,7 +413,7 @@ export default function PerfumesPage() {
           </div>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             {weatherSuggestions.map(item => (
-              <button key={item.id} onClick={() => router.push(`/dashboard/perfumes/${item.id}`)}
+              <button key={item.id} onClick={() => router.push(`/dashboard/aromatica/${item.id}`)}
                 style={{ padding:"8px 12px", borderRadius:10, border:"1px solid rgba(99,102,241,0.2)", background:isDark?"rgba(99,102,241,0.1)":"rgba(99,102,241,0.06)", cursor:"pointer", textAlign:"left" }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#6366f1" }}>{item.brand}</div>
                 <div style={{ fontSize:12, fontWeight:800, color:V.text }}>{item.model}</div>
@@ -432,7 +432,7 @@ export default function PerfumesPage() {
           <div style={{ fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint, marginBottom:8 }}>Most used</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
             {topUsed.map(({ perfume, days }) => (
-              <button key={perfume.id} onClick={() => router.push(`/dashboard/perfumes/${perfume.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
+              <button key={perfume.id} onClick={() => router.push(`/dashboard/aromatica/${perfume.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
                 <div style={{ fontSize:11, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>{perfume.brand}</div>
                 <div style={{ fontSize:14, fontWeight:800, margin:"2px 0 6px" }}>{perfume.model}</div>
                 <div style={{ fontSize:12, color:V.muted }}>{days} day{days === 1 ? "" : "s"} used</div>
@@ -464,7 +464,7 @@ export default function PerfumesPage() {
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
                 {brandItems.map(x => (
-                  <button key={x.id} onClick={() => router.push(`/dashboard/perfumes/${x.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
+                  <button key={x.id} onClick={() => router.push(`/dashboard/aromatica/${x.id}`)} style={{ textAlign:"left", border:`1px solid ${V.border}`, background:V.input, borderRadius:12, padding:12, cursor:"pointer" }}>
                     <div style={{ fontSize:14, fontWeight:800 }}>{x.model}</div>
                     <div style={{ fontSize:11, color:V.muted, marginTop:3 }}>
                       {isWardrobeItem(x) ? "Wardrobe" : isWishlistItem(x) ? "Wishlist" : "Archive"}
@@ -508,7 +508,7 @@ export default function PerfumesPage() {
                   const activeBottleCount   = item.bottles.filter(b => !ARCHIVE_STATUSES.has(b.status)).length;
                   const isMixed = activeBottleCount > 0 && archivedBottleCount > 0;
                   return (
-                    <button key={item.id} onClick={() => router.push(`/dashboard/perfumes/${item.id}`)}
+                    <button key={item.id} onClick={() => router.push(`/dashboard/aromatica/${item.id}`)}
                       style={{ borderRadius:14, border:`1px solid ${V.border}`, background:V.card, cursor:"pointer", padding:0, textAlign:"left", color:V.text, transition:"transform 0.15s,box-shadow 0.15s,border-color 0.15s" }}
                       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform="translateY(-2px)"; (e.currentTarget as HTMLButtonElement).style.boxShadow="0 8px 32px rgba(0,0,0,0.12)"; (e.currentTarget as HTMLButtonElement).style.borderColor="rgba(245,166,35,0.4)"; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform=""; (e.currentTarget as HTMLButtonElement).style.boxShadow=""; (e.currentTarget as HTMLButtonElement).style.borderColor=V.border; }}>
@@ -561,7 +561,7 @@ export default function PerfumesPage() {
               const perf = items.find(x => x.id === p.perfumeId);
               return (
                 <div key={p.id} style={{ display:"grid", gridTemplateColumns:"1fr 0.6fr 0.8fr 1.2fr", gap:8, padding:"11px 16px", borderTop:`1px solid ${V.border}`, fontSize:13, alignItems:"center" }}>
-                  <button onClick={() => perf && router.push(`/dashboard/perfumes/${perf.id}`)} style={{ background:"none", border:"none", textAlign:"left", cursor:"pointer", padding:0, fontWeight:700, color:V.text, fontSize:13 }}>{perf ? `${perf.brand} ${perf.model}` : "Unknown"}</button>
+                  <button onClick={() => perf && router.push(`/dashboard/aromatica/${perf.id}`)} style={{ background:"none", border:"none", textAlign:"left", cursor:"pointer", padding:0, fontWeight:700, color:V.text, fontSize:13 }}>{perf ? `${perf.brand} ${perf.model}` : "Unknown"}</button>
                   <div style={{ fontWeight:700 }}>{p.price > 0 ? fmtMoney(p.price) : <span style={{ color:V.faint }}>Free</span>}</div>
                   <div style={{ color:V.muted, fontSize:12 }}>{p.date}</div>
                   <div>{p.shopLink ? <a href={p.shopLink} target="_blank" rel="noreferrer" style={{ color:V.accent, textDecoration:"none", fontWeight:600, fontSize:12 }}>{p.shopName}</a> : <span style={{ color:V.muted, fontSize:12 }}>{p.shopName}</span>}</div>
