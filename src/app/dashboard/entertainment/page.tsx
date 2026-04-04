@@ -264,7 +264,10 @@ export default function EntertainmentPage() {
   const traktEpisodes = traktHistory.filter(h => h.type === "episode");
   const traktMovies   = traktHistory.filter(h => h.type === "movie");
 
-  function showMsg(msg: string) { setToast(msg); setTimeout(() => setToast(""), 2500); }
+  function showMsg(msg: string, isError = false) {
+    setToast(msg);
+    setTimeout(() => setToast(""), isError ? 8000 : 2500);
+  }
 
   async function doSearch(q: string) {
     if (!q.trim() || !traktClientId) return;
@@ -290,12 +293,12 @@ export default function EntertainmentPage() {
       const data = await res.json();
       if (!res.ok) {
         setShowAuth(false);
-        showMsg(`Auth failed: ${data.error ?? res.status} — Check your Client ID is correct`);
+        showMsg(`Auth failed: ${data.error ?? res.status} — Check your Client ID is correct`, true);
         return;
       }
       if (!data.device_code || !data.user_code) {
         setShowAuth(false);
-        showMsg("Unexpected response from Trakt — is your Client ID correct?");
+        showMsg("Unexpected response from Trakt — is your Client ID correct?", true);
         return;
       }
       setDeviceCode(data);
@@ -303,7 +306,7 @@ export default function EntertainmentPage() {
       pollForToken(data.device_code, data.interval ?? 5);
     } catch (e) {
       setShowAuth(false);
-      showMsg(`Network error: ${String(e)}`);
+      showMsg(`Network error: ${String(e)}`, true);
     }
   }
 
@@ -761,8 +764,8 @@ export default function EntertainmentPage() {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position:"fixed", bottom:20, right:16, background:isDark?"#1a3a2a":"#f0fdf4", color:"#16a34a", border:"1px solid rgba(22,163,74,0.3)", padding:"12px 18px", borderRadius:12, fontSize:13, fontWeight:700, zIndex:200 }}>
-          {toast}
+        <div onClick={() => setToast("")} style={{ position:"fixed", bottom:20, right:16, maxWidth:360, background:isDark?"#1a3a2a":"#f0fdf4", color:"#16a34a", border:"1px solid rgba(22,163,74,0.3)", padding:"12px 18px", borderRadius:12, fontSize:13, fontWeight:700, zIndex:200, cursor:"pointer", wordBreak:"break-all", lineHeight:1.5 }}>
+          {toast} <span style={{ opacity:0.5, fontSize:11, marginLeft:6 }}>✕</span>
         </div>
       )}
     </div>
