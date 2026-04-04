@@ -52,17 +52,24 @@ export async function POST(request: NextRequest) {
 
   // ── Initiate device auth ──────────────────────────────────────────────
   if (action === "device_init") {
-    const res = await fetch(`${TRAKT_BASE}/oauth/device/code`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: clientId }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      console.error("Trakt device_init failed:", res.status, data);
-      return NextResponse.json({ error: `Trakt ${res.status}: ${JSON.stringify(data)}` }, { status: res.status });
+    try {
+      const res = await fetch(`${TRAKT_BASE}/oauth/device/code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+      const text = await res.text();
+      let data: unknown;
+      try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      if (!res.ok) {
+        console.error("Trakt device_init failed:", res.status, text);
+        return NextResponse.json({ error: `Trakt ${res.status}: ${text}` }, { status: 500 });
+      }
+      return NextResponse.json(data);
+    } catch (e) {
+      console.error("device_init fetch error:", e);
+      return NextResponse.json({ error: `Fetch failed: ${String(e)}` }, { status: 500 });
     }
-    return NextResponse.json(data);
   }
 
   // ── Poll device auth ──────────────────────────────────────────────────
