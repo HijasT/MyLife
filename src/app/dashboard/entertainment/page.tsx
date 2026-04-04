@@ -130,6 +130,7 @@ export default function EntertainmentPage() {
   const [authPolling, setAuthPolling]       = useState(false);
   const [addingItem, setAddingItem]         = useState<string | null>(null);
   const [authError, setAuthError] = useState("");
+  const [addedItems, setAddedItems]         = useState<Set<string>>(new Set());
   const [toast, setToast]                   = useState("");
 
   // Load config from DB
