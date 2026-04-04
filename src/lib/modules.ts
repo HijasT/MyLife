@@ -6,6 +6,7 @@ export const MODULES: Module[] = [
   { id:"portfolio",   label:"Portfolio",      icon:"📈", href:"/dashboard/portfolio",   group:"finance",   status:"active",      description:"Stocks, gold & metals",      color:"#378ADD" },
   { id:"calendar",    label:"Calendar",       icon:"🗓️",  href:"/dashboard/calendar",    group:"lifestyle", status:"active",      description:"Work hours & life log",      color:"#6366f1" },
   { id:"biomarkers",  label:"BioMarkers",     icon:"🧬", href:"/dashboard/biomarkers",  group:"lifestyle", status:"active",      description:"Lab results & body metrics", color:"#10b981" },
+  { id:"entertainment", label:"Entertainment",  icon:"🎬", href:"/dashboard/entertainment", group:"lifestyle", status:"active", description:"Trakt · Letterboxd",           color:"#8b5cf6" },
   { id:"inventory",   label:"Inventory",      icon:"📦", href:"/dashboard/inventory",   group:"lifestyle", status:"active", description:"Home · Food · Wardrobe",     color:"#10b981" },
 ];
 
