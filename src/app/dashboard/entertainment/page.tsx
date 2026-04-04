@@ -659,7 +659,6 @@ export default function EntertainmentPage() {
           )}
         </div>
       )}
-    </div>
 
       {/* Device Auth Modal */}
       {showAuth && deviceCode && (
