@@ -175,15 +175,20 @@ export default function EntertainmentPage() {
     setTraktLoading(true);
     setTraktError("");
     try {
+      const headers = {
+        "Content-Type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": traktClientId,
+      };
       const [histRes, statsRes] = await Promise.all([
-        fetch(`/api/trakt?username=${encodeURIComponent(traktUsername)}&clientId=${encodeURIComponent(traktClientId)}&type=history&limit=10`),
-        fetch(`/api/trakt?username=${encodeURIComponent(traktUsername)}&clientId=${encodeURIComponent(traktClientId)}&type=stats`),
+        fetch(`https://api.trakt.tv/users/${encodeURIComponent(traktUsername)}/history?limit=10&extended=full`, { headers }),
+        fetch(`https://api.trakt.tv/users/${encodeURIComponent(traktUsername)}/stats`, { headers }),
       ]);
       if (histRes.ok)  setTraktHistory(await histRes.json());
-      else { const e = await histRes.json(); setTraktError(e.error ?? "Trakt error"); }
+      else setTraktError(`History: ${histRes.status} — ensure your Trakt profile is public`);
       if (statsRes.ok) setTraktStats(await statsRes.json());
     } catch (e) {
-      setTraktError(String(e));
+      setTraktError(`CORS error — add ${window.location.origin} to Trakt app CORS origins. ${String(e)}`);
     }
     setTraktLoading(false);
   }
@@ -275,7 +280,10 @@ export default function EntertainmentPage() {
     setSearchLoading(true);
     setSearchResults([]);
     try {
-      const res = await fetch(`/api/trakt?type=search&query=${encodeURIComponent(q)}&clientId=${encodeURIComponent(traktClientId)}`);
+      const res = await fetch(
+        `https://api.trakt.tv/search/movie,show?query=${encodeURIComponent(q)}&limit=10&extended=full`,
+        { headers: { "Content-Type":"application/json", "trakt-api-version":"2", "trakt-api-key": traktClientId } }
+      );
       if (res.ok) setSearchResults(await res.json());
     } catch {}
     setSearchLoading(false);
@@ -358,15 +366,19 @@ export default function EntertainmentPage() {
     const key = `${result.type}-${item.ids.trakt}`;
     setAddingItem(key);
     try {
-      const res = await fetch("/api/trakt", {
+      const payload: Record<string, unknown[]> = { movies: [], shows: [] };
+      const entry = { ids: item.ids, watched_at: new Date().toISOString() };
+      if (isMovie) payload.movies.push(entry); else payload.shows.push(entry);
+
+      const res = await fetch("https://api.trakt.tv/sync/history", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "add_history",
-          clientId: traktClientId,
-          accessToken: traktAccessToken,
-          items: [{ type: result.type, ids: item.ids }],
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          "trakt-api-version": "2",
+          "trakt-api-key": traktClientId,
+          "Authorization": `Bearer ${traktAccessToken}`,
+        },
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         setAddedItems(prev => new Set([...prev, key]));
