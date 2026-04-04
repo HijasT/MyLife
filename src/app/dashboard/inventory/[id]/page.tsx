@@ -36,6 +36,7 @@ function daysLeft(d: string | null) {
 }
 
 export default function InventoryDetailPage({ params }: { params: { id: string } }) {
+  const { id } = use(params);
   const supabase = createClient();
   const router = useRouter();
   const [item, setItem] = useState<Item | null>(null);
@@ -59,7 +60,7 @@ export default function InventoryDetailPage({ params }: { params: { id: string }
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push("/login"); return; }
-      const { data } = await supabase.from("inventory_items").select("*").eq("id", params.id).single();
+      const { data } = await supabase.from("inventory_items").select("*").eq("id", id).single();
       if (data) {
         const it = dbToItem(data);
         setItem(it);
@@ -72,7 +73,7 @@ export default function InventoryDetailPage({ params }: { params: { id: string }
       setLoading(false);
     }
     load();
-  }, [params.id]);
+  }, [id]);
 
   function showMsg(msg: string) { setToast(msg); setTimeout(() => setToast(""), 2500); }
 

@@ -139,6 +139,7 @@ function buildCarryForwardNote(previousMonth: string, currency: Currency, carryF
 }
 
 export default function DueItemDetailPage({ params }: { params: { id: string } }) {
+  const { id } = use(params);
   const supabase = createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -192,8 +193,8 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       setUserId(user.id);
 
       const [itemRes, entriesRes, settingsRes, navRes] = await Promise.all([
-        supabase.from("due_items").select("*").eq("id", params.id).eq("user_id", user.id).single(),
-        supabase.from("due_entries").select("*").eq("due_item_id", params.id).eq("user_id", user.id).order("month", { ascending: false }),
+        supabase.from("due_items").select("*").eq("id", id).eq("user_id", user.id).single(),
+        supabase.from("due_entries").select("*").eq("due_item_id", id).eq("user_id", user.id).order("month", { ascending: false }),
         supabase.from("due_month_settings").select("month,fx_rates,is_locked").eq("user_id", user.id),
         supabase.from("due_items").select("id,name,sort_order,created_at").eq("user_id", user.id).order("sort_order").order("created_at"),
       ]);
@@ -272,7 +273,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
       setLoading(false);
     }
     void load();
-  }, [params.id]);
+  }, [id]);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -472,12 +473,12 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
   }
 
   const nav = useMemo(() => {
-    const idx = itemNav.findIndex((row) => row.id === params.id);
+    const idx = itemNav.findIndex((row) => row.id === id);
     return {
       prev: idx > 0 ? itemNav[idx - 1] : null,
       next: idx >= 0 && idx < itemNav.length - 1 ? itemNav[idx + 1] : null,
     };
-  }, [itemNav, params.id]);
+  }, [itemNav, id]);
 
   const nativeCurrency = item?.defaultCurrency ?? "AED";
   const stats = useMemo(() => {

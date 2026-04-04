@@ -170,6 +170,7 @@ function Stars({ value, size = 16 }: { value: number | null; size?: number }) {
 }
 
 export default function PerfumeDetailPage({ params }: { params: { id: string } }) {
+  const { id } = use(params);
   const supabase = createClient();
   const router = useRouter();
   const isDark = useDarkMode();
@@ -222,11 +223,11 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
       }
       setUserId(user.id);
       const [itemRes, purRes, allRes, catalogRes, wearRes] = await Promise.all([
-        supabase.from("perfumes").select("*, perfume_bottles(*)").eq("id", params.id).single(),
-        supabase.from("perfume_purchases").select("*").eq("perfume_id", params.id).order("date", { ascending: false }),
+        supabase.from("perfumes").select("*, perfume_bottles(*)").eq("id", id).single(),
+        supabase.from("perfume_purchases").select("*").eq("perfume_id", id).order("date", { ascending: false }),
         supabase.from("perfumes").select("notes_tags").eq("user_id", user.id),
         supabase.from("perfumes").select("*").eq("user_id", user.id).order("brand"),
-        supabase.from("perfume_wear_logs").select("*").eq("perfume_id", params.id).order("worn_on", { ascending: false }),
+        supabase.from("perfume_wear_logs").select("*").eq("perfume_id", id).order("worn_on", { ascending: false }),
       ]);
       if (itemRes.error) showToast(itemRes.error.message);
       if (purRes.error) showToast(purRes.error.message);
@@ -266,7 +267,7 @@ export default function PerfumeDetailPage({ params }: { params: { id: string } }
       markSynced();
     }
     load();
-  }, [params.id, router, supabase]);
+  }, [id, router, supabase]);
 
   function showToast(msg: string) {
     setToast(msg);

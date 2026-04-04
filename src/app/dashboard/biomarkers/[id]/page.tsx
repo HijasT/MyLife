@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { findBiomarkerRef } from "@/lib/biomarkers_db";
 
@@ -117,7 +117,8 @@ function TrendChart({ points, refMin, refMax }: { points: { x: string; y: number
   );
 }
 
-export default function BiomarkerDetailPage({ params }: { params: { id: string } }) {
+export default function BiomarkerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const client = createClient();
   const router = useRouter();
   const [test, setTest] = useState<BiomarkerTest | null>(null);
@@ -148,8 +149,8 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
         return;
       }
       const [tRes, rRes, allTRes, allRRes] = await Promise.all([
-        client.from("biomarker_tests").select("*").eq("id", params.id).single(),
-        client.from("biomarker_results").select("*").eq("test_id", params.id).eq("user_id", user.id).order("test_date", { ascending: true }),
+        client.from("biomarker_tests").select("*").eq("id", id).single(),
+        client.from("biomarker_results").select("*").eq("test_id", id).eq("user_id", user.id).order("test_date", { ascending: true }),
         client.from("biomarker_tests").select("*").eq("user_id", user.id).order("name"),
         client.from("biomarker_results").select("*").eq("user_id", user.id).order("test_date", { ascending: true }),
       ]);
@@ -164,7 +165,7 @@ export default function BiomarkerDetailPage({ params }: { params: { id: string }
       setLoading(false);
     }
     load();
-  }, [client, params.id]);
+  }, [id]);
 
   const latest = results.at(-1);
   const previous = results.length > 1 ? results[results.length - 2] : undefined;

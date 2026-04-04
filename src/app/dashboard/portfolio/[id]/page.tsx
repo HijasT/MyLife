@@ -212,6 +212,7 @@ export default function PortfolioItemPage({
 }: {
   params: { id: string };
 }) {
+  const { id } = use(params);
   const supabase = createClient();
   const router = useRouter();
 
@@ -265,16 +266,16 @@ export default function PortfolioItemPage({
       setUserId(user.id);
 
       const [itemRes, purRes, alertRes] = await Promise.all([
-        supabase.from("portfolio_items").select("*").eq("id", params.id).single(),
+        supabase.from("portfolio_items").select("*").eq("id", id).single(),
         supabase
           .from("portfolio_purchases")
           .select("*")
-          .eq("item_id", params.id)
+          .eq("item_id", id)
           .order("purchased_at", { ascending: false }),
         supabase
           .from("portfolio_alerts")
           .select("*")
-          .eq("item_id", params.id)
+          .eq("item_id", id)
           .order("created_at", { ascending: false }),
       ]);
 
@@ -290,7 +291,7 @@ export default function PortfolioItemPage({
     }
 
     load();
-  }, [params.id, router, supabase]);
+  }, [id, router, supabase]);
 
   useEffect(() => {
     async function syncAlerts() {
