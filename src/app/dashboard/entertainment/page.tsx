@@ -285,57 +285,66 @@ export default function EntertainmentPage() {
     if (!traktClientId) { showMsg("Enter your Trakt Client ID in setup first"); return; }
     setShowAuth(true);
     setDeviceCode(null);
+    setAuthError("");
     try {
-      const res = await fetch("/api/trakt", {
+      // Call Trakt directly from browser — Vercel IPs are blocked by Cloudflare
+      const res = await fetch("https://api.trakt.tv/oauth/device/code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "device_init", clientId: traktClientId }),
+        body: JSON.stringify({ client_id: traktClientId }),
       });
-      const data = await res.json();
       if (!res.ok) {
+        const text = await res.text();
         setShowAuth(false);
-        setAuthError(`Trakt error: ${JSON.stringify(data)}`);
+        setAuthError(`Trakt ${res.status}: ${text.slice(0, 200)}`);
         return;
       }
+      const data = await res.json();
       if (!data.device_code || !data.user_code) {
         setShowAuth(false);
         setAuthError(`Unexpected Trakt response: ${JSON.stringify(data)}`);
         return;
       }
-      setAuthError("");
       setDeviceCode(data);
       setAuthPolling(true);
       pollForToken(data.device_code, data.interval ?? 5);
     } catch (e) {
       setShowAuth(false);
-      setAuthError(`Network error: ${String(e)}`);
+      setAuthError(`CORS error — add ${window.location.origin} to your Trakt app's JavaScript (CORS) Origins at trakt.tv/oauth/applications, then try again. Raw: ${String(e)}`);
     }
   }
 
   async function pollForToken(dc: string, interval: number) {
-    if (!traktClientSecret) { showMsg("Client Secret required for writing. Add it in Setup."); setAuthPolling(false); return; }
+    if (!traktClientSecret) { showMsg("Client Secret required. Add it in Setup."); setAuthPolling(false); return; }
     const poll = async (): Promise<void> => {
-      const res = await fetch("/api/trakt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "device_poll", clientId: traktClientId, clientSecret: traktClientSecret, deviceCode: dc }),
-      });
-      const data = await res.json();
-      if (data.pending) {
-        await new Promise(r => setTimeout(r, interval * 1000));
-        return poll();
-      }
-      if (data.access_token) {
-        setTraktAccessToken(data.access_token);
-        if (userId) {
-          await supabase.from("profiles").update({ trakt_access_token: data.access_token }).eq("id", userId);
+      try {
+        // Also call token exchange directly from browser
+        const res = await fetch("https://api.trakt.tv/oauth/device/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: dc, client_id: traktClientId, client_secret: traktClientSecret }),
+        });
+        if (res.status === 400) {
+          // Still waiting for user to authorize
+          await new Promise(r => setTimeout(r, interval * 1000));
+          return poll();
+        }
+        if (res.status === 200) {
+          const data = await res.json();
+          setTraktAccessToken(data.access_token);
+          if (userId) {
+            await supabase.from("profiles").update({ trakt_access_token: data.access_token }).eq("id", userId);
+          }
+          setAuthPolling(false);
+          setShowAuth(false);
+          showMsg("✓ Trakt connected — you can now add to history!");
+          return;
         }
         setAuthPolling(false);
-        setShowAuth(false);
-        showMsg("✓ Trakt connected — you can now add to history!");
-      } else {
+        setAuthError(`Auth poll failed: ${res.status}`);
+      } catch (e) {
         setAuthPolling(false);
-        showMsg("Auth failed or expired. Try again.");
+        setAuthError(`Poll error: ${String(e)}`);
       }
     };
     await poll();
@@ -448,7 +457,10 @@ export default function EntertainmentPage() {
           </div>
           {traktUsername && traktClientId && (
             <div style={{ fontSize:11, color:V.faint, marginTop:10 }}>
-              💡 In your Trakt app settings, add <code style={{ background:isDark?"rgba(255,255,255,0.07)":"rgba(0,0,0,0.06)", padding:"1px 5px", borderRadius:4 }}>https://mylife-in.vercel.app</code> to JavaScript CORS origins (optional but recommended).
+              💡 Required: In your Trakt app settings at{" "}
+              <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noreferrer" style={{ color:V.accent }}>trakt.tv/oauth/applications</a>,
+              add <code style={{ background:isDark?"rgba(255,255,255,0.07)":"rgba(0,0,0,0.06)", padding:"1px 5px", borderRadius:4 }}>https://mylife-in.vercel.app</code>{" "}
+              to the <strong>JavaScript (CORS) Origins</strong> field and save. This is needed for browser-to-Trakt calls.
             </div>
           )}
         </div>
