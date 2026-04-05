@@ -161,9 +161,15 @@ export default async function DashboardPage() {
   let todayEvents: CalEvent[] = [];
   let todayPortfolio: PortfolioPurchase[] = [];
   let portfolioCurrentAed = 0;
+  type ExpiryItem = { id: string; name: string; expiry_date: string; category: string; location: string | null };
+  let expiringItems: ExpiryItem[] = [];
 
   if (user) {
-    const [calendarRes, portfolioRes, itemRes, statRes] = await Promise.all([
+    const weekFromNow = new Date(now);
+    weekFromNow.setDate(weekFromNow.getDate() + 7);
+    const weekStr = weekFromNow.toLocaleDateString("en-CA", { timeZone: tz });
+
+    const [calendarRes, portfolioRes, itemRes, statRes, expiryRes] = await Promise.all([
       supabase
         .from("calendar_events")
         .select("id,title,event_type,work_start,work_end,color")
@@ -185,10 +191,19 @@ export default async function DashboardPage() {
         .from("portfolio_purchases")
         .select("item_id,units,total_paid,currency,transaction_type")
         .eq("user_id", user.id),
+      supabase
+        .from("inventory_items")
+        .select("id,name,expiry_date,category,location")
+        .eq("user_id", user.id)
+        .eq("is_finished", false)
+        .not("expiry_date", "is", null)
+        .lte("expiry_date", weekStr)
+        .order("expiry_date", { ascending: true }),
     ]);
 
     todayEvents = (calendarRes.data ?? []) as CalEvent[];
     todayPortfolio = (portfolioRes.data ?? []) as PortfolioPurchase[];
+    expiringItems = (expiryRes.data ?? []) as ExpiryItem[];
 
     const items = (itemRes.data ?? []) as PortfolioItem[];
     const stats = (statRes.data ?? []) as PortfolioStatRow[];
@@ -311,6 +326,40 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Expiring items alert */}
+      {expiringItems.length > 0 && (
+        <section className="mb-8">
+          <div className="rounded-2xl border overflow-hidden" style={{ background:"var(--card-bg)", borderColor:"rgba(239,68,68,0.3)" }}>
+            <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor:"rgba(239,68,68,0.2)", background:"rgba(239,68,68,0.05)" }}>
+              <span>⏰</span>
+              <span className="text-xs font-bold tracking-widest uppercase" style={{ color:"#ef4444" }}>
+                Expiring within 7 days — {expiringItems.length} item{expiringItems.length > 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="divide-y" style={{ borderColor:"var(--card-border)" }}>
+              {expiringItems.map(item => {
+                const days = Math.ceil((new Date(item.expiry_date).getTime() - new Date(today).getTime()) / 86400000);
+                const isExpired = days < 0;
+                const isToday = days === 0;
+                return (
+                  <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold" style={{ color:"var(--text-primary)" }}>{item.name}</div>
+                      <div className="text-xs" style={{ color:"var(--text-muted)" }}>
+                        {item.category}{item.location ? ` · ${item.location}` : ""}
+                      </div>
+                    </div>
+                    <div className="text-xs font-bold shrink-0" style={{ color: isExpired ? "#ef4444" : isToday ? "#ef4444" : days <= 3 ? "#f59e0b" : "#eab308" }}>
+                      {isExpired ? `Expired ${Math.abs(days)}d ago` : isToday ? "Expires today!" : days === 1 ? "Tomorrow" : `${days} days`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       {financeModules.length > 0 && (
         <section className="mb-10">

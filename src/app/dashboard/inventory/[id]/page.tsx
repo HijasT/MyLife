@@ -144,6 +144,15 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
 
   async function deleteItem() {
     if (!item) return;
+    // Remove linked calendar expiry event first
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from("calendar_events")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("source_module", "inventory")
+        .eq("source_id", item.id);
+    }
     await supabase.from("inventory_items").delete().eq("id", item.id);
     router.push("/dashboard/inventory");
   }

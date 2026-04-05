@@ -146,6 +146,17 @@ export default function InventoryPage() {
 
   async function toggleFinished(item: Item) {
     await supabase.from("inventory_items").update({ is_finished: !item.isFinished }).eq("id", item.id);
+    // Remove expiry event from calendar when marking as finished
+    if (!item.isFinished && item.expiryDate) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from("calendar_events")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("source_module", "inventory")
+          .eq("source_id", item.id);
+      }
+    }
     setItems(p => p.map(x => x.id === item.id ? { ...x, isFinished: !x.isFinished } : x));
   }
 
