@@ -167,7 +167,7 @@ export default async function DashboardPage() {
   if (user) {
     const weekFromNow = new Date(now);
     weekFromNow.setDate(weekFromNow.getDate() + 7);
-    const weekStr = weekFromNow.toLocaleDateString("en-CA", { timeZone: tz });
+    const weekStr = weekFromNow.toLocaleDateString("en-CA", { timeZone: timezone });
 
     const [calendarRes, portfolioRes, itemRes, statRes, expiryRes] = await Promise.all([
       supabase
