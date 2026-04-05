@@ -949,13 +949,29 @@ export default function CalendarPage() {
       .filter(([s]) => LEAVE_SHIFT_KEYS.includes(s as ShiftKey))
       .reduce((t, [, c]) => t + c, 0);
 
+    const totalWorkedDays = workedDays.size;
+
+    // Off days calculation:
+    // Rule 1: Every 5 days worked → 2 days off
+    const baseOffDays = Math.floor(totalWorkedDays / 5) * 2;
+    // Rule 2: Extra days worked beyond standard 5/week → earn same number as extra off days
+    // Standard work days in month = weeks in month × 5 (approximate using calendar days / 7 * 5)
+    const [y, m] = month.split("-").map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const standardWorkDays = Math.round((daysInMonth / 7) * 5);
+    const extraDaysWorked = Math.max(0, totalWorkedDays - standardWorkDays);
+    const offDays = baseOffDays + extraDaysWorked;
+
     return {
-      days: workedDays.size,
+      days: totalWorkedDays,
       hours: Math.round(hours * 10) / 10,
       extra: extraCount,
       regular: regularCount,
       leaves,
       shiftCounts,
+      offDays,
+      baseOffDays,
+      extraDaysWorked,
     };
   }, [events, month]);
 
@@ -1388,6 +1404,7 @@ export default function CalendarPage() {
           { label: "Regular shifts", value: monthStats.regular, color: "#3b82f6" },
           { label: "Extra shifts", value: monthStats.extra, color: "#ef4444" },
           { label: "Leaves", value: monthStats.leaves, color: "#22c55e" },
+          { label: "Off days earned", value: monthStats.offDays, color: "#f59e0b" },
         ].map((s) => (
           <div
             key={s.label}
@@ -1406,6 +1423,18 @@ export default function CalendarPage() {
           </div>
         ))}
       </div>
+
+      {/* Off days breakdown */}
+      {monthStats.days > 0 && (
+        <div style={{ padding: "6px 24px 0", fontSize: 11, color: V.faint }}>
+          🟡 Off days: <strong style={{ color: "#f59e0b" }}>{monthStats.offDays}</strong>
+          {" "}= base ({monthStats.days} days ÷ 5 × 2 = <strong>{monthStats.baseOffDays}</strong>)
+          {monthStats.extraDaysWorked > 0 && (
+            <> + extra days worked ({monthStats.extraDaysWorked})</>
+          )}
+          {" "}· Formula: every 5 days worked → 2 off days
+        </div>
+      )}
 
       {view === "month" && (
         <>
