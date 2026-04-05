@@ -87,6 +87,29 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
       updated_at: new Date().toISOString(),
     };
     await supabase.from("inventory_items").update(payload).eq("id", item.id);
+
+    // Sync calendar: delete old expiry event for this item, create new one if date set
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from("calendar_events")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("source_module", "inventory")
+        .eq("source_id", item.id);
+      if (expiryDate) {
+        await supabase.from("calendar_events").insert({
+          user_id: user.id,
+          date: expiryDate,
+          title: `⏰ Expiry: ${name}${brand ? ` (${brand})` : ""}${location ? ` · ${location}` : ""}`,
+          event_type: "note",
+          source_module: "inventory",
+          source_id: item.id,
+          color: "#ef4444",
+          notes: `Category: ${item.category}. Qty: ${quantity} ${item.unit}.`,
+        });
+      }
+    }
+
     setItem(p => p ? { ...p, name, location, quantity:parseFloat(quantity)||0,
       expiryDate:expiryDate||null, brand, imageUrl, notes,
       lowThreshold:lowThreshold?parseFloat(lowThreshold):null,
@@ -105,6 +128,17 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
   async function toggleFinished() {
     if (!item) return;
     await supabase.from("inventory_items").update({ is_finished: !item.isFinished }).eq("id", item.id);
+    // Remove expiry calendar event when item is finished
+    if (!item.isFinished) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from("calendar_events")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("source_module", "inventory")
+          .eq("source_id", item.id);
+      }
+    }
     setItem(p => p ? { ...p, isFinished: !p.isFinished } : p);
   }
 

@@ -125,8 +125,23 @@ export default function InventoryPage() {
     const { data, error } = await supabase.from("inventory_items").insert(payload).select("*").single();
     if (error) { showMsg("Failed to save"); return; }
     setItems(p => [dbToItem(data), ...p]);
+
+    // Auto-create calendar event for expiry date
+    if (form.expiryDate && data?.id) {
+      await supabase.from("calendar_events").insert({
+        user_id: userId,
+        date: form.expiryDate,
+        title: `⏰ Expiry: ${form.name.trim()}${form.brand ? ` (${form.brand})` : ""}${form.location ? ` · ${form.location}` : ""}`,
+        event_type: "note",
+        source_module: "inventory",
+        source_id: data.id,
+        color: "#ef4444",
+        notes: `Category: ${form.category}${form.subcategory ? ` / ${form.subcategory}` : ""}. Qty: ${form.quantity} ${form.unit}.`,
+      });
+    }
+
     setShowAdd(false); setForm(EMPTY_FORM);
-    showMsg("✓ Item added");
+    showMsg(form.expiryDate ? "✓ Item added · expiry added to calendar" : "✓ Item added");
   }
 
   async function toggleFinished(item: Item) {
