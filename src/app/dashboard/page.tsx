@@ -75,6 +75,17 @@ export default async function DashboardPage() {
     .format(now)
     .replace(/\//g, "-");
 
+  const tomorrowDate = new Date(now);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(tomorrowDate)
+    .replace(/\//g, "-");
+
   const timeNow = now.toLocaleTimeString("en-AE", {
     timeZone: timezone,
     hour: "2-digit",
@@ -136,6 +147,7 @@ export default async function DashboardPage() {
     work_start?: string;
     work_end?: string;
     color?: string;
+    date: string;
   };
 
   type PortfolioPurchase = {
@@ -159,6 +171,7 @@ export default async function DashboardPage() {
   };
 
   let todayEvents: CalEvent[] = [];
+  let tomorrowEvents: CalEvent[] = [];
   let todayPortfolio: PortfolioPurchase[] = [];
   let portfolioCurrentAed = 0;
   type ExpiryItem = { id: string; name: string; expiry_date: string; category: string; location: string | null };
@@ -172,9 +185,9 @@ export default async function DashboardPage() {
     const [calendarRes, portfolioRes, itemRes, statRes, expiryRes] = await Promise.all([
       supabase
         .from("calendar_events")
-        .select("id,title,event_type,work_start,work_end,color")
+        .select("id,title,event_type,work_start,work_end,color,date")
         .eq("user_id", user.id)
-        .eq("date", today)
+        .in("date", [today, tomorrow])
         .order("work_start", { ascending: true }),
       supabase
         .from("portfolio_purchases")
@@ -201,7 +214,9 @@ export default async function DashboardPage() {
         .order("expiry_date", { ascending: true }),
     ]);
 
-    todayEvents = (calendarRes.data ?? []) as CalEvent[];
+    const allCalEvents = (calendarRes.data ?? []) as CalEvent[];
+    todayEvents = allCalEvents.filter(e => e.date === today);
+    tomorrowEvents = allCalEvents.filter(e => e.date === tomorrow);
     todayPortfolio = (portfolioRes.data ?? []) as PortfolioPurchase[];
     expiringItems = (expiryRes.data ?? []) as ExpiryItem[];
 
@@ -326,6 +341,46 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Tomorrow's events */}
+      {tomorrowEvents.length > 0 && (
+        <div
+          className="mt-4 rounded-2xl border overflow-hidden"
+          style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
+        >
+          <div
+            className="px-4 py-3 border-b"
+            style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
+          >
+            <span className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
+              Tomorrow
+            </span>
+          </div>
+          <div className="flex flex-col divide-y" style={{ borderColor: "var(--card-border)" }}>
+            {tomorrowEvents.map((ev) => (
+              <div key={ev.id} className="px-4 py-3 flex items-center gap-3">
+                {ev.color && (
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: ev.color, flexShrink: 0 }} />
+                )}
+                <div className="flex-1">
+                  <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                    {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
+                  </div>
+                  {ev.work_start && ev.work_end && (
+                    <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                      {fmt12(ev.work_start)} – {fmt12(ev.work_end)}
+                    </div>
+                  )}
+                </div>
+                <div className="text-xs shrink-0" style={{ color: "var(--text-muted)" }}>
+                  {ev.event_type === "work" ? "🔵 Work" : ev.event_type === "leave" ? "🟢 Leave" : "📌"}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
 
       {/* Expiring items alert */}
       {expiringItems.length > 0 && (
