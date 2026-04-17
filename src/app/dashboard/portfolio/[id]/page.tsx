@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { nowDubai } from "@/lib/timezone";
@@ -31,7 +31,27 @@ type PortfolioItem = {
   currentPriceUpdatedAt: string | null;
   notes: string;
   livePriceSymbol?: string | null;
+  goldPurityKarat?: number | null;
+  weightGrams?: number | null;
 };
+
+// Purity factor for gold
+const PURITY_FACTOR: Record<number, number> = {
+  24: 1.0,
+  22: 0.9167,
+  21: 0.875,
+  18: 0.75,
+};
+
+// Gold-aware current value calculation
+function calcCurrentValue(item: PortfolioItem, totalUnits: number): number | null {
+  if (item.currentPrice == null) return null;
+  if (item.assetType === "gold" && item.weightGrams && item.weightGrams > 0 && item.goldPurityKarat) {
+    const factor = PURITY_FACTOR[item.goldPurityKarat] ?? 1;
+    return item.weightGrams * item.currentPrice * factor;
+  }
+  return item.currentPrice * totalUnits;
+}
 
 type Purchase = {
   id: string;
@@ -173,6 +193,8 @@ function dbToItem(r: any): PortfolioItem {
     currentPriceUpdatedAt: r.current_price_updated_at ?? null,
     notes: r.notes ?? "",
     livePriceSymbol: r.live_price_symbol ?? null,
+    goldPurityKarat: r.gold_purity_karat ?? null,
+    weightGrams: r.weight_grams ?? null,
   };
 }
 
@@ -210,10 +232,9 @@ function dbToAlert(r: any): PortfolioAlert {
 export default function PortfolioItemPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id } = use(params);
-  const supabase = createClient();
+  const supabase = await createClient();
   const router = useRouter();
 
   const [item, setItem] = useState<PortfolioItem | null>(null);
@@ -266,16 +287,16 @@ export default function PortfolioItemPage({
       setUserId(user.id);
 
       const [itemRes, purRes, alertRes] = await Promise.all([
-        supabase.from("portfolio_items").select("*").eq("id", id).single(),
+        supabase.from("portfolio_items").select("*").eq("id", params.id).single(),
         supabase
           .from("portfolio_purchases")
           .select("*")
-          .eq("item_id", id)
+          .eq("item_id", params.id)
           .order("purchased_at", { ascending: false }),
         supabase
           .from("portfolio_alerts")
           .select("*")
-          .eq("item_id", id)
+          .eq("item_id", params.id)
           .order("created_at", { ascending: false }),
       ]);
 
@@ -291,7 +312,7 @@ export default function PortfolioItemPage({
     }
 
     load();
-  }, [id, router, supabase]);
+  }, [params.id, router, supabase]);
 
   useEffect(() => {
     async function syncAlerts() {
@@ -360,10 +381,7 @@ export default function PortfolioItemPage({
     }
 
     const avgUnitPrice = totalUnits > 0 ? costBasisAed / totalUnits : 0;
-    const currentValueAed =
-      item?.currentPrice !== null && item?.currentPrice !== undefined
-        ? item.currentPrice * totalUnits
-        : null;
+    const currentValueAed = item ? calcCurrentValue(item, totalUnits) : null;
     const pl = currentValueAed !== null ? currentValueAed - costBasisAed : null;
     const plPct = pl !== null && costBasisAed > 0 ? (pl / costBasisAed) * 100 : null;
 
@@ -850,11 +868,16 @@ export default function PortfolioItemPage({
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "24px 20px" }}>
         <div style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 6 }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.5px", margin: 0 }}>{item.name}</h1>
             <span style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: V.accent }}>
               {item.symbol}
             </span>
+            {item.assetType === "gold" && (item.goldPurityKarat || item.weightGrams) && (
+              <span style={{ fontSize: 12, fontWeight: 800, padding: "3px 10px", borderRadius: 999, background: "rgba(255,215,0,0.15)", color: "#b8860b", border: "1px solid rgba(255,215,0,0.4)" }}>
+                🥇 {item.goldPurityKarat ? `${item.goldPurityKarat}K` : ""}{item.goldPurityKarat && item.weightGrams ? " · " : ""}{item.weightGrams ? `${item.weightGrams}g` : ""}
+              </span>
+            )}
           </div>
           {item.notes && <div style={{ fontSize: 13, color: V.muted }}>{item.notes}</div>}
         </div>

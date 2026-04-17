@@ -19,6 +19,8 @@ type PortfolioItem = {
   currentPriceUpdatedAt: string | null;
   notes: string;
   livePriceSymbol?: string | null;
+  goldPurityKarat?: number | null;
+  weightGrams?: number | null;
 };
 
 type TxType = "buy" | "sell";
@@ -78,6 +80,27 @@ const ASSET_ICONS: Record<AssetType, string> = {
   crypto: "₿",
   other: "💼",
 };
+
+// Purity factor for gold — 24K is pure (1.0), 22K is 91.6%, etc.
+const PURITY_FACTOR: Record<number, number> = {
+  24: 1.0,
+  22: 0.9167,
+  21: 0.875,
+  18: 0.75,
+};
+
+// Calculate the current value of an item in AED.
+// For gold with purity+weight set, uses weight × spot × purity factor (ignores unit count).
+// For everything else: currentPrice × totalUnits.
+function calcCurrentValue(item: PortfolioItem, totalUnits: number): number | null {
+  if (item.currentPrice == null) return null;
+  if (item.assetType === "gold" && item.weightGrams && item.weightGrams > 0 && item.goldPurityKarat) {
+    const factor = PURITY_FACTOR[item.goldPurityKarat] ?? 1;
+    // currentPrice for gold is expected to be AED per gram of 24K pure
+    return item.weightGrams * item.currentPrice * factor;
+  }
+  return item.currentPrice * totalUnits;
+}
 
 const LIVE_PRICE_OPTIONS = [
   { value: "", label: "None — manual price update" },
@@ -231,6 +254,8 @@ const dbToItem = (r: any): PortfolioItem => ({
   currentPriceUpdatedAt: r.current_price_updated_at ?? null,
   notes: r.notes ?? "",
   livePriceSymbol: r.live_price_symbol ?? null,
+  goldPurityKarat: r.gold_purity_karat ?? null,
+  weightGrams: r.weight_grams ?? null,
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -250,7 +275,7 @@ const dbToPurchase = (r: any): Purchase => ({
 });
 
 export default function PortfolioPage() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);
@@ -279,6 +304,14 @@ export default function PortfolioPage() {
   const [newPrice, setNewPrice] = useState("");
   const [toast, setToast] = useState("");
 
+  // Polish: asset type filter + expanded row for transaction drawer
+  const [typeFilter, setTypeFilter] = useState<AssetType | "all">("all");
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [itemPurchases, setItemPurchases] = useState<Record<string, Purchase[]>>({});
+  // Edit gold fields from update price modal
+  const [editGoldPurity, setEditGoldPurity] = useState<string>("");
+  const [editGoldWeight, setEditGoldWeight] = useState<string>("");
+
   const [newItem, setNewItem] = useState({
     symbol: "",
     name: "",
@@ -287,6 +320,8 @@ export default function PortfolioPage() {
     mainCurrency: "AED" as Currency,
     notes: "",
     livePriceSymbol: "",
+    goldPurityKarat: "24" as string,
+    weightGrams: "" as string,
   });
 
   const isDark =
@@ -743,6 +778,8 @@ export default function PortfolioPage() {
         main_currency: newItem.mainCurrency,
         notes: newItem.notes,
         live_price_symbol: newItem.livePriceSymbol || null,
+        gold_purity_karat: newItem.assetType === "gold" && newItem.goldPurityKarat ? Number(newItem.goldPurityKarat) : null,
+        weight_grams: newItem.assetType === "gold" && newItem.weightGrams ? Number(newItem.weightGrams) : null,
       })
       .select("*")
       .single();
@@ -770,6 +807,8 @@ export default function PortfolioPage() {
         mainCurrency: "AED",
         notes: "",
         livePriceSymbol: "",
+        goldPurityKarat: "24",
+        weightGrams: "",
       });
       showToast("Asset added");
     }
@@ -798,24 +837,40 @@ export default function PortfolioPage() {
 
     const nowIso = new Date().toISOString();
 
+    const updatePayload: Record<string, unknown> = {
+      current_price: price,
+      current_price_updated_at: nowIso,
+    };
+
+    // If gold, also save purity + weight
+    if (item.assetType === "gold") {
+      updatePayload.gold_purity_karat = editGoldPurity ? Number(editGoldPurity) : null;
+      updatePayload.weight_grams = editGoldWeight ? Number(editGoldWeight) : null;
+    }
+
     await supabase
       .from("portfolio_items")
-      .update({
-        current_price: price,
-        current_price_updated_at: nowIso,
-      })
+      .update(updatePayload)
       .eq("id", item.id);
 
     setItems((p) =>
       p.map((x) =>
         x.id === item.id
-          ? { ...x, currentPrice: price, currentPriceUpdatedAt: nowIso }
+          ? {
+              ...x,
+              currentPrice: price,
+              currentPriceUpdatedAt: nowIso,
+              goldPurityKarat: item.assetType === "gold" ? (editGoldPurity ? Number(editGoldPurity) : null) : x.goldPurityKarat,
+              weightGrams: item.assetType === "gold" ? (editGoldWeight ? Number(editGoldWeight) : null) : x.weightGrams,
+            }
           : x
       )
     );
     setShowUpdatePrice(null);
     setNewPrice("");
-    showToast("Price updated");
+    setEditGoldPurity("");
+    setEditGoldWeight("");
+    showToast(item.assetType === "gold" ? "Gold details updated" : "Price updated");
   }
 
   function showToast(msg: string) {
@@ -832,9 +887,8 @@ export default function PortfolioPage() {
       if (!s) continue;
 
       invested += s.costBasisAed;
-      current += item.currentPrice
-        ? item.currentPrice * s.totalUnits
-        : s.costBasisAed;
+      const cv = calcCurrentValue(item, s.totalUnits);
+      current += cv !== null ? cv : s.costBasisAed;
     }
 
     return {
@@ -1345,6 +1399,100 @@ export default function PortfolioPage() {
             ))}
           </div>
 
+          {/* Allocation breakdown bar + Asset type filter tabs */}
+          {items.length > 0 && (() => {
+            const typeBreakdown: Record<AssetType, number> = { gold: 0, silver: 0, stock: 0, crypto: 0, other: 0 };
+            for (const item of items) {
+              const s = allStats[item.id];
+              if (!s) continue;
+              // Use current value (gold-aware) as allocation proxy, fall back to cost basis
+              const cv = calcCurrentValue(item, s.totalUnits);
+              const valueAed = cv !== null ? cv : (s.costBasisAed || 0);
+              typeBreakdown[item.assetType] = (typeBreakdown[item.assetType] ?? 0) + Math.max(0, valueAed);
+            }
+            const totalVal = Object.values(typeBreakdown).reduce((a, b) => a + b, 0);
+            const typeColors: Record<AssetType, string> = {
+              gold: "#FFD700", silver: "#C0C0C0", stock: "#3b82f6", crypto: "#f59e0b", other: "#94a3b8",
+            };
+            const sortedTypes = (Object.entries(typeBreakdown) as [AssetType, number][])
+              .filter(([, v]) => v > 0)
+              .sort(([, a], [, b]) => b - a);
+
+            return (
+              <div style={{ padding: "16px 24px 0" }}>
+                {/* Allocation bar */}
+                {totalVal > 0 && sortedTypes.length > 1 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
+                      <span>Allocation breakdown</span>
+                      <span>{sortedTypes.length} asset type{sortedTypes.length > 1 ? "s" : ""}</span>
+                    </div>
+                    <div style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)" }}>
+                      {sortedTypes.map(([type, val]) => (
+                        <div key={type}
+                          title={`${type}: AED ${fmtN(val)} (${((val / totalVal) * 100).toFixed(1)}%)`}
+                          style={{ width: `${(val / totalVal) * 100}%`, background: typeColors[type], transition: "width 0.3s" }} />
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+                      {sortedTypes.map(([type, val]) => (
+                        <div key={type} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 3, background: typeColors[type] }} />
+                          <span style={{ color: V.muted, textTransform: "capitalize", fontWeight: 700 }}>{ASSET_ICONS[type]} {type}</span>
+                          <span style={{ color: V.faint }}>{((val / totalVal) * 100).toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Asset type tabs */}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", borderBottom: `1px solid ${V.border}`, paddingBottom: 0 }}>
+                  {(() => {
+                    const counts: Record<string, number> = { all: items.length };
+                    for (const it of items) counts[it.assetType] = (counts[it.assetType] ?? 0) + 1;
+                    const tabs: Array<{ key: AssetType | "all"; label: string; emoji: string }> = [
+                      { key: "all",    label: "All",    emoji: "📊" },
+                      { key: "gold",   label: "Gold",   emoji: "🥇" },
+                      { key: "silver", label: "Silver", emoji: "🥈" },
+                      { key: "stock",  label: "Stocks", emoji: "📈" },
+                      { key: "crypto", label: "Crypto", emoji: "₿" },
+                      { key: "other",  label: "Other",  emoji: "📌" },
+                    ];
+                    return tabs.filter(t => t.key === "all" || (counts[t.key] ?? 0) > 0).map(t => {
+                      const isActive = typeFilter === t.key;
+                      return (
+                        <button key={t.key} onClick={() => setTypeFilter(t.key)}
+                          style={{
+                            padding: "7px 14px",
+                            borderRadius: "8px 8px 0 0",
+                            border: `1px solid ${isActive ? V.border : "transparent"}`,
+                            borderBottom: isActive ? `1px solid ${V.card}` : "1px solid transparent",
+                            background: isActive ? V.card : "transparent",
+                            color: isActive ? V.text : V.muted,
+                            cursor: "pointer",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            marginBottom: -1,
+                            position: "relative",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}>
+                          <span>{t.emoji}</span>
+                          <span>{t.label}</span>
+                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: isActive ? V.accent + "22" : isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: isActive ? V.accent : V.faint, fontWeight: 800 }}>
+                            {counts[t.key] ?? 0}
+                          </span>
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={{ padding: "14px 24px" }}>
             {items.length === 0 ? (
               <div style={{ padding: "60px 0", textAlign: "center" }}>
@@ -1358,7 +1506,7 @@ export default function PortfolioPage() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {items.map((item) => {
+                {items.filter(item => typeFilter === "all" || item.assetType === typeFilter).map((item) => {
                   const s = allStats[item.id] ?? {
                     totalUnits: 0,
                     costBasisAed: 0,
@@ -1368,9 +1516,7 @@ export default function PortfolioPage() {
                     avgUnitPrice: 0,
                   };
 
-                  const curVal = item.currentPrice
-                    ? item.currentPrice * s.totalUnits
-                    : null;
+                  const curVal = calcCurrentValue(item, s.totalUnits);
                   const pl = curVal !== null ? curVal - s.costBasisAed : null;
                   const plPct =
                     pl !== null && s.costBasisAed > 0
@@ -1467,6 +1613,23 @@ export default function PortfolioPage() {
                                   {item.livePriceSymbol}
                                 </span>
                               )}
+                              {item.assetType === "gold" && (item.goldPurityKarat || item.weightGrams) && (
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: 800,
+                                    padding: "2px 8px",
+                                    borderRadius: 999,
+                                    background: "rgba(255,215,0,0.15)",
+                                    color: "#b8860b",
+                                    border: "1px solid rgba(255,215,0,0.3)",
+                                  }}
+                                >
+                                  {item.goldPurityKarat ? `${item.goldPurityKarat}K` : ""}
+                                  {item.goldPurityKarat && item.weightGrams ? " · " : ""}
+                                  {item.weightGrams ? `${item.weightGrams}g` : ""}
+                                </span>
+                              )}
                             </div>
 
                             <div style={{ fontSize: 12, color: V.faint, marginTop: 2 }}>
@@ -1529,10 +1692,35 @@ export default function PortfolioPage() {
                             }}
                           >
                             <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (expandedItemId === item.id) {
+                                  setExpandedItemId(null);
+                                } else {
+                                  setExpandedItemId(item.id);
+                                  if (!itemPurchases[item.id]) {
+                                    const { data } = await supabase
+                                      .from("portfolio_purchases")
+                                      .select("*")
+                                      .eq("item_id", item.id)
+                                      .order("purchased_at", { ascending: false })
+                                      .limit(15);
+                                    setItemPurchases(p => ({ ...p, [item.id]: (data ?? []).map(dbToPurchase) }));
+                                  }
+                                }
+                              }}
+                              style={{ ...btn, padding: "3px 10px", fontSize: 10 }}
+                            >
+                              {expandedItemId === item.id ? "▲ Hide" : "▼ History"}
+                            </button>
+
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setShowUpdatePrice(item);
                                 setNewPrice(item.currentPrice?.toString() ?? "");
+                                setEditGoldPurity((item.goldPurityKarat ?? 24).toString());
+                                setEditGoldWeight(item.weightGrams?.toString() ?? "");
                               }}
                               style={{ ...btn, padding: "3px 10px", fontSize: 10 }}
                             >
@@ -1557,6 +1745,62 @@ export default function PortfolioPage() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Transaction history drawer */}
+                      {expandedItemId === item.id && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ marginTop: 14, paddingTop: 14, borderTop: `1px dashed ${V.border}` }}
+                        >
+                          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
+                            <span>Transaction history</span>
+                            <span>{(itemPurchases[item.id] ?? []).length} transactions</span>
+                          </div>
+                          {!itemPurchases[item.id] ? (
+                            <div style={{ fontSize: 12, color: V.faint, padding: "10px 0", textAlign: "center" }}>Loading…</div>
+                          ) : itemPurchases[item.id].length === 0 ? (
+                            <div style={{ fontSize: 12, color: V.faint, padding: "10px 0", textAlign: "center" }}>No transactions yet</div>
+                          ) : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+                              {itemPurchases[item.id].map(tx => {
+                                const isSell = tx.transactionType === "sell";
+                                return (
+                                  <div key={tx.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", borderRadius: 8, fontSize: 12 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                      <span style={{ padding: "2px 8px", borderRadius: 999, background: isSell ? "rgba(239,68,68,0.12)" : "rgba(16,163,74,0.12)", color: isSell ? "#ef4444" : "#16a34a", fontWeight: 800, fontSize: 10 }}>
+                                        {isSell ? "SELL" : "BUY"}
+                                      </span>
+                                      <div>
+                                        <div style={{ fontWeight: 600, color: V.text }}>
+                                          {fmtN(tx.units, 4)} {item.unitLabel} @ {tx.currency} {fmtN(tx.unitPrice)}
+                                        </div>
+                                        <div style={{ fontSize: 10, color: V.faint }}>
+                                          {new Date(tx.purchasedAt).toLocaleDateString("en-AE", { year: "numeric", month: "short", day: "numeric" })}
+                                          {tx.source ? ` · ${tx.source}` : ""}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div style={{ fontWeight: 700, color: isSell ? "#16a34a" : V.text }}>
+                                      {isSell ? "+" : ""}{tx.currency} {fmtN(tx.totalPaid)}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div style={{ marginTop: 10, textAlign: "center" }}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/dashboard/portfolio/${item.id}`);
+                              }}
+                              style={{ ...btn, padding: "5px 14px", fontSize: 11, color: V.accent, borderColor: V.accent + "44" }}
+                            >
+                              View full detail →
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1821,6 +2065,41 @@ export default function PortfolioPage() {
                 </span>
               </label>
 
+              {/* Gold-specific fields — shown only when asset type is gold */}
+              {newItem.assetType === "gold" && (
+                <>
+                  <label style={lbl}>
+                    Purity
+                    <select
+                      style={inp}
+                      value={newItem.goldPurityKarat}
+                      onChange={(e) =>
+                        setNewItem((p) => ({ ...p, goldPurityKarat: e.target.value }))
+                      }
+                    >
+                      <option value="24">24K (pure, 99.9%)</option>
+                      <option value="22">22K (91.6%)</option>
+                      <option value="21">21K (87.5%)</option>
+                      <option value="18">18K (75%)</option>
+                    </select>
+                  </label>
+
+                  <label style={lbl}>
+                    Weight (grams)
+                    <input
+                      type="number"
+                      step="0.01"
+                      style={inp}
+                      value={newItem.weightGrams}
+                      onChange={(e) =>
+                        setNewItem((p) => ({ ...p, weightGrams: e.target.value }))
+                      }
+                      placeholder="e.g. 10.5"
+                    />
+                  </label>
+                </>
+              )}
+
               <label style={{ ...lbl, gridColumn: "1/-1" }}>
                 Notes
                 <input
@@ -1885,12 +2164,17 @@ export default function PortfolioPage() {
                 fontWeight: 800,
               }}
             >
-              Update price — {showUpdatePrice.name}
+              {showUpdatePrice.assetType === "gold" ? "Update gold" : "Update price"} — {showUpdatePrice.name}
             </div>
 
             <div style={{ padding: 20 }}>
               <label style={lbl}>
                 {showUpdatePrice.mainCurrency} per {showUpdatePrice.unitLabel}
+                {showUpdatePrice.assetType === "gold" && (
+                  <span style={{ fontSize: 10, color: V.faint, fontWeight: 400, textTransform: "none", marginLeft: 6 }}>
+                    (spot price per gram of pure 24K)
+                  </span>
+                )}
                 <input
                   type="number"
                   style={inp}
@@ -1900,6 +2184,41 @@ export default function PortfolioPage() {
                   autoFocus
                 />
               </label>
+
+              {/* Gold-specific edit fields */}
+              {showUpdatePrice.assetType === "gold" && (
+                <>
+                  <label style={{ ...lbl, marginTop: 14 }}>
+                    Purity
+                    <select style={inp} value={editGoldPurity} onChange={(e) => setEditGoldPurity(e.target.value)}>
+                      <option value="24">24K (99.9%)</option>
+                      <option value="22">22K (91.6%)</option>
+                      <option value="21">21K (87.5%)</option>
+                      <option value="18">18K (75%)</option>
+                    </select>
+                  </label>
+                  <label style={{ ...lbl, marginTop: 14 }}>
+                    Weight (grams)
+                    <input type="number" step="0.01" style={inp} value={editGoldWeight}
+                      onChange={(e) => setEditGoldWeight(e.target.value)} placeholder="e.g. 10.5" />
+                  </label>
+                  {newPrice && editGoldWeight && editGoldPurity && (() => {
+                    const factor = PURITY_FACTOR[Number(editGoldPurity)] ?? 1;
+                    const computed = Number(newPrice) * Number(editGoldWeight) * factor;
+                    return (
+                      <div style={{ marginTop: 14, padding: "10px 12px", background: "rgba(255,215,0,0.08)", borderRadius: 10, border: "1px solid rgba(255,215,0,0.3)", fontSize: 12 }}>
+                        <div style={{ color: V.muted, marginBottom: 4 }}>Calculated current value:</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD700" }}>
+                          AED {fmtN(computed)}
+                        </div>
+                        <div style={{ color: V.faint, fontSize: 10, marginTop: 4 }}>
+                          = {editGoldWeight}g × AED {newPrice}/g × {(factor * 100).toFixed(1)}%
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
             </div>
 
             <div
