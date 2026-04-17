@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -138,9 +138,8 @@ function buildCarryForwardNote(previousMonth: string, currency: Currency, carryF
   return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
 }
 
-export default function DueItemDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const supabase = createClient();
+export default function DueItemDetailPage({ params }: { params: { id: string } }) {
+  const supabase = await createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [item, setItem] = useState<DueItem | null>(null);
@@ -193,8 +192,8 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
       setUserId(user.id);
 
       const [itemRes, entriesRes, settingsRes, navRes] = await Promise.all([
-        supabase.from("due_items").select("*").eq("id", id).eq("user_id", user.id).single(),
-        supabase.from("due_entries").select("*").eq("due_item_id", id).eq("user_id", user.id).order("month", { ascending: false }),
+        supabase.from("due_items").select("*").eq("id", params.id).eq("user_id", user.id).single(),
+        supabase.from("due_entries").select("*").eq("due_item_id", params.id).eq("user_id", user.id).order("month", { ascending: false }),
         supabase.from("due_month_settings").select("month,fx_rates,is_locked").eq("user_id", user.id),
         supabase.from("due_items").select("id,name,sort_order,created_at").eq("user_id", user.id).order("sort_order").order("created_at"),
       ]);
@@ -273,7 +272,7 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
       setLoading(false);
     }
     void load();
-  }, [id]);
+  }, [params.id]);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -365,6 +364,18 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
     closePaymentModal();
     setSavingPayment(false);
     showToast(amount >= remaining ? "Payment saved and cleared" : "Partial payment saved");
+  }
+
+  async function deletePayment(paymentId: string, entryId: string) {
+    if (!userId) return;
+    if (!confirm("Delete this payment? The entry status and remaining amount will be recalculated.")) return;
+    const { error } = await supabase.from("due_payments").delete().eq("id", paymentId).eq("user_id", userId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await refreshEntry(entryId);
+    showToast("Payment deleted");
   }
 
   async function saveDates() {
@@ -473,12 +484,12 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const nav = useMemo(() => {
-    const idx = itemNav.findIndex((row) => row.id === id);
+    const idx = itemNav.findIndex((row) => row.id === params.id);
     return {
       prev: idx > 0 ? itemNav[idx - 1] : null,
       next: idx >= 0 && idx < itemNav.length - 1 ? itemNav[idx + 1] : null,
     };
-  }, [itemNav, id]);
+  }, [itemNav, params.id]);
 
   const nativeCurrency = item?.defaultCurrency ?? "AED";
   const stats = useMemo(() => {
@@ -548,18 +559,18 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
   const sHead = { padding: "11px 16px", borderBottom: `1px solid ${V.border}`, fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: V.faint, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)" };
 
   if (loading) return <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", background: V.bg }}><div style={{ width: 28, height: 28, border: `2.5px solid ${V.accent}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
-  if (!item) return <div style={{ padding: 40, background: V.bg, minHeight: "100vh", color: V.muted }}>Not found. <Link href="/dashboard/duetracker" style={{ color: V.accent }}>Back</Link></div>;
+  if (!item) return <div style={{ padding: 40, background: V.bg, minHeight: "100vh", color: V.muted }}>Not found. <Link href="/dashboard/budget" style={{ color: V.accent }}>Back</Link></div>;
 
   return (
     <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
       <div style={{ position: "sticky", top: 0, zIndex: 20, background: isDark ? "rgba(13,15,20,0.9)" : "rgba(249,248,245,0.9)", backdropFilter: "blur(12px)", borderBottom: `1px solid ${V.border}`, padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <Link href="/dashboard/duetracker" style={{ display: "flex", alignItems: "center", gap: 8, color: V.muted, textDecoration: "none", fontWeight: 600, fontSize: 13 }}>
+        <Link href="/dashboard/budget" style={{ display: "flex", alignItems: "center", gap: 8, color: V.muted, textDecoration: "none", fontWeight: 600, fontSize: 13 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
           Due Tracker
         </Link>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button style={{ ...btn, opacity: nav.prev ? 1 : 0.45, cursor: nav.prev ? "pointer" : "not-allowed" }} disabled={!nav.prev} onClick={() => nav.prev && router.push(`/dashboard/duetracker/${nav.prev.id}`)} title={nav.prev ? `Previous: ${nav.prev.name}` : "No previous due"}>‹</button>
-          <button style={{ ...btn, opacity: nav.next ? 1 : 0.45, cursor: nav.next ? "pointer" : "not-allowed" }} disabled={!nav.next} onClick={() => nav.next && router.push(`/dashboard/duetracker/${nav.next.id}`)} title={nav.next ? `Next: ${nav.next.name}` : "No next due"}>›</button>
+          <button style={{ ...btn, opacity: nav.prev ? 1 : 0.45, cursor: nav.prev ? "pointer" : "not-allowed" }} disabled={!nav.prev} onClick={() => nav.prev && router.push(`/dashboard/budget/${nav.prev.id}`)} title={nav.prev ? `Previous: ${nav.prev.name}` : "No previous due"}>‹</button>
+          <button style={{ ...btn, opacity: nav.next ? 1 : 0.45, cursor: nav.next ? "pointer" : "not-allowed" }} disabled={!nav.next} onClick={() => nav.next && router.push(`/dashboard/budget/${nav.next.id}`)} title={nav.next ? `Next: ${nav.next.name}` : "No next due"}>›</button>
           <button style={btnP} onClick={() => { setNewCurrency(item.defaultCurrency); setShowAddMonth(true); }}>+ Add month</button>
         </div>
       </div>
@@ -729,6 +740,19 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
                             {entry.lastPaidAt ? ` · Last: ${fmtDateTime(entry.lastPaidAt)}` : ""}
                           </div>
                         )}
+                        {/* Progress bar for partial/in-progress entries */}
+                        {entry.amountPaid > 0 && getTotalDue(entry) > 0 && (() => {
+                          const pct = Math.min(100, Math.round((entry.amountPaid / getTotalDue(entry)) * 100));
+                          const isComplete = pct >= 100;
+                          return (
+                            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ flex: 1, height: 6, background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", borderRadius: 999, overflow: "hidden" }}>
+                                <div style={{ height: "100%", width: `${pct}%`, background: isComplete ? "#16a34a" : "linear-gradient(90deg,#F5A623 0%,#f59e0b 100%)", borderRadius: 999, transition: "width 0.3s" }} />
+                              </div>
+                              <span style={{ fontSize: 10, fontWeight: 800, color: isComplete ? "#16a34a" : V.accent, minWidth: 34, textAlign: "right" }}>{pct}%</span>
+                            </div>
+                          );
+                        })()}
                         {diffAbs !== null && (
                           <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
                             vs previous: {diffAbs > 0 ? "+" : ""}{entry.currency} {diffAbs.toFixed(0)} {diffPct !== null ? `(${diffPct > 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : "(new)"}
@@ -756,9 +780,19 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
                     <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, marginBottom: 8 }}>Payment history</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {paymentsByEntry[entry.id].map((payment) => (
-                        <div key={payment.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: V.muted, flexWrap: "wrap" }}>
+                        <div key={payment.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 12, color: V.muted, flexWrap: "wrap" }}>
                           <span><strong style={{ color: V.text }}>{entry.currency} {payment.paidAmount.toFixed(2)}</strong>{payment.note ? ` · ${payment.note}` : ""}</span>
-                          <span>{fmtDateTime(payment.paidAt)}</span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span>{fmtDateTime(payment.paidAt)}</span>
+                            <button
+                              onClick={() => void deletePayment(payment.id, entry.id)}
+                              disabled={monthLocks[entry.month]}
+                              style={{ background: "none", border: "none", color: V.faint, cursor: monthLocks[entry.month] ? "not-allowed" : "pointer", padding: "2px 6px", fontSize: 13, opacity: monthLocks[entry.month] ? 0.3 : 0.7, borderRadius: 6 }}
+                              onMouseEnter={(e) => !monthLocks[entry.month] && (e.currentTarget.style.color = "#ef4444", e.currentTarget.style.opacity = "1")}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = V.faint, e.currentTarget.style.opacity = monthLocks[entry.month] ? "0.3" : "0.7")}
+                              title="Delete payment"
+                            >✕</button>
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -801,11 +835,24 @@ export default function DueItemDetailPage({ params }: { params: Promise<{ id: st
                 <input type="text" inputMode="decimal" style={inp} value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} disabled={savingPayment} />
               </label>
 
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(getEntryRemaining(paymentModalEntry).toFixed(2))} disabled={savingPayment || getEntryRemaining(paymentModalEntry) <= 0}>Use remaining</button>
-                {Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) > 1 && (
-                  <button type="button" style={btn} onClick={() => setPaymentAmount((Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0) / 2).toFixed(2))} disabled={savingPayment}>Half</button>
-                )}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(() => {
+                  const remaining = getEntryRemaining(paymentModalEntry);
+                  if (remaining <= 0) return null;
+                  return [
+                    { label: "¼", frac: 0.25 },
+                    { label: "½", frac: 0.5 },
+                    { label: "¾", frac: 0.75 },
+                    { label: "Full", frac: 1 },
+                  ].map(({ label, frac }) => (
+                    <button key={label} type="button"
+                      style={{ ...btn, padding: "6px 14px", fontSize: 12, fontWeight: 800, color: frac === 1 ? V.accent : V.text }}
+                      onClick={() => setPaymentAmount((remaining * frac).toFixed(2))}
+                      disabled={savingPayment}>
+                      {label}
+                    </button>
+                  ));
+                })()}
               </div>
 
               <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
