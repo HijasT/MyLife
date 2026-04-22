@@ -380,7 +380,6 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
-    </div>
 
       {/* Expiring items alert */}
       {expiringItems.length > 0 && (
