@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { nowDubai } from "@/lib/timezone";
@@ -138,7 +138,8 @@ function buildCarryForwardNote(previousMonth: string, currency: Currency, carryF
   return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
 }
 
-export default function DueItemDetailPage({ params }: { params: { id: string } }) {
+export default function DueItemDetailPage() {
+  const params = useParams();
   const supabase = createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -192,13 +193,15 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
         }
         setUserId(user.id);
 
-        // Ensure params.id is available
-        const itemId = params.id;
+        // Get ID from params - useParams returns string | string[]
+        const itemId = Array.isArray(params.id) ? params.id[0] : params.id;
         if (!itemId) {
-          console.error("No item ID provided");
+          console.error("No item ID provided in params:", params);
           setLoading(false);
           return;
         }
+
+        console.log("Loading due item:", itemId);
 
         const [itemRes, entriesRes, settingsRes, navRes] = await Promise.all([
           supabase.from("due_items").select("*").eq("id", itemId).eq("user_id", user.id).single(),
@@ -289,7 +292,7 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
     }
     }
     void load();
-  }, [params.id, router, supabase]);
+  }, [params, router, supabase]);
 
   function showToast(msg: string) {
     setToast(msg);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { nowDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
@@ -229,11 +229,8 @@ function dbToAlert(r: any): PortfolioAlert {
   };
 }
 
-export default function PortfolioItemPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function PortfolioItemPage() {
+  const params = useParams();
   const supabase = createClient();
   const router = useRouter();
 
@@ -287,13 +284,15 @@ export default function PortfolioItemPage({
 
         setUserId(user.id);
 
-        // Ensure params.id is available
-        const itemId = params.id;
+        // Get ID from params - useParams returns string | string[]
+        const itemId = Array.isArray(params.id) ? params.id[0] : params.id;
         if (!itemId) {
-          console.error("No item ID provided");
+          console.error("No item ID provided in params:", params);
           setLoading(false);
           return;
         }
+
+        console.log("Loading portfolio item:", itemId);
 
         const [itemRes, purRes, alertRes] = await Promise.all([
           supabase.from("portfolio_items").select("*").eq("id", itemId).single(),
@@ -329,7 +328,7 @@ export default function PortfolioItemPage({
     }
 
     load();
-  }, [params.id, router, supabase]);
+  }, [params, router, supabase]);
 
   useEffect(() => {
     async function syncAlerts() {
