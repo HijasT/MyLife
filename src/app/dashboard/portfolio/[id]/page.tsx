@@ -275,40 +275,57 @@ export default function PortfolioItemPage({
 
   useEffect(() => {
     async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.push("/login");
-        return;
+        if (!user) {
+          router.push("/login");
+          return;
+        }
+
+        setUserId(user.id);
+
+        // Ensure params.id is available
+        const itemId = params.id;
+        if (!itemId) {
+          console.error("No item ID provided");
+          setLoading(false);
+          return;
+        }
+
+        const [itemRes, purRes, alertRes] = await Promise.all([
+          supabase.from("portfolio_items").select("*").eq("id", itemId).single(),
+          supabase
+            .from("portfolio_purchases")
+            .select("*")
+            .eq("item_id", itemId)
+            .order("purchased_at", { ascending: false }),
+          supabase
+            .from("portfolio_alerts")
+            .select("*")
+            .eq("item_id", itemId)
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (itemRes.error) {
+          console.error("Error fetching portfolio item:", itemRes.error);
+        }
+
+        if (itemRes.data) {
+          const mapped = dbToItem(itemRes.data);
+          setItem(mapped);
+          setLivePriceSymbolInput(mapped.livePriceSymbol ?? "");
+        }
+        if (purRes.data) setPurchases(purRes.data.map(dbToPurchase));
+        if (alertRes.data) setAlerts(alertRes.data.map(dbToAlert));
+
+        setLoading(false);
+      } catch (error) {
+        console.error("Error loading portfolio item:", error);
+        setLoading(false);
       }
-
-      setUserId(user.id);
-
-      const [itemRes, purRes, alertRes] = await Promise.all([
-        supabase.from("portfolio_items").select("*").eq("id", params.id).single(),
-        supabase
-          .from("portfolio_purchases")
-          .select("*")
-          .eq("item_id", params.id)
-          .order("purchased_at", { ascending: false }),
-        supabase
-          .from("portfolio_alerts")
-          .select("*")
-          .eq("item_id", params.id)
-          .order("created_at", { ascending: false }),
-      ]);
-
-      if (itemRes.data) {
-        const mapped = dbToItem(itemRes.data);
-        setItem(mapped);
-        setLivePriceSymbolInput(mapped.livePriceSymbol ?? "");
-      }
-      if (purRes.data) setPurchases(purRes.data.map(dbToPurchase));
-      if (alertRes.data) setAlerts(alertRes.data.map(dbToAlert));
-
-      setLoading(false);
     }
 
     load();

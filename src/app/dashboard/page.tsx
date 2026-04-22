@@ -307,6 +307,28 @@ export default async function DashboardPage() {
               ) : (
                 <div className="text-sm" style={{ color: "var(--text-muted)" }}>No work logged today</div>
               )}
+
+              {tomorrowEvents.filter((e) => e.event_type === "work").length > 0 && (
+                <>
+                  <div className="text-[11px] font-bold tracking-widest uppercase mb-2 mt-4" style={{ color: "var(--text-muted)" }}>
+                    Tomorrow&apos;s work
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {tomorrowEvents.filter((e) => e.event_type === "work").map((ev) => (
+                      <div key={ev.id}>
+                        <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                          {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
+                        </div>
+                        {ev.work_start && ev.work_end && (
+                          <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                            {fmt12(ev.work_start)} – {fmt12(ev.work_end)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
@@ -327,6 +349,19 @@ export default async function DashboardPage() {
                   <div className="text-sm" style={{ color: "var(--text-muted)" }}>Quiet day so far</div>
                 )}
               </div>
+
+              {tomorrowEvents.filter((e) => e.event_type !== "work").length > 0 && (
+                <>
+                  <div className="text-[11px] font-bold tracking-widest uppercase mb-2 mt-4" style={{ color: "var(--text-muted)" }}>
+                    Tomorrow
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {tomorrowEvents.filter((e) => e.event_type !== "work").slice(0, 2).map((ev) => (
+                      <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>{ev.title}</div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="p-4">
@@ -341,45 +376,6 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
-
-      {/* Tomorrow's events */}
-      {tomorrowEvents.length > 0 && (
-        <div
-          className="mt-4 rounded-2xl border overflow-hidden"
-          style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
-        >
-          <div
-            className="px-4 py-3 border-b"
-            style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
-          >
-            <span className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
-              Tomorrow
-            </span>
-          </div>
-          <div className="flex flex-col divide-y" style={{ borderColor: "var(--card-border)" }}>
-            {tomorrowEvents.map((ev) => (
-              <div key={ev.id} className="px-4 py-3 flex items-center gap-3">
-                {ev.color && (
-                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: ev.color, flexShrink: 0 }} />
-                )}
-                <div className="flex-1">
-                  <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                    {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
-                  </div>
-                  {ev.work_start && ev.work_end && (
-                    <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-                      {fmt12(ev.work_start)} – {fmt12(ev.work_end)}
-                    </div>
-                  )}
-                </div>
-                <div className="text-xs shrink-0" style={{ color: "var(--text-muted)" }}>
-                  {ev.event_type === "work" ? "🔵 Work" : ev.event_type === "leave" ? "🟢 Leave" : "📌"}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Expiring items alert */}
       {expiringItems.length > 0 && (

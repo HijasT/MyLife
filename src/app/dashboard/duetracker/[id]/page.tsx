@@ -184,21 +184,34 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
 
   useEffect(() => {
     async function load() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-      setUserId(user.id);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          router.push("/login");
+          return;
+        }
+        setUserId(user.id);
 
-      const [itemRes, entriesRes, settingsRes, navRes] = await Promise.all([
-        supabase.from("due_items").select("*").eq("id", params.id).eq("user_id", user.id).single(),
-        supabase.from("due_entries").select("*").eq("due_item_id", params.id).eq("user_id", user.id).order("month", { ascending: false }),
-        supabase.from("due_month_settings").select("month,fx_rates,is_locked").eq("user_id", user.id),
-        supabase.from("due_items").select("id,name,sort_order,created_at").eq("user_id", user.id).order("sort_order").order("created_at"),
-      ]);
+        // Ensure params.id is available
+        const itemId = params.id;
+        if (!itemId) {
+          console.error("No item ID provided");
+          setLoading(false);
+          return;
+        }
 
-      if (itemRes.data) {
+        const [itemRes, entriesRes, settingsRes, navRes] = await Promise.all([
+          supabase.from("due_items").select("*").eq("id", itemId).eq("user_id", user.id).single(),
+          supabase.from("due_entries").select("*").eq("due_item_id", itemId).eq("user_id", user.id).order("month", { ascending: false }),
+          supabase.from("due_month_settings").select("month,fx_rates,is_locked").eq("user_id", user.id),
+          supabase.from("due_items").select("id,name,sort_order,created_at").eq("user_id", user.id).order("sort_order").order("created_at"),
+        ]);
+
+        if (itemRes.error) {
+          console.error("Error fetching item:", itemRes.error);
+        }
+
+        if (itemRes.data) {
         const r = itemRes.data;
         const nextItem: DueItem = {
           id: r.id,
@@ -270,9 +283,13 @@ export default function DueItemDetailPage({ params }: { params: { id: string } }
         setItemNav(navRes.data.map((r: { id: string; name: string }) => ({ id: r.id, name: r.name })));
       }
       setLoading(false);
+    } catch (error) {
+      console.error("Error loading due item:", error);
+      setLoading(false);
+    }
     }
     void load();
-  }, [params.id]);
+  }, [params.id, router, supabase]);
 
   function showToast(msg: string) {
     setToast(msg);

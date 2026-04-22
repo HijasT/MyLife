@@ -979,12 +979,11 @@ export default function DueTrackerPage() {
       <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800 }}>Due <span style={{ color: V.accent, fontStyle: "italic" }}>Tracker</span></div>
-          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Now with actual statuses instead of paid-or-pretend. Roll forward copies last month’s fixed dues into this month and resets them to pending.</div>
+          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Track and manage your recurring payments with status tracking.</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={btn} onClick={() => setShowHidden((v) => !v)}>{showHidden ? "Hide hidden" : "Show hidden"}</button>
           <button style={btn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          <button style={btn} onClick={() => void rollForwardFixedItems()} title="Creates missing entries for the month automatically, including carry forward for pending or partial dues and regular monthly dues for fixed items.">↻ Roll forward</button>
           <button style={settings.isLocked ? btnP : btn} onClick={() => void toggleMonthLock(settings.isLocked ? false : true)}>{settings.isLocked ? "🔒 Unlock month" : "🔓 Lock month"}</button>
           <button style={btnP} onClick={() => setShowAddItem(true)}>+ Add due</button>
         </div>
@@ -1168,7 +1167,16 @@ export default function DueTrackerPage() {
                 const strike = isSettled(status);
 
                 return (
-                  <div key={item.id} style={{ padding: "11px 16px", borderBottom: `1px solid ${V.border}`, opacity: item.isHidden ? 0.45 : 1 }}>
+                  <div 
+                    key={item.id} 
+                    style={{ 
+                      padding: "11px 16px", 
+                      borderBottom: `1px solid ${V.border}`, 
+                      opacity: item.isHidden ? 0.45 : 1,
+                      background: status === "pending" ? "rgba(239,68,68,0.05)" : "transparent",
+                      borderLeft: status === "pending" ? "3px solid #ef4444" : "3px solid transparent"
+                    }}
+                  >
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                       <select disabled={settings.isLocked} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked ? 0.6 : 1 }}>
                         <option value="pending">Pending</option>
