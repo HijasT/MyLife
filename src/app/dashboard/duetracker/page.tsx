@@ -1175,7 +1175,7 @@ export default function DueTrackerPage() {
                   metaText = `Due ${fmtMonthDay(cycle.dueDate)}`;
                   if (overdue) metaText += " · Overdue";
                 } else if (isSettled && entry?.paidAt) {
-                  metaText = `Paid ${fmtMonthDay(entry.paidAt)}`;
+                  metaText = `Paid ${fmtMonthDay(new Date(entry.paidAt))}`;
                 }
                 if (isPartial && entry) {
                   metaText = `Paid ${currency} ${entry.amountPaid.toFixed(0)} of ${amount.toLocaleString()}`;
