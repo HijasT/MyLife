@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Sans, Playfair_Display } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { PWARegister } from "@/components/PWARegister";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -65,6 +66,7 @@ export default function RootLayout({
           color: "var(--text-primary)",
         }}
       >
+        <PWARegister />
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

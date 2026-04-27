@@ -1180,9 +1180,8 @@ export default function DueTrackerPage() {
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
                       <select disabled={settings.isLocked} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked ? 0.6 : 1 }}>
                         <option value="pending">Pending</option>
-                        <option value="partial">Partial</option>
-                        <option value="paid">Paid</option>
-                                                <option value="waived">Waived</option>
+                        <option value="waived">Waived</option>
+                        {(status === "partial" || status === "paid") && <option value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>}
                       </select>
 
                       <div style={{ flex: 1, minWidth: 180 }}>
@@ -1244,7 +1243,7 @@ export default function DueTrackerPage() {
                       </div>
 
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                        <button onClick={() => void openPaymentModal(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>{entry && entry.amountPaid > 0 ? "Add payment" : "Pay"}</button>
+                        <button onClick={() => void openPaymentModal(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>Pay</button>
                         <button onClick={() => router.push(`/dashboard/duetracker/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
                         <button onClick={() => setEditItemId(isEditing ? null : item.id)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: isEditing ? V.accent : V.muted }}>{isEditing ? "Done" : "Edit"}</button>
                         <button onClick={() => void toggleHide(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.faint }}>{item.isHidden ? "Show" : "Hide"}</button>
@@ -1259,8 +1258,8 @@ export default function DueTrackerPage() {
       </div>
 
       {showAddItem && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowAddItem(false)}>
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflow: "auto" }} onClick={() => setShowAddItem(false)}>
+          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto", margin: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>Add due item</div>
               <button style={btn} onClick={() => setShowAddItem(false)}>✕</button>
@@ -1361,10 +1360,10 @@ export default function DueTrackerPage() {
 
       {paymentModal && (
         <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflow: "auto" }}
           onClick={closePaymentModal}
         >
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", margin: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
