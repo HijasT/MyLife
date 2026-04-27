@@ -343,6 +343,7 @@ export default function DueTrackerPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [editItemId, setEditItemId] = useState<string | null>(null);
+  const [moreMenuId, setMoreMenuId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sortBy, setSortBy] = useState<SortKey>("manual");
   const [toast, setToast] = useState("");
@@ -979,7 +980,7 @@ export default function DueTrackerPage() {
       <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800 }}>Due <span style={{ color: V.accent, fontStyle: "italic" }}>Tracker</span></div>
-          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Track and manage your recurring payments with status tracking.</div>
+          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Track and manage your recurring payments</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={btn} onClick={() => setShowHidden((v) => !v)}>{showHidden ? "Hide hidden" : "Show hidden"}</button>
@@ -1161,94 +1162,224 @@ export default function DueTrackerPage() {
 
               {!isCollapsed && rows.map(({ item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle }) => {
                 const status = entry?.status ?? "pending";
-                const tone = statusTone(status);
-                const isEditing = editItemId === item.id;
-                const prev = getPrevEntry(item.id);
-                const strike = isSettled(status);
+                const isSettled = status === "paid" || status === "waived";
+                const isPending = status === "pending";
+                const isPartial = status === "partial";
+                
+                // Status dot color
+                const dotColor = isPending ? "#ef4444" : isPartial ? "#f59e0b" : "#16a34a";
+                
+                // Meta text - simplified to show only essential info
+                let metaText = "";
+                if (!isSettled && cycle?.dueDate) {
+                  metaText = `Due ${fmtMonthDay(cycle.dueDate)}`;
+                  if (overdue) metaText += " · Overdue";
+                } else if (isSettled && entry?.paidAt) {
+                  metaText = `Paid ${fmtMonthDay(entry.paidAt)}`;
+                }
+                if (isPartial && entry) {
+                  metaText = `Paid ${currency} ${entry.amountPaid.toFixed(0)} of ${amount.toLocaleString()}`;
+                }
 
                 return (
                   <div 
                     key={item.id} 
                     style={{ 
-                      padding: "11px 16px", 
+                      padding: "20px 24px", 
                       borderBottom: `1px solid ${V.border}`, 
-                      opacity: item.isHidden ? 0.45 : 1,
-                      background: status === "pending" ? "rgba(239,68,68,0.05)" : "transparent",
-                      borderLeft: status === "pending" ? "3px solid #ef4444" : "3px solid transparent"
+                      display: "grid",
+                      gridTemplateColumns: "auto 1fr auto auto",
+                      gap: "24px",
+                      alignItems: "center",
+                      opacity: item.isHidden ? 0.45 : (isSettled ? 0.6 : 1),
+                      background: isPending ? "rgba(239,68,68,0.03)" : "transparent",
+                      borderLeft: isPending ? "4px solid #ef4444" : "4px solid transparent",
+                      transition: "background 0.2s",
+                      position: "relative"
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = isPending ? "rgba(239,68,68,0.05)" : isDark ? "rgba(245,166,35,0.02)" : "rgba(245,166,35,0.02)";
+                      const moreBtn = e.currentTarget.querySelector('[data-more-btn]') as HTMLElement;
+                      if (moreBtn) moreBtn.style.opacity = "1";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = isPending ? "rgba(239,68,68,0.03)" : "transparent";
+                      const moreBtn = e.currentTarget.querySelector('[data-more-btn]') as HTMLElement;
+                      if (moreBtn) moreBtn.style.opacity = "0";
                     }}
                   >
-                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      <select disabled={settings.isLocked} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked ? 0.6 : 1 }}>
-                        <option value="pending">Pending</option>
-                        <option value="partial">Partial</option>
-                        <option value="paid">Paid</option>
-                                                <option value="waived">Waived</option>
-                      </select>
+                    {/* Status Dot */}
+                    <div style={{ 
+                      width: 12, 
+                      height: 12, 
+                      borderRadius: "50%", 
+                      background: dotColor,
+                      flexShrink: 0
+                    }} />
 
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 14, fontWeight: 700, textDecoration: strike ? "line-through" : "none", color: strike ? V.faint : V.text }}>{item.name}</span>
-                          {item.isFixed && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(99,102,241,0.1)", color: "#6366f1" }}>Fixed</span>}
-                          {item.isHidden && <span style={{ fontSize: 10, color: V.faint }}>(hidden)</span>}
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: tone.bg, color: tone.fg }}>{status}</span>
-                          {overdue && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "rgba(239,68,68,0.1)", color: "#ef4444" }}>Overdue</span>}
-                          {!overdue && upcoming && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "rgba(59,130,246,0.1)", color: "#3b82f6" }}>Upcoming</span>}
+                    {/* Item Info */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ 
+                        fontSize: 16, 
+                        fontWeight: 600, 
+                        textDecoration: isSettled ? "line-through" : "none",
+                        color: isSettled ? V.faint : V.text
+                      }}>
+                        {item.name}
+                      </div>
+                      {metaText && (
+                        <div style={{ fontSize: 14, color: V.muted }}>
+                          {metaText}
                         </div>
-                        <div style={{ fontSize: 11, color: V.muted, marginTop: 3, display: "flex", flexDirection: "column", gap: 2 }}>
-                          {!isSettled(status) && cycle?.statementDate ? <span style={{ fontWeight: 600, color: "#F5A623" }}>Statement: {fmtMonthDay(cycle.statementDate)}</span> : null}
-                          {!isSettled(status) && cycle?.dueDate ? <span style={{ fontWeight: 600, color: "#ef4444" }}>Due: {fmtMonthDay(cycle.dueDate)}</span> : null}
-                          {!isSettled(status) && cycle?.nextDate && cycle.nextLabel ? (
-                            <span style={{ color: cycle.nextLabel === "statement" ? "#F5A623" : "#ef4444" }}>
-                              {cycle.daysUntilNext === 0 ? "Today" : `${cycle.daysUntilNext} day${cycle.daysUntilNext === 1 ? "" : "s"}` } for the {cycle.nextLabel === "statement" ? "Statement" : "Due"}: {fmtMonthDay(cycle.nextDate)}
-                            </span>
-                          ) : null}
+                      )}
+                    </div>
+
+                    {/* Amount */}
+                    <div style={{ 
+                      fontSize: 24, 
+                      fontWeight: 600, 
+                      fontFamily: "var(--font-display)",
+                      textAlign: "right",
+                      color: isSettled ? "#16a34a" : isPartial ? V.accent : V.text
+                    }}>
+                      {amount.toLocaleString()} {currency}
+                    </div>
+
+                    {/* Action Button */}
+                    <button 
+                      onClick={() => {
+                        if (isSettled) {
+                          router.push(`/dashboard/duetracker/${item.id}`);
+                        } else {
+                          openPaymentModal(item);
+                        }
+                      }}
+                      style={{ 
+                        ...btn, 
+                        padding: "10px 20px", 
+                        fontSize: 14,
+                        fontWeight: 700,
+                        background: isSettled ? V.card : "#16a34a",
+                        color: isSettled ? V.text : "#fff",
+                        border: isSettled ? `2px solid ${V.border}` : "none",
+                        borderRadius: 14,
+                        whiteSpace: "nowrap"
+                      }}
+                    >
+                      {isSettled ? "View" : isPartial ? "Pay Remaining" : "Pay Now"}
+                    </button>
+
+                    {/* More Menu (appears on hover) */}
+                    <div 
+                      data-more-btn
+                      style={{ 
+                        position: "absolute",
+                        top: 16,
+                        right: 16,
+                        opacity: 0,
+                        transition: "opacity 0.2s"
+                      }}
+                    >
+                      <button
+                        onClick={() => setMoreMenuId(moreMenuId === item.id ? null : item.id)}
+                        style={{
+                          ...btn,
+                          padding: "6px 12px",
+                          fontSize: 18,
+                          color: V.muted,
+                          background: V.card,
+                          border: `1px solid ${V.border}`,
+                          borderRadius: 8
+                        }}
+                      >
+                        ⋯
+                      </button>
+                      
+                      {/* Dropdown Menu */}
+                      {moreMenuId === item.id && (
+                        <div style={{
+                          position: "absolute",
+                          top: "100%",
+                          right: 0,
+                          marginTop: 4,
+                          background: V.card,
+                          border: `2px solid ${V.border}`,
+                          borderRadius: 14,
+                          minWidth: 180,
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                          zIndex: 100,
+                          overflow: "hidden"
+                        }}>
+                          <button
+                            onClick={() => {
+                              router.push(`/dashboard/duetracker/${item.id}`);
+                              setMoreMenuId(null);
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "12px 16px",
+                              border: "none",
+                              background: "transparent",
+                              textAlign: "left",
+                              cursor: "pointer",
+                              fontSize: 14,
+                              fontWeight: 500,
+                              color: V.text,
+                              borderBottom: `1px solid ${V.border}`,
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = isDark ? "rgba(245,166,35,0.05)" : "rgba(245,166,35,0.05)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            📊 View Details & History
+                          </button>
+                          <button
+                            onClick={() => {
+                              void updateEntryStatus(item, isSettled ? "pending" : status === "pending" ? "paid" : "pending");
+                              setMoreMenuId(null);
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "12px 16px",
+                              border: "none",
+                              background: "transparent",
+                              textAlign: "left",
+                              cursor: "pointer",
+                              fontSize: 14,
+                              fontWeight: 500,
+                              color: V.text,
+                              borderBottom: `1px solid ${V.border}`,
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = isDark ? "rgba(245,166,35,0.05)" : "rgba(245,166,35,0.05)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {isSettled ? "↩️ Mark as Pending" : "✅ Mark as Paid"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              void toggleHide(item);
+                              setMoreMenuId(null);
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "12px 16px",
+                              border: "none",
+                              background: "transparent",
+                              textAlign: "left",
+                              cursor: "pointer",
+                              fontSize: 14,
+                              fontWeight: 500,
+                              color: V.text,
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = isDark ? "rgba(245,166,35,0.05)" : "rgba(245,166,35,0.05)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {item.isHidden ? "👁️ Show Item" : "🙈 Hide Item"}
+                          </button>
                         </div>
-                        {isEditing ? (
-                          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                            <input defaultValue={entry?.note ?? ""} placeholder="Note for this month…" onBlur={(e) => void updateEntryField(item, "note", e.target.value)} style={{ ...inp, fontSize: 12, boxSizing: "border-box" }} />
-                          </div>
-                        ) : entry?.note ? (
-                          <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 3 }}>{entry.note}</div>
-                        ) : null}
-                        {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {getEntryRemaining(item, entry).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt)}` : ""}</div>}
-                        {prev && diffAbs !== null && (
-                          <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
-                            vs last month: {diffAbs > 0 ? "+" : ""}{currency} {diffAbs.toFixed(0)}
-                            {diffPct !== null ? ` (${diffPct > 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : " (new)"}
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        {isEditing ? (
-                          <>
-                            <input type="text" inputMode="decimal" defaultValue={getMonthlyAmount(item, entry) || ""} placeholder="This month amount" onBlur={(e) => void updateEntryField(item, "amount", e.target.value ? Number(e.target.value) : null)} style={{ ...inp, width: 130, textAlign: "right" }} />
-                            <select defaultValue={currency} onChange={(e) => void updateEntryField(item, "currency", e.target.value as Currency)} style={{ ...inp, width: 70 }}>
-                              <option>AED</option>
-                              <option>INR</option>
-                              <option>USD</option>
-                            </select>
-                          </>
-                        ) : (
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, textDecoration: status === "waived" ? "line-through" : "none", color: status === "paid" ? "#16a34a" : status === "partial" ? V.accent : status === "waived" ? V.faint : V.text }}>
-                              {currency} {amount.toLocaleString()}
-                            </div>
-                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent }}>Paid {currency} {entry.amountPaid.toFixed(2)}</div>}
-                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: V.faint }}>{getEntryRemaining(item, entry) < 0 ? "Credit left" : "Left"} {currency} {getEntryRemaining(item, entry).toFixed(2)}</div>}
-                            {entry?.carryForwardAmount ? <div style={{ fontSize: 11, color: "#f59e0b" }}>{entry.carryForwardAmount < 0 ? "Credit carried" : "Carry forward"} {currency} {entry.carryForwardAmount.toFixed(2)}</div> : null}
-                            <div style={{ fontSize: 11, color: V.faint }}>This month {currency} {getMonthlyAmount(item, entry).toFixed(2)}</div>
-                            {currency !== "AED" && amount > 0 && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {toAed(amount, currency, settings.fxRates).toFixed(0)}</div>}
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                        <button onClick={() => void openPaymentModal(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>{entry && entry.amountPaid > 0 ? "Add payment" : "Pay"}</button>
-                        <button onClick={() => router.push(`/dashboard/duetracker/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
-                        <button onClick={() => setEditItemId(isEditing ? null : item.id)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: isEditing ? V.accent : V.muted }}>{isEditing ? "Done" : "Edit"}</button>
-                        <button onClick={() => void toggleHide(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.faint }}>{item.isHidden ? "Show" : "Hide"}</button>
-                      </div>
+                      )}
                     </div>
                   </div>
                 );
