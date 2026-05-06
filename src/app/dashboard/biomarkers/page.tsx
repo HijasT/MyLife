@@ -152,10 +152,6 @@ export default function BioMarkersPage() {
   const [userId, setUserId] = useState("");
   const [isDark, setIsDark] = useState(false);
   
-  // Editing states
-  const [editingTestId, setEditingTestId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
-  
   // Compare tab states
   const [compareDate1, setCompareDate1] = useState<string>("");
   const [compareDate2, setCompareDate2] = useState<string>("");
@@ -336,30 +332,6 @@ export default function BioMarkersPage() {
   }, [tests, results, compareDate1, compareDate2]);
 
   // ============= ACTIONS =============
-  async function saveTestName(testId: string, newName: string) {
-    if (!newName.trim()) return;
-    const cl = supabase();
-    await cl.from("biomarker_tests").update({ name: newName.trim() }).eq("id", testId);
-    setTests(prev => prev.map(t => t.id === testId ? { ...t, name: newName.trim() } : t));
-    setEditingTestId(null);
-  }
-
-  async function updateTestGroup(testId: string, newGroup: string) {
-    const cl = supabase();
-    await cl.from("biomarker_tests").update({ group_name: newGroup }).eq("id", testId);
-    setTests(prev => prev.map(t => t.id === testId ? { ...t, groupName: newGroup } : t));
-  }
-
-  async function deleteTest(testId: string) {
-    if (!confirm("Delete this marker and all its results?")) return;
-    const cl = supabase();
-    await Promise.all([
-      cl.from("biomarker_results").delete().eq("test_id", testId),
-      cl.from("biomarker_tests").delete().eq("id", testId),
-    ]);
-    setTests(prev => prev.filter(t => t.id !== testId));
-    setResults(prev => prev.filter(r => r.testId !== testId));
-  }
 
   // ============= STYLES =============
   const V = isDark
@@ -438,11 +410,6 @@ export default function BioMarkersPage() {
             section={section}
             statusTone={statusTone}
             compareTone={compareTone}
-            editingTestId={editingTestId}
-            editingName={editingName}
-            setEditingTestId={setEditingTestId}
-            setEditingName={setEditingName}
-            saveTestName={saveTestName}
           />
         )}
         
@@ -491,13 +458,7 @@ export default function BioMarkersPage() {
             groupCards={groupCards}
             selectedGroup={selectedGroup}
             setSelectedGroup={setSelectedGroup}
-            updateTestGroup={updateTestGroup}
-            deleteTest={deleteTest}
-            editingTestId={editingTestId}
-            editingName={editingName}
-            setEditingTestId={setEditingTestId}
-            setEditingName={setEditingName}
-            saveTestName={saveTestName}
+            userId={userId}
             V={V}
             section={section}
             btn={btn}
@@ -574,7 +535,7 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
   );
 }
 
-function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, section, statusTone, compareTone, editingTestId, editingName, setEditingTestId, setEditingName, saveTestName }: any) {
+function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, section, statusTone, compareTone }: any) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(groupCards.map((g: any) => g.groupName)));
   
   const toggleGroup = (groupName: string) => {
@@ -610,27 +571,14 @@ function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, s
                   const pct = delta != null && prev?.valueNum != null ? Math.round((delta / prev.valueNum) * 100) : null;
                   
                   return (
-                    <div key={t.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10, alignItems: "center" }}>
-                      <div>
-                        {editingTestId === t.id ? (
-                          <input
-                            value={editingName}
-                            onChange={(e) => setEditingName(e.target.value)}
-                            onBlur={() => saveTestName(t.id, editingName)}
-                            onKeyDown={(e) => e.key === "Enter" && saveTestName(t.id, editingName)}
-                            autoFocus
-                            style={{ fontSize: 14, fontWeight: 700, border: `1px solid ${V.accent}`, borderRadius: 4, padding: "2px 6px", background: V.surface, color: V.text, width: "100%" }}
-                          />
-                        ) : (
-                          <div style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => { setEditingTestId(t.id); setEditingName(t.name); }}>
-                            {t.name} <span style={{ fontSize: 10, color: V.muted }}>✎</span>
-                          </div>
-                        )}
+                    <Link key={t.id} href={`/dashboard/biomarkers/${t.id}`} style={{ textDecoration: "none", color: V.text }}>
+                      <div style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10, alignItems: "center", cursor: "pointer", transition: "all 0.2s" }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
+                        <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                        <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
                       </div>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
-                      <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
-                      <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
@@ -853,8 +801,95 @@ function BodyMetricsTab({ metrics, V, section, isDark }: any) {
   );
 }
 
-function ManageTab({ groupCards, selectedGroup, setSelectedGroup, updateTestGroup, deleteTest, editingTestId, editingName, setEditingTestId, setEditingName, saveTestName, V, section, btn }: any) {
+function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, V, section, btn }: any) {
   const group = groupCards.find((g: any) => g.groupName === selectedGroup);
+  const [editingTest, setEditingTest] = useState<any>(null);
+  const [showAddTest, setShowAddTest] = useState(false);
+  const [newTest, setNewTest] = useState({
+    name: "",
+    groupName: selectedGroup,
+    method: "",
+    unit: "",
+    refMin: "",
+    refMax: "",
+  });
+  
+  const startEdit = (test: any) => {
+    setEditingTest({
+      id: test.id,
+      name: test.name,
+      method: test.method,
+      unit: test.unit,
+      refMin: test.refMin ?? "",
+      refMax: test.refMax ?? "",
+      groupName: test.groupName,
+    });
+  };
+  
+  const cancelEdit = () => {
+    setEditingTest(null);
+  };
+  
+  const saveEdit = async () => {
+    if (!editingTest) return;
+    const cl = supabase();
+    await cl.from("biomarker_tests").update({
+      name: editingTest.name,
+      method: editingTest.method,
+      unit: editingTest.unit,
+      ref_min: editingTest.refMin === "" ? null : parseFloat(editingTest.refMin),
+      ref_max: editingTest.refMax === "" ? null : parseFloat(editingTest.refMax),
+      group_name: editingTest.groupName,
+    }).eq("id", editingTest.id);
+    setEditingTest(null);
+    window.location.reload(); // Reload to see changes
+  };
+  
+  const deleteTest = async (testId: string) => {
+    if (!confirm("Delete this marker and all its results?")) return;
+    const cl = supabase();
+    await Promise.all([
+      cl.from("biomarker_results").delete().eq("test_id", testId),
+      cl.from("biomarker_tests").delete().eq("id", testId),
+    ]);
+    window.location.reload();
+  };
+  
+  const addNewTest = async () => {
+    if (!newTest.name || !selectedGroup) return;
+    const cl = supabase();
+    await cl.from("biomarker_tests").insert({
+      user_id: userId,
+      name: newTest.name,
+      group_name: selectedGroup,
+      method: newTest.method,
+      unit: newTest.unit,
+      ref_min: newTest.refMin === "" ? null : parseFloat(newTest.refMin),
+      ref_max: newTest.refMax === "" ? null : parseFloat(newTest.refMax),
+      sort_order: 0,
+    });
+    setNewTest({ name: "", groupName: selectedGroup, method: "", unit: "", refMin: "", refMax: "" });
+    setShowAddTest(false);
+    window.location.reload();
+  };
+  
+  const inputStyle = {
+    width: "100%",
+    padding: "8px 12px",
+    fontSize: 13,
+    border: `1px solid ${V.border}`,
+    borderRadius: 6,
+    background: V.surface,
+    color: V.text,
+  };
+  
+  const labelStyle = {
+    fontSize: 11,
+    fontWeight: 700,
+    textTransform: "uppercase" as const,
+    color: V.faint,
+    marginBottom: 4,
+  };
   
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -869,31 +904,171 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, updateTestGrou
         </select>
       </div>
 
-      {/* Group Management */}
+      {/* Add New Test Button */}
       {group && (
         <div style={{ ...section, padding: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{group.groupName}</div>
+          <button onClick={() => setShowAddTest(!showAddTest)} style={{ ...btn, width: "100%", fontWeight: 700 }}>
+            {showAddTest ? "− Cancel" : "+ Add New Test to " + group.groupName}
+          </button>
+        </div>
+      )}
+
+      {/* Add New Test Form */}
+      {showAddTest && (
+        <div style={{ ...section, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 16 }}>Add New Test</div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div>
+              <div style={labelStyle}>Test Name *</div>
+              <input 
+                type="text" 
+                value={newTest.name} 
+                onChange={(e) => setNewTest({ ...newTest, name: e.target.value })}
+                placeholder="e.g., Hemoglobin"
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={labelStyle}>Unit</div>
+                <input 
+                  type="text" 
+                  value={newTest.unit} 
+                  onChange={(e) => setNewTest({ ...newTest, unit: e.target.value })}
+                  placeholder="e.g., g/dL"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <div style={labelStyle}>Methodology</div>
+                <input 
+                  type="text" 
+                  value={newTest.method} 
+                  onChange={(e) => setNewTest({ ...newTest, method: e.target.value })}
+                  placeholder="e.g., HPLC"
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={labelStyle}>Min Reference</div>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  value={newTest.refMin} 
+                  onChange={(e) => setNewTest({ ...newTest, refMin: e.target.value })}
+                  placeholder="e.g., 12.0"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <div style={labelStyle}>Max Reference</div>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  value={newTest.refMax} 
+                  onChange={(e) => setNewTest({ ...newTest, refMax: e.target.value })}
+                  placeholder="e.g., 16.0"
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+            <button onClick={addNewTest} style={{ ...btn, background: V.accent, color: "#fff", fontWeight: 700, padding: "10px" }}>
+              Add Test
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Group Management - Test List */}
+      {group && (
+        <div style={{ ...section, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{group.groupName} <span style={{ fontSize: 12, color: V.muted }}>({group.tests.length} markers)</span></div>
           
-          <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "grid", gap: 12 }}>
             {group.tests.map((t: any) => (
-              <div key={t.id} style={{ padding: "10px 12px", border: `1px solid ${V.border}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  {editingTestId === t.id ? (
-                    <input
-                      value={editingName}
-                      onChange={(e) => setEditingName(e.target.value)}
-                      onBlur={() => saveTestName(t.id, editingName)}
-                      onKeyDown={(e) => e.key === "Enter" && saveTestName(t.id, editingName)}
-                      autoFocus
-                      style={{ fontSize: 14, fontWeight: 700, border: `1px solid ${V.accent}`, borderRadius: 4, padding: "2px 6px", background: V.surface, color: V.text }}
-                    />
-                  ) : (
-                    <span style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => { setEditingTestId(t.id); setEditingName(t.name); }}>
-                      {t.name} <span style={{ fontSize: 10, color: V.muted }}>✎</span>
-                    </span>
-                  )}
-                </div>
-                <button onClick={() => deleteTest(t.id)} style={{ ...btn, padding: "6px 12px", fontSize: 11, color: "#dc2626", borderColor: "#dc2626" }}>Delete</button>
+              <div key={t.id} style={{ border: `1px solid ${V.border}`, borderRadius: 8, padding: 12 }}>
+                {editingTest?.id === t.id ? (
+                  // EDIT MODE
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <div>
+                      <div style={labelStyle}>Test Name *</div>
+                      <input 
+                        type="text" 
+                        value={editingTest.name} 
+                        onChange={(e) => setEditingTest({ ...editingTest, name: e.target.value })}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <div style={labelStyle}>Unit</div>
+                        <input 
+                          type="text" 
+                          value={editingTest.unit} 
+                          onChange={(e) => setEditingTest({ ...editingTest, unit: e.target.value })}
+                          style={inputStyle}
+                        />
+                      </div>
+                      <div>
+                        <div style={labelStyle}>Methodology</div>
+                        <input 
+                          type="text" 
+                          value={editingTest.method} 
+                          onChange={(e) => setEditingTest({ ...editingTest, method: e.target.value })}
+                          style={inputStyle}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <div style={labelStyle}>Min Reference</div>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          value={editingTest.refMin} 
+                          onChange={(e) => setEditingTest({ ...editingTest, refMin: e.target.value })}
+                          style={inputStyle}
+                        />
+                      </div>
+                      <div>
+                        <div style={labelStyle}>Max Reference</div>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          value={editingTest.refMax} 
+                          onChange={(e) => setEditingTest({ ...editingTest, refMax: e.target.value })}
+                          style={inputStyle}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={saveEdit} style={{ ...btn, flex: 1, background: V.accent, color: "#fff", fontWeight: 700 }}>Save</button>
+                      <button onClick={cancelEdit} style={{ ...btn, flex: 1 }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  // VIEW MODE
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800 }}>{t.name}</div>
+                        <div style={{ fontSize: 11, color: V.muted, marginTop: 2 }}>
+                          {t.unit && <span>Unit: {t.unit}</span>}
+                          {t.method && <span> · Method: {t.method}</span>}
+                        </div>
+                        <div style={{ fontSize: 11, color: V.muted, marginTop: 2 }}>
+                          Range: {t.refMin ?? "—"} - {t.refMax ?? "—"}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => startEdit(t)} style={{ ...btn, padding: "6px 12px", fontSize: 11 }}>Edit</button>
+                        <button onClick={() => deleteTest(t.id)} style={{ ...btn, padding: "6px 12px", fontSize: 11, color: "#dc2626", borderColor: "#dc2626" }}>Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
