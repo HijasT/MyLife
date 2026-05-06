@@ -72,7 +72,9 @@ type Tab = "overview" | "groups" | "dates" | "compare" | "metrics" | "manage";
 
 function formatDelta(value: number | null): string {
   if (value == null) return "—";
-  const formatted = value.toFixed(3);
+  // Round to 3 decimals first to avoid floating point issues
+  const rounded = Math.round(value * 1000) / 1000;
+  const formatted = rounded.toFixed(3);
   // Remove trailing zeros: 12.500 → 12.5, 12.000 → 12
   return formatted.replace(/\.?0+$/, '');
 }
@@ -490,8 +492,30 @@ export default function BioMarkersPage() {
 // ============= TAB COMPONENTS =============
 
 function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTone, compareTone }: any) {
+  const btnStyle = {
+    padding: "12px 20px",
+    fontSize: 14,
+    fontWeight: 700,
+    border: "none",
+    borderRadius: 10,
+    background: V.accent,
+    color: "#fff",
+    cursor: "pointer",
+    transition: "all 0.2s",
+  };
+  
   return (
     <div style={{ display: "grid", gap: 18 }}>
+      {/* Action Buttons */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <button style={btnStyle} onClick={() => window.location.href = '/dashboard/biomarkers/add-session'}>
+          + Lab session
+        </button>
+        <button style={btnStyle} onClick={() => window.location.href = '/dashboard/biomarkers/add-body-metric'}>
+          + Body metrics
+        </button>
+      </div>
+      
       {/* Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
         {[
@@ -522,11 +546,12 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
                     <div>
                       <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{test.groupName}</div>
                       <div style={{ fontSize: 15, fontWeight: 800 }}>{test.name}</div>
+                      <div style={{ fontSize: 10, color: V.muted, marginTop: 2 }}>{new Date(latest.testDate).toLocaleDateString()}</div>
                     </div>
                     <div style={{ fontSize: 14, fontWeight: 800 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 11, color: V.muted }}>{test.unit}</span></div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                       <span style={{ padding: "4px 10px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 11, fontWeight: 800 }}>{tone.label}</span>
-                      <span style={{ fontSize: 12, color: compareTone(delta), fontWeight: 800 }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</span>
+                      <span style={{ fontSize: 12, color: compareTone(delta), fontWeight: 800 }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</span>
                     </div>
                   </div>
                 </Link>
@@ -590,11 +615,19 @@ function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, s
                   
                   return (
                     <Link key={t.id} href={`/dashboard/biomarkers/${t.id}`} style={{ textDecoration: "none", color: V.text }}>
-                      <div style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10, alignItems: "center", cursor: "pointer", transition: "all 0.2s" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
-                        <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
-                        <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
-                        <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
+                      <div style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, cursor: "pointer", transition: "all 0.2s" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10, alignItems: "center" }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
+                            <div style={{ fontSize: 10, color: V.muted, marginTop: 2 }}>
+                              Range: {t.refMin ?? "—"} - {t.refMax ?? "—"} {t.unit}
+                            </div>
+                            <div style={{ fontSize: 10, color: V.muted }}>{latest ? new Date(latest.testDate).toLocaleDateString() : ""}</div>
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
+                          <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                          <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
+                        </div>
                       </div>
                     </Link>
                   );
@@ -652,10 +685,17 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
             {items.map(({ result, test }: any) => {
               const status = statusTone(getStatus(result.valueNum, test.refMin, test.refMax, result.valueText));
               return (
-                <div key={result.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10, alignItems: "center" }}>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{test.name}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{result.valueNum ?? result.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test.unit}</span></div>
-                  <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                <div key={result.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10, alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{test.name}</div>
+                      <div style={{ fontSize: 10, color: V.muted, marginTop: 2 }}>
+                        Range: {test.refMin ?? "—"} - {test.refMax ?? "—"} {test.unit}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>{result.valueNum ?? result.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test.unit}</span></div>
+                    <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                  </div>
                 </div>
               );
             })}
@@ -776,10 +816,35 @@ function BodyMetricsTab({ metrics, V, section, isDark }: any) {
                 { label: "Skeletal Muscle", value: latest.skeletalMuscleKg, unit: "kg", prev: previous?.skeletalMuscleKg },
               ].map((m: { label: string; value: number | null; unit: string; prev?: number | null }) => {
                 const delta = m.value != null && m.prev != null ? m.value - m.prev : null;
+                
+                // BMI color coding
+                let bmiColor = V.text;
+                let bmiRange = "";
+                if (m.label === "BMI" && m.value != null) {
+                  if (m.value < 18.5) {
+                    bmiColor = "#f59e0b"; // amber
+                    bmiRange = "Optimal: 18.5-24.9";
+                  } else if (m.value >= 18.5 && m.value < 25) {
+                    bmiColor = "#10b981"; // green
+                    bmiRange = "Optimal: 18.5-24.9";
+                  } else if (m.value >= 25 && m.value < 30) {
+                    bmiColor = "#f59e0b"; // amber
+                    bmiRange = "Optimal: 18.5-24.9";
+                  } else {
+                    bmiColor = "#ef4444"; // red
+                    bmiRange = "Optimal: 18.5-24.9";
+                  }
+                }
+                
                 return (
                   <div key={m.label} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 14 }}>
                     <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{m.label}</div>
-                    <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{m.value ?? "—"} <span style={{ fontSize: 14, color: V.muted }}>{m.unit}</span></div>
+                    <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4, color: m.label === "BMI" ? bmiColor : V.text }}>
+                      {m.value ?? "—"} <span style={{ fontSize: 14, color: V.muted }}>{m.unit}</span>
+                    </div>
+                    {m.label === "BMI" && bmiRange && (
+                      <div style={{ fontSize: 10, color: V.muted, marginTop: 2 }}>{bmiRange}</div>
+                    )}
                     {delta !== null && (
                       <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: delta > 0 ? "#c00" : delta < 0 ? "#070" : "#999" }}>
                         {delta > 0 ? "+" : ""}{formatDelta(delta)} {m.unit}
