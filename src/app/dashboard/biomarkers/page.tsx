@@ -575,46 +575,69 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
 }
 
 function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, section, statusTone, compareTone, editingTestId, editingName, setEditingTestId, setEditingName, saveTestName }: any) {
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(groupCards.map((g: any) => g.groupName)));
+  
+  const toggleGroup = (groupName: string) => {
+    const newExpanded = new Set(expandedGroups);
+    if (newExpanded.has(groupName)) {
+      newExpanded.delete(groupName);
+    } else {
+      newExpanded.add(groupName);
+    }
+    setExpandedGroups(newExpanded);
+  };
+  
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      {groupCards.map((g: any) => (
-        <div key={g.groupName} style={{ ...section, padding: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{g.groupName} <span style={{ fontSize: 12, color: V.muted }}>({g.tests.length} markers · {g.abnormal} abnormal)</span></div>
-          <div style={{ display: "grid", gap: 8 }}>
-            {g.tests.map((t: any) => {
-              const latest = latestResults.get(t.id);
-              const prev = previousResults.get(t.id);
-              const status = latest ? statusTone(getStatus(latest.valueNum, t.refMin, t.refMax, latest.valueText)) : { label: "—", bg: "#f5f5f5", fg: "#999" };
-              const delta = latest?.valueNum != null && prev?.valueNum != null ? latest.valueNum - prev.valueNum : null;
-              const pct = delta != null && prev?.valueNum != null ? Math.round((delta / prev.valueNum) * 100) : null;
-              
-              return (
-                <div key={t.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10, alignItems: "center" }}>
-                  <div>
-                    {editingTestId === t.id ? (
-                      <input
-                        value={editingName}
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={() => saveTestName(t.id, editingName)}
-                        onKeyDown={(e) => e.key === "Enter" && saveTestName(t.id, editingName)}
-                        autoFocus
-                        style={{ fontSize: 14, fontWeight: 700, border: `1px solid ${V.accent}`, borderRadius: 4, padding: "2px 6px", background: V.surface, color: V.text, width: "100%" }}
-                      />
-                    ) : (
-                      <div style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => { setEditingTestId(t.id); setEditingName(t.name); }}>
-                        {t.name} <span style={{ fontSize: 10, color: V.muted }}>✎</span>
+      {groupCards.map((g: any) => {
+        const isExpanded = expandedGroups.has(g.groupName);
+        return (
+          <div key={g.groupName} style={{ ...section, padding: 16 }}>
+            <div 
+              style={{ fontSize: 16, fontWeight: 800, marginBottom: isExpanded ? 12 : 0, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }} 
+              onClick={() => toggleGroup(g.groupName)}
+            >
+              <span>{g.groupName} <span style={{ fontSize: 12, color: V.muted }}>({g.tests.length} markers · {g.abnormal} abnormal)</span></span>
+              <span style={{ fontSize: 20, fontWeight: 700, color: V.accent }}>{isExpanded ? "−" : "+"}</span>
+            </div>
+            {isExpanded && (
+              <div style={{ display: "grid", gap: 8 }}>
+                {g.tests.map((t: any) => {
+                  const latest = latestResults.get(t.id);
+                  const prev = previousResults.get(t.id);
+                  const status = latest ? statusTone(getStatus(latest.valueNum, t.refMin, t.refMax, latest.valueText)) : { label: "—", bg: "#f5f5f5", fg: "#999" };
+                  const delta = latest?.valueNum != null && prev?.valueNum != null ? latest.valueNum - prev.valueNum : null;
+                  const pct = delta != null && prev?.valueNum != null ? Math.round((delta / prev.valueNum) * 100) : null;
+                  
+                  return (
+                    <div key={t.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10, alignItems: "center" }}>
+                      <div>
+                        {editingTestId === t.id ? (
+                          <input
+                            value={editingName}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onBlur={() => saveTestName(t.id, editingName)}
+                            onKeyDown={(e) => e.key === "Enter" && saveTestName(t.id, editingName)}
+                            autoFocus
+                            style={{ fontSize: 14, fontWeight: 700, border: `1px solid ${V.accent}`, borderRadius: 4, padding: "2px 6px", background: V.surface, color: V.text, width: "100%" }}
+                          />
+                        ) : (
+                          <div style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => { setEditingTestId(t.id); setEditingName(t.name); }}>
+                            {t.name} <span style={{ fontSize: 10, color: V.muted }}>✎</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
-                  <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
-                  <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
-                </div>
-              );
-            })}
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
+                      <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                      <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
