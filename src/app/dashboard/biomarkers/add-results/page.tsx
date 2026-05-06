@@ -113,10 +113,20 @@ export default function AddResultsPage() {
     
     const loadExistingResults = async () => {
       const cl = supabase();
-      const { data: resultsData } = await cl
+      
+      console.log("Loading results for date:", selectedDate);
+      
+      const { data: resultsData, error: resultsError } = await cl
         .from("biomarker_results")
         .select("*")
         .eq("test_date", selectedDate);
+
+      if (resultsError) {
+        console.error("Error loading results:", resultsError);
+        return;
+      }
+
+      console.log("Loaded results:", resultsData?.length || 0);
 
       if (resultsData && resultsData.length > 0) {
         const newValues = new Map<string, TestValue>();
@@ -130,21 +140,26 @@ export default function AddResultsPage() {
           });
         });
         setTestValues(newValues);
+        console.log("Set values for tests:", newValues.size);
 
         // Load session details
-        const { data: sessionData } = await cl
+        const { data: sessionData, error: sessionError } = await cl
           .from("biomarker_sessions")
           .select("*")
           .eq("session_date", selectedDate)
           .single();
 
-        if (sessionData) {
+        if (sessionError) {
+          console.log("No session data found (this is OK for new dates)");
+        } else if (sessionData) {
+          console.log("Loaded session data:", sessionData);
           setCostAed(sessionData.total_paid_aed?.toString() || "");
           setClinicName(sessionData.clinic_name || "");
           setSessionNotes(sessionData.notes || "");
         }
       } else {
         // Clear values for new date
+        console.log("No existing results - starting fresh");
         setTestValues(new Map());
         setCostAed("");
         setClinicName("");
@@ -208,8 +223,8 @@ export default function AddResultsPage() {
       const cl = supabase();
       const testDateTime = `${selectedDate}T${selectedTime}:00`;
 
-      // Save session details
-      const { data: sessionData } = await cl
+      // 1. Save/update session details
+      const { error: sessionError } = await cl
         .from("biomarker_sessions")
         .upsert({
           user_id: userId,
@@ -219,50 +234,78 @@ export default function AddResultsPage() {
           notes: sessionNotes || null,
         }, {
           onConflict: 'user_id,session_date'
-        })
-        .select()
-        .single();
+        });
 
-      // Save/update results
-      const updates: any[] = [];
-      const inserts: any[] = [];
+      if (sessionError) {
+        console.error("Session save error:", sessionError);
+        alert(`Error saving session: ${sessionError.message}`);
+        setSaving(false);
+        return;
+      }
 
+      // 2. Prepare all results for upsert
+      const resultsToSave: any[] = [];
+      
       testValues.forEach((value, testId) => {
-        if (!value.valueNum && !value.valueText) return; // Skip empty
+        // Skip if both numeric and text values are empty
+        if (!value.valueNum && !value.valueText) return;
 
-        const data = {
+        resultsToSave.push({
+          user_id: userId,  // ← ADDED THIS!
           test_id: testId,
           test_date: selectedDate,
           test_datetime: testDateTime,
           value_num: value.valueNum ? parseFloat(value.valueNum) : null,
           value_text: value.valueText || null,
           notes: value.notes || null,
-        };
-
-        if (value.resultId) {
-          // Update existing
-          updates.push(
-            cl.from("biomarker_results").update(data).eq("id", value.resultId)
-          );
-        } else {
-          // Insert new
-          inserts.push(data);
-        }
+        });
       });
 
-      // Execute all updates
-      await Promise.all(updates);
-
-      // Execute all inserts
-      if (inserts.length > 0) {
-        await cl.from("biomarker_results").insert(inserts);
+      if (resultsToSave.length === 0) {
+        alert("No test values to save!");
+        setSaving(false);
+        return;
       }
 
-      alert("Results saved successfully!");
+      // 3. Upsert all results (update existing or insert new)
+      // We need to handle this differently because biomarker_results doesn't have a simple unique key
+      // So we'll delete existing results for this date and insert new ones
+      
+      // First, get all test IDs we're saving
+      const testIds = resultsToSave.map(r => r.test_id);
+      
+      // Delete existing results for these tests on this date
+      const { error: deleteError } = await cl
+        .from("biomarker_results")
+        .delete()
+        .eq("test_date", selectedDate)
+        .in("test_id", testIds);
+
+      if (deleteError) {
+        console.error("Delete error:", deleteError);
+        alert(`Error clearing old results: ${deleteError.message}`);
+        setSaving(false);
+        return;
+      }
+
+      // Insert all new results
+      const { error: insertError } = await cl
+        .from("biomarker_results")
+        .insert(resultsToSave);
+
+      if (insertError) {
+        console.error("Insert error:", insertError);
+        alert(`Error saving results: ${insertError.message}`);
+        setSaving(false);
+        return;
+      }
+
+      // Success!
+      alert(`Successfully saved ${resultsToSave.length} test result${resultsToSave.length === 1 ? '' : 's'}!`);
       router.push("/dashboard/biomarkers");
-    } catch (error) {
-      console.error("Error saving:", error);
-      alert("Error saving results. Please try again.");
+    } catch (error: any) {
+      console.error("Unexpected error:", error);
+      alert(`Unexpected error: ${error.message || 'Unknown error'}`);
     } finally {
       setSaving(false);
     }
