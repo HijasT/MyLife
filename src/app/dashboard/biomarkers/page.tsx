@@ -70,6 +70,13 @@ type CompareRow = {
 
 type Tab = "overview" | "groups" | "dates" | "compare" | "metrics" | "manage";
 
+function formatDelta(value: number | null): string {
+  if (value == null) return "—";
+  const formatted = value.toFixed(3);
+  // Remove trailing zeros: 12.500 → 12.5, 12.000 → 12
+  return formatted.replace(/\.?0+$/, '');
+}
+
 // ============= DB CONVERTERS =============
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dbToTest = (r: any): BiomarkerTest => ({
@@ -280,7 +287,16 @@ export default function BioMarkersPage() {
         if (status === "high" || status === "low") g.abnormal++;
       }
     });
-    return Array.from(groups.values()).sort((a, b) => a.groupName.localeCompare(b.groupName));
+    
+    // Sort groups alphabetically, but "Other" always last
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.groupName.toLowerCase() === "other") return 1;
+      if (b.groupName.toLowerCase() === "other") return -1;
+      return a.groupName.localeCompare(b.groupName);
+    }).map(g => ({
+      ...g,
+      tests: g.tests.sort((a, b) => a.name.localeCompare(b.name)) // Sort tests alphabetically
+    }));
   }, [tests, latestResults]);
 
   const resultsByDate = useMemo(() => {
@@ -459,6 +475,8 @@ export default function BioMarkersPage() {
             selectedGroup={selectedGroup}
             setSelectedGroup={setSelectedGroup}
             userId={userId}
+            tests={tests}
+            setTests={setTests}
             V={V}
             section={section}
             btn={btn}
@@ -472,39 +490,8 @@ export default function BioMarkersPage() {
 // ============= TAB COMPONENTS =============
 
 function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTone, compareTone }: any) {
-  const btnStyle = {
-    padding: "12px 20px",
-    fontSize: 14,
-    fontWeight: 700,
-    border: `1px solid ${V.border}`,
-    borderRadius: 10,
-    background: V.surface,
-    color: V.text,
-    cursor: "pointer",
-    transition: "all 0.2s",
-  };
-  
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      {/* Action Buttons */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12 }}>
-        <Link href="/dashboard/biomarkers/add-result" style={{ textDecoration: "none" }}>
-          <button style={{ ...btnStyle, width: "100%", background: V.accent, color: "#fff", border: "none" }}>
-            + Add Result
-          </button>
-        </Link>
-        <Link href="/dashboard/biomarkers/add-session" style={{ textDecoration: "none" }}>
-          <button style={{ ...btnStyle, width: "100%" }}>
-            + Add Session
-          </button>
-        </Link>
-        <Link href="/dashboard/biomarkers/add-body-metric" style={{ textDecoration: "none" }}>
-          <button style={{ ...btnStyle, width: "100%" }}>
-            + Add Body Metric
-          </button>
-        </Link>
-      </div>
-      
       {/* Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
         {[
@@ -607,7 +594,7 @@ function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, s
                         <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
                         <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
                         <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
-                        <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(3)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
+                        <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
                       </div>
                     </Link>
                   );
@@ -737,7 +724,7 @@ function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, 
                     <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: prevTone.bg, color: prevTone.fg, fontSize: 10, fontWeight: 800 }}>{prevTone.label}</span>
                   </td>
                   <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
-                    {row.delta == null ? "—" : `${row.delta > 0 ? "↑ +" : "↓ "}${row.delta.toFixed(3)}`}
+                    {row.delta == null ? "—" : `${row.delta > 0 ? "↑ +" : "↓ "}${formatDelta(row.delta)}`}
                   </td>
                   <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
                     {row.pct == null ? "—" : `${row.pct > 0 ? "+" : ""}${row.pct}%`}
@@ -795,7 +782,7 @@ function BodyMetricsTab({ metrics, V, section, isDark }: any) {
                     <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{m.value ?? "—"} <span style={{ fontSize: 14, color: V.muted }}>{m.unit}</span></div>
                     {delta !== null && (
                       <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: delta > 0 ? "#c00" : delta < 0 ? "#070" : "#999" }}>
-                        {delta > 0 ? "+" : ""}{delta.toFixed(3)} {m.unit}
+                        {delta > 0 ? "+" : ""}{formatDelta(delta)} {m.unit}
                       </div>
                     )}
                   </div>
@@ -832,50 +819,73 @@ function BodyMetricsTab({ metrics, V, section, isDark }: any) {
   );
 }
 
-function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, V, section, btn }: any) {
+function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests, setTests, V, section, btn }: any) {
   const group = groupCards.find((g: any) => g.groupName === selectedGroup);
-  const [editingTest, setEditingTest] = useState<any>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedTests, setEditedTests] = useState<any[]>([]);
   const [showAddTest, setShowAddTest] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newTest, setNewTest] = useState({
     name: "",
-    groupName: selectedGroup,
     method: "",
     unit: "",
     refMin: "",
     refMax: "",
   });
   
-  const startEdit = (test: any) => {
-    setEditingTest({
-      id: test.id,
-      name: test.name,
-      method: test.method,
-      unit: test.unit,
-      refMin: test.refMin ?? "",
-      refMax: test.refMax ?? "",
-      groupName: test.groupName,
-    });
+  // Initialize editing state when group selected
+  useEffect(() => {
+    if (group) {
+      setEditedTests(group.tests.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        method: t.method,
+        unit: t.unit,
+        refMin: t.refMin ?? "",
+        refMax: t.refMax ?? "",
+        groupName: t.groupName,
+      })));
+    }
+    setIsEditing(false);
+  }, [group]);
+  
+  const updateTest = (index: number, field: string, value: any) => {
+    const updated = [...editedTests];
+    updated[index] = { ...updated[index], [field]: value };
+    setEditedTests(updated);
   };
   
-  const cancelEdit = () => {
-    setEditingTest(null);
-  };
-  
-  const saveEdit = async () => {
-    if (!editingTest) return;
+  const saveAllChanges = async () => {
     const cl = supabase();
-    await cl.from("biomarker_tests").update({
-      name: editingTest.name,
-      method: editingTest.method,
-      unit: editingTest.unit,
-      ref_min: editingTest.refMin === "" ? null : parseFloat(editingTest.refMin),
-      ref_max: editingTest.refMax === "" ? null : parseFloat(editingTest.refMax),
-      group_name: editingTest.groupName,
-    }).eq("id", editingTest.id);
-    setEditingTest(null);
-    window.location.reload(); // Reload to see changes
+    const updates = editedTests.map(test => 
+      cl.from("biomarker_tests").update({
+        name: test.name,
+        method: test.method,
+        unit: test.unit,
+        ref_min: test.refMin === "" ? null : parseFloat(test.refMin),
+        ref_max: test.refMax === "" ? null : parseFloat(test.refMax),
+        group_name: test.groupName,
+      }).eq("id", test.id)
+    );
+    
+    await Promise.all(updates);
+    
+    // Update local state
+    setTests((prev: any[]) => prev.map(t => {
+      const updated = editedTests.find(e => e.id === t.id);
+      return updated ? {
+        ...t,
+        name: updated.name,
+        method: updated.method,
+        unit: updated.unit,
+        refMin: updated.refMin === "" ? null : parseFloat(updated.refMin),
+        refMax: updated.refMax === "" ? null : parseFloat(updated.refMax),
+        groupName: updated.groupName,
+      } : t;
+    }));
+    
+    setIsEditing(false);
   };
   
   const deleteTest = async (testId: string) => {
@@ -885,13 +895,14 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, V, sec
       cl.from("biomarker_results").delete().eq("test_id", testId),
       cl.from("biomarker_tests").delete().eq("id", testId),
     ]);
-    window.location.reload();
+    setTests((prev: any[]) => prev.filter(t => t.id !== testId));
+    setEditedTests(prev => prev.filter(t => t.id !== testId));
   };
   
   const addNewTest = async () => {
     if (!newTest.name || !selectedGroup) return;
     const cl = supabase();
-    await cl.from("biomarker_tests").insert({
+    const { data } = await cl.from("biomarker_tests").insert({
       user_id: userId,
       name: newTest.name,
       group_name: selectedGroup,
@@ -900,29 +911,57 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, V, sec
       ref_min: newTest.refMin === "" ? null : parseFloat(newTest.refMin),
       ref_max: newTest.refMax === "" ? null : parseFloat(newTest.refMax),
       sort_order: 0,
-    });
-    setNewTest({ name: "", groupName: selectedGroup, method: "", unit: "", refMin: "", refMax: "" });
+    }).select().single();
+    
+    if (data) {
+      setTests((prev: any[]) => [...prev, {
+        id: data.id,
+        groupName: data.group_name,
+        name: data.name,
+        method: data.method,
+        refRange: "",
+        refMin: data.ref_min,
+        refMax: data.ref_max,
+        unit: data.unit,
+        sortOrder: data.sort_order,
+      }]);
+    }
+    
+    setNewTest({ name: "", method: "", unit: "", refMin: "", refMax: "" });
     setShowAddTest(false);
-    window.location.reload();
   };
   
   const createNewGroup = async () => {
     if (!newGroupName.trim()) return;
-    // Create a placeholder test in the new group
     const cl = supabase();
-    await cl.from("biomarker_tests").insert({
+    const { data } = await cl.from("biomarker_tests").insert({
       user_id: userId,
-      name: "Placeholder Test",
+      name: "New Test",
       group_name: newGroupName.trim(),
       method: "",
       unit: "",
       ref_min: null,
       ref_max: null,
       sort_order: 0,
-    });
+    }).select().single();
+    
+    if (data) {
+      setTests((prev: any[]) => [...prev, {
+        id: data.id,
+        groupName: data.group_name,
+        name: data.name,
+        method: data.method,
+        refRange: "",
+        refMin: data.ref_min,
+        refMax: data.ref_max,
+        unit: data.unit,
+        sortOrder: data.sort_order,
+      }]);
+      setSelectedGroup(newGroupName.trim());
+    }
+    
     setNewGroupName("");
     setShowCreateGroup(false);
-    window.location.reload();
   };
   
   const inputStyle = {
@@ -945,14 +984,13 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, V, sec
   
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      {/* Create New Group Button */}
+      {/* Create New Group */}
       <div style={{ ...section, padding: 16 }}>
         <button onClick={() => setShowCreateGroup(!showCreateGroup)} style={{ ...btn, width: "100%", fontWeight: 700, background: V.accent, color: "#fff", border: "none" }}>
           {showCreateGroup ? "− Cancel" : "+ Create New Group"}
         </button>
       </div>
 
-      {/* Create New Group Form */}
       {showCreateGroup && (
         <div style={{ ...section, padding: 16 }}>
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 16 }}>Create New Group</div>
@@ -976,7 +1014,7 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, V, sec
       
       {/* Group Selector */}
       <div style={{ ...section, padding: 16 }}>
-        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Select Group to Manage</div>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Select Group</div>
         <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)} style={{ width: "100%", padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
           <option value="">-- Select a group --</option>
           {groupCards.map((g: any) => (
@@ -985,183 +1023,89 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, V, sec
         </select>
       </div>
 
-      {/* Add New Test Button */}
+      {/* Add New Test */}
       {group && (
         <div style={{ ...section, padding: 16 }}>
           <button onClick={() => setShowAddTest(!showAddTest)} style={{ ...btn, width: "100%", fontWeight: 700 }}>
-            {showAddTest ? "− Cancel" : "+ Add New Test to " + group.groupName}
+            {showAddTest ? "− Cancel" : "+ Add Test to " + group.groupName}
           </button>
         </div>
       )}
 
-      {/* Add New Test Form */}
       {showAddTest && (
         <div style={{ ...section, padding: 16 }}>
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 16 }}>Add New Test</div>
           <div style={{ display: "grid", gap: 12 }}>
-            <div>
-              <div style={labelStyle}>Test Name *</div>
-              <input 
-                type="text" 
-                value={newTest.name} 
-                onChange={(e) => setNewTest({ ...newTest, name: e.target.value })}
-                placeholder="e.g., Hemoglobin"
-                style={inputStyle}
-              />
+            <input type="text" value={newTest.name} onChange={(e) => setNewTest({ ...newTest, name: e.target.value })} placeholder="Test Name" style={inputStyle} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <input type="text" value={newTest.unit} onChange={(e) => setNewTest({ ...newTest, unit: e.target.value })} placeholder="Unit (e.g., g/dL)" style={inputStyle} />
+              <input type="text" value={newTest.method} onChange={(e) => setNewTest({ ...newTest, method: e.target.value })} placeholder="Method (e.g., HPLC)" style={inputStyle} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div>
-                <div style={labelStyle}>Unit</div>
-                <input 
-                  type="text" 
-                  value={newTest.unit} 
-                  onChange={(e) => setNewTest({ ...newTest, unit: e.target.value })}
-                  placeholder="e.g., g/dL"
-                  style={inputStyle}
-                />
-              </div>
-              <div>
-                <div style={labelStyle}>Methodology</div>
-                <input 
-                  type="text" 
-                  value={newTest.method} 
-                  onChange={(e) => setNewTest({ ...newTest, method: e.target.value })}
-                  placeholder="e.g., HPLC"
-                  style={inputStyle}
-                />
-              </div>
+              <input type="number" step="0.01" value={newTest.refMin} onChange={(e) => setNewTest({ ...newTest, refMin: e.target.value })} placeholder="Min Ref" style={inputStyle} />
+              <input type="number" step="0.01" value={newTest.refMax} onChange={(e) => setNewTest({ ...newTest, refMax: e.target.value })} placeholder="Max Ref" style={inputStyle} />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div>
-                <div style={labelStyle}>Min Reference</div>
-                <input 
-                  type="number" 
-                  step="0.01"
-                  value={newTest.refMin} 
-                  onChange={(e) => setNewTest({ ...newTest, refMin: e.target.value })}
-                  placeholder="e.g., 12.0"
-                  style={inputStyle}
-                />
-              </div>
-              <div>
-                <div style={labelStyle}>Max Reference</div>
-                <input 
-                  type="number" 
-                  step="0.01"
-                  value={newTest.refMax} 
-                  onChange={(e) => setNewTest({ ...newTest, refMax: e.target.value })}
-                  placeholder="e.g., 16.0"
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-            <button onClick={addNewTest} style={{ ...btn, background: V.accent, color: "#fff", fontWeight: 700, padding: "10px" }}>
-              Add Test
-            </button>
+            <button onClick={addNewTest} style={{ ...btn, background: V.accent, color: "#fff", fontWeight: 700, padding: "10px" }}>Add Test</button>
           </div>
         </div>
       )}
 
-      {/* Group Management - Test List */}
-      {group && (
+      {/* Edit Group */}
+      {group && !isEditing && (
+        <div style={{ ...section, padding: 16 }}>
+          <button onClick={() => setIsEditing(true)} style={{ ...btn, width: "100%", fontWeight: 700, background: V.accent, color: "#fff", border: "none" }}>
+            Edit All Tests in {group.groupName}
+          </button>
+        </div>
+      )}
+
+      {/* Edit Mode - All Tests */}
+      {group && isEditing && (
+        <div style={{ ...section, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>Editing {group.groupName}</div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {editedTests.map((test, index) => (
+              <div key={test.id} style={{ border: `1px solid ${V.border}`, borderRadius: 8, padding: 12, display: "grid", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+                  <input type="text" value={test.name} onChange={(e) => updateTest(index, "name", e.target.value)} placeholder="Test Name" style={inputStyle} />
+                  <select value={test.groupName} onChange={(e) => updateTest(index, "groupName", e.target.value)} style={inputStyle}>
+                    {groupCards.map((g: any) => (
+                      <option key={g.groupName} value={g.groupName}>{g.groupName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <input type="text" value={test.unit} onChange={(e) => updateTest(index, "unit", e.target.value)} placeholder="Unit" style={inputStyle} />
+                  <input type="text" value={test.method} onChange={(e) => updateTest(index, "method", e.target.value)} placeholder="Method" style={inputStyle} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <input type="number" step="0.01" value={test.refMin} onChange={(e) => updateTest(index, "refMin", e.target.value)} placeholder="Min" style={inputStyle} />
+                  <input type="number" step="0.01" value={test.refMax} onChange={(e) => updateTest(index, "refMax", e.target.value)} placeholder="Max" style={inputStyle} />
+                  <button onClick={() => deleteTest(test.id)} style={{ ...btn, color: "#dc2626", borderColor: "#dc2626" }}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+            <button onClick={saveAllChanges} style={{ ...btn, flex: 1, background: V.accent, color: "#fff", fontWeight: 700, padding: "12px" }}>Save All Changes</button>
+            <button onClick={() => setIsEditing(false)} style={{ ...btn, flex: 1, padding: "12px" }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* View Mode - Test List */}
+      {group && !isEditing && (
         <div style={{ ...section, padding: 16 }}>
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{group.groupName} <span style={{ fontSize: 12, color: V.muted }}>({group.tests.length} markers)</span></div>
-          
-          <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 8 }}>
             {group.tests.map((t: any) => (
-              <div key={t.id} style={{ border: `1px solid ${V.border}`, borderRadius: 8, padding: 12 }}>
-                {editingTest?.id === t.id ? (
-                  // EDIT MODE
-                  <div style={{ display: "grid", gap: 12 }}>
-                    <div>
-                      <div style={labelStyle}>Test Name *</div>
-                      <input 
-                        type="text" 
-                        value={editingTest.name} 
-                        onChange={(e) => setEditingTest({ ...editingTest, name: e.target.value })}
-                        style={inputStyle}
-                      />
-                    </div>
-                    <div>
-                      <div style={labelStyle}>Move to Group</div>
-                      <select 
-                        value={editingTest.groupName} 
-                        onChange={(e) => setEditingTest({ ...editingTest, groupName: e.target.value })}
-                        style={inputStyle}
-                      >
-                        {groupCards.map((g: any) => (
-                          <option key={g.groupName} value={g.groupName}>{g.groupName}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <div>
-                        <div style={labelStyle}>Unit</div>
-                        <input 
-                          type="text" 
-                          value={editingTest.unit} 
-                          onChange={(e) => setEditingTest({ ...editingTest, unit: e.target.value })}
-                          style={inputStyle}
-                        />
-                      </div>
-                      <div>
-                        <div style={labelStyle}>Methodology</div>
-                        <input 
-                          type="text" 
-                          value={editingTest.method} 
-                          onChange={(e) => setEditingTest({ ...editingTest, method: e.target.value })}
-                          style={inputStyle}
-                        />
-                      </div>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                      <div>
-                        <div style={labelStyle}>Min Reference</div>
-                        <input 
-                          type="number" 
-                          step="0.01"
-                          value={editingTest.refMin} 
-                          onChange={(e) => setEditingTest({ ...editingTest, refMin: e.target.value })}
-                          style={inputStyle}
-                        />
-                      </div>
-                      <div>
-                        <div style={labelStyle}>Max Reference</div>
-                        <input 
-                          type="number" 
-                          step="0.01"
-                          value={editingTest.refMax} 
-                          onChange={(e) => setEditingTest({ ...editingTest, refMax: e.target.value })}
-                          style={inputStyle}
-                        />
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={saveEdit} style={{ ...btn, flex: 1, background: V.accent, color: "#fff", fontWeight: 700 }}>Save</button>
-                      <button onClick={cancelEdit} style={{ ...btn, flex: 1 }}>Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  // VIEW MODE
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{t.name}</div>
-                        <div style={{ fontSize: 11, color: V.muted, marginTop: 2 }}>
-                          {t.unit && <span>Unit: {t.unit}</span>}
-                          {t.method && <span> · Method: {t.method}</span>}
-                        </div>
-                        <div style={{ fontSize: 11, color: V.muted, marginTop: 2 }}>
-                          Range: {t.refMin ?? "—"} - {t.refMax ?? "—"}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => startEdit(t)} style={{ ...btn, padding: "6px 12px", fontSize: 11 }}>Edit</button>
-                        <button onClick={() => deleteTest(t.id)} style={{ ...btn, padding: "6px 12px", fontSize: 11, color: "#dc2626", borderColor: "#dc2626" }}>Delete</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+              <div key={t.id} style={{ border: `1px solid ${V.border}`, borderRadius: 8, padding: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
+                <div style={{ fontSize: 11, color: V.muted, marginTop: 2 }}>
+                  {t.unit && <span>Unit: {t.unit}</span>}
+                  {t.method && <span> · Method: {t.method}</span>}
+                  {(t.refMin || t.refMax) && <span> · Range: {t.refMin ?? "—"} - {t.refMax ?? "—"}</span>}
+                </div>
               </div>
             ))}
           </div>
