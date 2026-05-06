@@ -439,9 +439,12 @@ export default function BioMarkersPage() {
             resultsByDate={resultsByDate}
             testMap={testMap}
             sessions={sessions}
+            results={results}
+            setResults={setResults}
             V={V}
             section={section}
             statusTone={statusTone}
+            btn={btn}
           />
         )}
         
@@ -492,30 +495,8 @@ export default function BioMarkersPage() {
 // ============= TAB COMPONENTS =============
 
 function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTone, compareTone }: any) {
-  const btnStyle = {
-    padding: "12px 20px",
-    fontSize: 14,
-    fontWeight: 700,
-    border: "none",
-    borderRadius: 10,
-    background: V.accent,
-    color: "#fff",
-    cursor: "pointer",
-    transition: "all 0.2s",
-  };
-  
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      {/* Action Buttons */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <button style={btnStyle} onClick={() => window.location.href = '/dashboard/biomarkers/add-session'}>
-          + Lab session
-        </button>
-        <button style={btnStyle} onClick={() => window.location.href = '/dashboard/biomarkers/add-body-metric'}>
-          + Body metrics
-        </button>
-      </div>
-      
       {/* Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
         {[
@@ -641,7 +622,8 @@ function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, s
   );
 }
 
-function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, testMap, sessions, V, section, statusTone }: any) {
+function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, testMap, sessions, results, setResults, V, section, statusTone, btn }: any) {
+  const [editingResult, setEditingResult] = useState<any>(null);
   const sessionForDate = sessions.find((s: any) => s.sessionDate === selectedDate);
   const resultsForDate = resultsByDate.get(selectedDate) || [];
   
@@ -653,6 +635,51 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
     if (!grouped.has(test.groupName)) grouped.set(test.groupName, []);
     grouped.get(test.groupName)!.push({ result: r, test });
   });
+  
+  const startEdit = (result: any) => {
+    setEditingResult({
+      id: result.id,
+      valueNum: result.valueNum ?? "",
+      valueText: result.valueText ?? "",
+      notes: result.notes ?? "",
+    });
+  };
+  
+  const cancelEdit = () => {
+    setEditingResult(null);
+  };
+  
+  const saveEdit = async () => {
+    if (!editingResult) return;
+    const cl = supabase();
+    await cl.from("biomarker_results").update({
+      value_num: editingResult.valueNum === "" ? null : parseFloat(editingResult.valueNum),
+      value_text: editingResult.valueText || null,
+      notes: editingResult.notes || null,
+    }).eq("id", editingResult.id);
+    
+    // Update local state
+    setResults((prev: any[]) => prev.map(r => 
+      r.id === editingResult.id ? {
+        ...r,
+        valueNum: editingResult.valueNum === "" ? null : parseFloat(editingResult.valueNum),
+        valueText: editingResult.valueText || null,
+        notes: editingResult.notes || null,
+      } : r
+    ));
+    
+    setEditingResult(null);
+  };
+  
+  const inputStyle = {
+    width: "100%",
+    padding: "8px 12px",
+    fontSize: 13,
+    border: `1px solid ${V.border}`,
+    borderRadius: 6,
+    background: V.surface,
+    color: V.text,
+  };
   
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -684,18 +711,66 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
           <div style={{ display: "grid", gap: 8 }}>
             {items.map(({ result, test }: any) => {
               const status = statusTone(getStatus(result.valueNum, test.refMin, test.refMax, result.valueText));
+              const isEditing = editingResult?.id === result.id;
+              
               return (
                 <div key={result.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10, alignItems: "center" }}>
-                    <div>
+                  {isEditing ? (
+                    // EDIT MODE
+                    <div style={{ display: "grid", gap: 12 }}>
                       <div style={{ fontSize: 14, fontWeight: 700 }}>{test.name}</div>
-                      <div style={{ fontSize: 10, color: V.muted, marginTop: 2 }}>
-                        Range: {test.refMin ?? "—"} - {test.refMax ?? "—"} {test.unit}
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, marginBottom: 4 }}>NUMERIC VALUE</div>
+                          <input 
+                            type="number" 
+                            step="0.001"
+                            value={editingResult.valueNum} 
+                            onChange={(e) => setEditingResult({ ...editingResult, valueNum: e.target.value })}
+                            placeholder="e.g., 12.5"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, marginBottom: 4 }}>TEXT VALUE (Optional)</div>
+                          <input 
+                            type="text" 
+                            value={editingResult.valueText} 
+                            onChange={(e) => setEditingResult({ ...editingResult, valueText: e.target.value })}
+                            placeholder="e.g., Positive"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, marginBottom: 4 }}>NOTES (Optional)</div>
+                          <input 
+                            type="text" 
+                            value={editingResult.notes} 
+                            onChange={(e) => setEditingResult({ ...editingResult, notes: e.target.value })}
+                            placeholder="Add notes"
+                            style={inputStyle}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={saveEdit} style={{ ...btn, flex: 1, background: V.accent, color: "#fff", fontWeight: 700 }}>Save</button>
+                        <button onClick={cancelEdit} style={{ ...btn, flex: 1 }}>Cancel</button>
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{result.valueNum ?? result.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test.unit}</span></div>
-                    <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
-                  </div>
+                  ) : (
+                    // VIEW MODE
+                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{test.name}</div>
+                        <div style={{ fontSize: 10, color: V.muted, marginTop: 2 }}>
+                          Range: {test.refMin ?? "—"} - {test.refMax ?? "—"} {test.unit}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{result.valueNum ?? result.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test.unit}</span></div>
+                      <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                      <button onClick={() => startEdit(result)} style={{ ...btn, padding: "6px 12px", fontSize: 11 }}>Edit</button>
+                    </div>
+                  )}
                 </div>
               );
             })}
