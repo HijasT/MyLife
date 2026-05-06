@@ -473,6 +473,7 @@ export default function BioMarkersPage() {
             section={section}
             statusTone={statusTone}
             compareTone={compareTone}
+            isDark={isDark}
           />
         )}
         
@@ -481,6 +482,7 @@ export default function BioMarkersPage() {
             metrics={metrics}
             V={V}
             section={section}
+            isDark={isDark}
           />
         )}
         
@@ -518,7 +520,7 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
           { label: "Currently abnormal", value: summary.abnormal, color: "#dc2626" },
           { label: "Newly abnormal", value: summary.newlyAbnormal, color: "#d97706" },
           { label: "Back to normal", value: summary.backToNormal, color: "#059669" },
-        ].map((card) => (
+        ].map((card: { label: string; value: number; color: string }) => (
           <div key={card.label} style={{ ...section, padding: 16 }}>
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800 }}>{card.label}</div>
             <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6, color: card.color }}>{card.value}</div>
@@ -562,7 +564,7 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
           <div style={{ color: V.muted, fontSize: 13 }}>No test sessions recorded yet.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {uniqueDates.slice(0, 5).map((date) => (
+            {uniqueDates.slice(0, 5).map((date: string) => (
               <div key={date} style={{ fontSize: 14, color: V.text }}>• {new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
             ))}
           </div>
@@ -636,7 +638,7 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
       <div style={{ ...section, padding: 16 }}>
         <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Select Session Date</div>
         <select value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: "100%", padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
-          {uniqueDates.map((date) => (
+          {uniqueDates.map((date: string) => (
             <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</option>
           ))}
         </select>
@@ -654,7 +656,7 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
       )}
 
       {/* Results Grouped by Test Group */}
-      {Array.from(grouped.entries()).map(([groupName, items]) => (
+      {Array.from(grouped.entries()).map(([groupName, items]: [string, any[]]) => (
         <div key={groupName} style={{ ...section, padding: 16 }}>
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{groupName} <span style={{ fontSize: 12, color: V.muted }}>({items.length} tests)</span></div>
           <div style={{ display: "grid", gap: 8 }}>
@@ -679,7 +681,7 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
   );
 }
 
-function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, setCompareDate2, compareData, testMap, V, section, statusTone, compareTone }: any) {
+function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, setCompareDate2, compareData, testMap, V, section, statusTone, compareTone, isDark }: any) {
   return (
     <div style={{ display: "grid", gap: 18 }}>
       {/* Date Selectors */}
@@ -687,13 +689,13 @@ function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, 
         <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Compare Dates</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 12, alignItems: "center" }}>
           <select value={compareDate1} onChange={(e) => setCompareDate1(e.target.value)} style={{ padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
-            {uniqueDates.map((date) => (
+            {uniqueDates.map((date: string) => (
               <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</option>
             ))}
           </select>
           <div style={{ fontSize: 18, fontWeight: 800, color: V.accent }}>vs</div>
           <select value={compareDate2} onChange={(e) => setCompareDate2(e.target.value)} style={{ padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
-            {uniqueDates.map((date) => (
+            {uniqueDates.map((date: string) => (
               <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</option>
             ))}
           </select>
@@ -763,7 +765,7 @@ function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, 
   );
 }
 
-function BodyMetricsTab({ metrics, V, section }: any) {
+function BodyMetricsTab({ metrics, V, section, isDark }: any) {
   const latest = metrics[0];
   const previous = metrics[1];
   
@@ -783,7 +785,7 @@ function BodyMetricsTab({ metrics, V, section }: any) {
                 { label: "Body Fat", value: latest.bodyFatPct, unit: "%", prev: previous?.bodyFatPct },
                 { label: "Visceral Fat", value: latest.visceralFatL, unit: "L", prev: previous?.visceralFatL },
                 { label: "Skeletal Muscle", value: latest.skeletalMuscleKg, unit: "kg", prev: previous?.skeletalMuscleKg },
-              ].map((m) => {
+              ].map((m: { label: string; value: number | null; unit: string; prev?: number | null }) => {
                 const delta = m.value != null && m.prev != null ? m.value - m.prev : null;
                 return (
                   <div key={m.label} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 14 }}>
