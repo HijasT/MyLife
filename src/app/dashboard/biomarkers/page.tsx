@@ -8,6 +8,7 @@ import { searchBiomarkerRefs, findBiomarkerRef, type BiomarkerRef } from "@/lib/
 
 const supabase = createClient;
 
+// ============= TYPES =============
 type BiomarkerTest = {
   id: string;
   groupName: string;
@@ -67,6 +68,9 @@ type CompareRow = {
   currStatus: MarkerStatus;
 };
 
+type Tab = "overview" | "groups" | "dates" | "compare" | "metrics" | "manage";
+
+// ============= DB CONVERTERS =============
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dbToTest = (r: any): BiomarkerTest => ({
   id: r.id,
@@ -80,6 +84,7 @@ const dbToTest = (r: any): BiomarkerTest => ({
   sortOrder: r.sort_order ?? 0,
   createdAt: r.created_at,
 });
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dbToResult = (r: any): BiomarkerResult => ({
   id: r.id,
@@ -90,6 +95,7 @@ const dbToResult = (r: any): BiomarkerResult => ({
   notes: r.notes ?? "",
   createdAt: r.created_at,
 });
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dbToMetric = (r: any): BodyMetric => ({
   id: r.id,
@@ -102,6 +108,7 @@ const dbToMetric = (r: any): BodyMetric => ({
   skeletalMuscleKg: r.skeletal_muscle_kg ?? null,
   notes: r.notes ?? "",
 });
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dbToSession = (r: any): Session => ({
   id: r.id,
@@ -111,928 +118,768 @@ const dbToSession = (r: any): Session => ({
   notes: r.notes ?? "",
 });
 
-function fmtDate(dateStr: string) {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-AE", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function fmtShort(dateStr: string) {
-  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-AE", { day: "2-digit", month: "short" });
-}
-
-function fmtMoney(n: number | null | undefined) {
-  return n == null ? "—" : `AED ${n.toFixed(2)}`;
-}
-
-
-function bodyMetricTone(kind: string, val: number | null) {
-  if (val == null) return { bg: "rgba(107,114,128,0.12)", fg: "#6b7280", label: "No data" };
-  const ranges: Record<string, [number, number]> = {
-    weight: [70, 75],
-    bmi: [21, 24],
-    fat: [12, 20],
-    skeletal: [32, 35],
-    visceral: [2, 4],
-  };
-  const r = ranges[kind];
-  if (!r) return { bg: "rgba(107,114,128,0.12)", fg: "#6b7280", label: "—" };
-  const ok = val >= r[0] && val <= r[1];
-  return ok ? { bg: "rgba(16,185,129,0.12)", fg: "#059669", label: `Optimal ${r[0]}-${r[1]}` } : { bg: "rgba(239,68,68,0.12)", fg: "#dc2626", label: `Target ${r[0]}-${r[1]}` };
-}
-function rangeLabel(test: BiomarkerTest) {
-  if (test.refMin == null && test.refMax == null) return test.unit || "Text marker";
-  if (test.refMin != null && test.refMax != null) return `${test.refMin} – ${test.refMax}${test.unit ? ` ${test.unit}` : ""}`;
-  if (test.refMin != null) return `≥ ${test.refMin}${test.unit ? ` ${test.unit}` : ""}`;
-  return `≤ ${test.refMax}${test.unit ? ` ${test.unit}` : ""}`;
-}
-function deltaColorForTest(delta: number | null, current: number | null, test: BiomarkerTest) {
-  if (delta == null || current == null) return "#6b7280";
-  const within = (test.refMin == null || current >= test.refMin) && (test.refMax == null || current <= test.refMax);
-  return within ? "#059669" : "#dc2626";
-}
-
-function daysSince(dateStr: string) {
-  const then = new Date(`${dateStr}T00:00:00`).getTime();
-  const now = new Date().getTime();
-  return Math.floor((now - then) / 86400000);
-}
-
-function markerStatus(result: BiomarkerResult | undefined, test: BiomarkerTest): MarkerStatus {
-  if (!result) return "missing";
-  if (result.valueNum == null) return result.valueText ? "text" : "missing";
-  if (test.refMin == null && test.refMax == null) return "no-range";
-  if (test.refMin != null && result.valueNum < test.refMin) return "low";
-  if (test.refMax != null && result.valueNum > test.refMax) return "high";
+// ============= HELPER FUNCTIONS =============
+function getStatus(val: number | null, min: number | null, max: number | null, text: string): MarkerStatus {
+  if (text) return "text";
+  if (val == null) return "missing";
+  if (min == null && max == null) return "no-range";
+  if (min != null && val < min) return "low";
+  if (max != null && val > max) return "high";
   return "normal";
 }
 
-function statusTone(status: MarkerStatus) {
-  switch (status) {
-    case "low":
-      return { bg: "rgba(59,130,246,0.12)", fg: "#2563eb", label: "Low" };
-    case "high":
-      return { bg: "rgba(239,68,68,0.12)", fg: "#dc2626", label: "High" };
-    case "normal":
-      return { bg: "rgba(16,185,129,0.12)", fg: "#059669", label: "Normal" };
-    case "no-range":
-      return { bg: "rgba(245,158,11,0.12)", fg: "#d97706", label: "No range" };
-    case "text":
-      return { bg: "rgba(99,102,241,0.12)", fg: "#4f46e5", label: "Text" };
-    default:
-      return { bg: "rgba(107,114,128,0.12)", fg: "#6b7280", label: "Missing" };
-  }
+function statusTone(s: MarkerStatus) {
+  if (s === "high" || s === "low") return { label: s.toUpperCase(), bg: "#fee", fg: "#c00" };
+  if (s === "normal") return { label: "OK", bg: "#efe", fg: "#070" };
+  if (s === "text") return { label: "TEXT", bg: "#eef", fg: "#007" };
+  return { label: "—", bg: "#f5f5f5", fg: "#999" };
 }
 
-function numericInputForTest(test: BiomarkerTest) {
-  return Boolean(test.unit || test.refMin != null || test.refMax != null);
+function compareTone(delta: number | null) {
+  if (delta == null) return "#999";
+  if (delta > 0) return "#c00";
+  if (delta < 0) return "#070";
+  return "#999";
 }
 
-function deltaPct(prev: number | null, curr: number | null) {
-  if (prev == null || curr == null) return { delta: null, pct: null };
-  const delta = Number((curr - prev).toFixed(2));
-  if (prev === 0) return { delta, pct: null };
-  return { delta, pct: Number((((curr - prev) / prev) * 100).toFixed(1)) };
-}
-
-function compareTone(value: number | null) {
-  if (value == null || value === 0) return "#6b7280";
-  return value > 0 ? "#dc2626" : "#059669";
-}
-
-function dateKeySortDesc(a: string, b: string) {
-  return b.localeCompare(a);
-}
-
-function TinyLineChart({
-  points,
-  refMin,
-  refMax,
-}: {
-  points: { x: string; y: number }[];
-  refMin: number | null;
-  refMax: number | null;
-}) {
-  const W = 460;
-  const H = 170;
-  if (!points.length) return <div style={{ fontSize: 13, color: "#6b7280" }}>No numeric trend yet</div>;
-  const values = points.map((p) => p.y);
-  const minV = Math.min(...values, ...(refMin != null ? [refMin] : []), ...(refMax != null ? [refMax] : []));
-  const maxV = Math.max(...values, ...(refMin != null ? [refMin] : []), ...(refMax != null ? [refMax] : []));
-  const span = Math.max(maxV - minV, 1);
-  const padX = 28;
-  const padY = 18;
-  const innerW = W - padX * 2;
-  const innerH = H - padY * 2;
-  const pt = points.map((p, i) => ({
-    ...p,
-    sx: padX + (i / Math.max(points.length - 1, 1)) * innerW,
-    sy: padY + innerH - ((p.y - minV) / span) * innerH,
-  }));
-  const avg = values.reduce((a, b) => a + b, 0) / values.length;
-  const avgY = padY + innerH - ((avg - minV) / span) * innerH;
-  const line = pt.map((p) => `${p.sx},${p.sy}`).join(" ");
-  const bandY1 = refMax == null ? null : padY + innerH - ((refMax - minV) / span) * innerH;
-  const bandY2 = refMin == null ? null : padY + innerH - ((refMin - minV) / span) * innerH;
-  const bandTop = bandY1 != null && bandY2 != null ? Math.min(bandY1, bandY2) : null;
-  const bandHeight = bandY1 != null && bandY2 != null ? Math.abs(bandY1 - bandY2) : null;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 190 }}>
-      <rect x="0" y="0" width={W} height={H} rx="14" fill="transparent" />
-      {bandTop != null && bandHeight != null && <rect x={padX} y={bandTop} width={innerW} height={bandHeight} fill="rgba(16,185,129,0.08)" />}
-      <line x1={padX} y1={avgY} x2={W - padX} y2={avgY} stroke="#f59e0b" strokeDasharray="6 5" strokeWidth="2" />
-      <polyline fill="none" stroke="#10b981" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" points={line} />
-      {pt.map((p) => (
-        <g key={`${p.x}-${p.y}`}>
-          <circle cx={p.sx} cy={p.sy} r="4" fill="#10b981" />
-          <text x={p.sx} y={H - 2} textAnchor="middle" fontSize="9" fill="#6b7280">{fmtShort(p.x)}</text>
-        </g>
-      ))}
-      <text x={W - padX} y={avgY - 6} textAnchor="end" fontSize="10" fill="#d97706">Avg {avg.toFixed(2)}</text>
-    </svg>
-  );
-}
-
-export default function BiomarkersPage() {
-  const client = supabase();
-  const [userId, setUserId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+// ============= MAIN COMPONENT =============
+export default function BioMarkersPage() {
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [tests, setTests] = useState<BiomarkerTest[]>([]);
   const [results, setResults] = useState<BiomarkerResult[]>([]);
   const [metrics, setMetrics] = useState<BodyMetric[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [toast, setToast] = useState("");
-  const [showAddResult, setShowAddResult] = useState(false);
-  const [showAddMetric, setShowAddMetric] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [showAddTest, setShowAddTest] = useState(false);
-  const [addDate, setAddDate] = useState(nowDubai().slice(0, 10));
-  const [addValues, setAddValues] = useState<Record<string, string>>({});
-  const [sessionCost, setSessionCost] = useState("");
-  const [sessionNote, setSessionNote] = useState("");
-  const [importText, setImportText] = useState("");
-  const [metricForm, setMetricForm] = useState({ measuredAt: nowDubai().slice(0, 10), weightKg: "", heightCm: "", bodyFatPct: "", visceralFatL: "", skeletalMuscleKg: "", notes: "" });
-  const [compareLeft, setCompareLeft] = useState("");
-  const [compareRight, setCompareRight] = useState("");
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [testForm, setTestForm] = useState({ name: "", groupName: "", newGroupName: "", method: "", unit: "", refMin: "", refMax: "", sortOrder: "0" });
-  const [dbSuggestions, setDbSuggestions] = useState<BiomarkerRef[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-
-  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
-  const V = {
-    bg: isDark ? "#0d0f14" : "#f9f8f5",
-    card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
-    text: isDark ? "#f0ede8" : "#1a1a1a",
-    muted: isDark ? "#9ba3b2" : "#6b7280",
-    faint: isDark ? "#6b7280" : "#9ca3af",
-    input: isDark ? "#1e2130" : "#f7f7f8",
-    accent: "#10b981",
-  };
-  const btn = { padding: "8px 14px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 700 } as const;
-  const btnP = { ...btn, background: V.accent, color: "#fff", border: "none" } as const;
-  const input = { padding: "9px 12px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
-  const section = { background: V.card, border: `1px solid ${V.border}`, borderRadius: 16 } as const;
-
-  function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(""), 2500);
-  }
-
-  function openModal(setter: React.Dispatch<React.SetStateAction<boolean>>) {
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
-      document.body.style.overflow = "hidden";
-    }
-    setter(true);
-  }
-
-  function closeModal(setter: React.Dispatch<React.SetStateAction<boolean>>) {
-    setter(false);
-    if (typeof document !== "undefined") document.body.style.overflow = "";
-  }
+  const [userId, setUserId] = useState("");
+  const [isDark, setIsDark] = useState(false);
+  
+  // Editing states
+  const [editingTestId, setEditingTestId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  
+  // Compare tab states
+  const [compareDate1, setCompareDate1] = useState<string>("");
+  const [compareDate2, setCompareDate2] = useState<string>("");
+  
+  // By Date tab state
+  const [selectedDate, setSelectedDate] = useState<string>("");
+  
+  // Manage tab states
+  const [selectedGroup, setSelectedGroup] = useState<string>("");
 
   useEffect(() => {
-    async function load() {
-      const { data: { user } } = await client.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+    const cl = supabase();
+    cl.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
       setUserId(user.id);
-      const [tRes, rRes, mRes, sRes] = await Promise.all([
-        client.from("biomarker_tests").select("*").eq("user_id", user.id).order("group_name").order("sort_order"),
-        client.from("biomarker_results").select("*").eq("user_id", user.id).order("test_date", { ascending: false }),
-        client.from("body_metrics").select("*").eq("user_id", user.id).order("measured_at", { ascending: false }),
-        client.from("biomarker_lab_sessions").select("*").eq("user_id", user.id).order("session_date", { ascending: false }),
-      ]);
-      setTests((tRes.data ?? []).map(dbToTest));
-      setResults((rRes.data ?? []).map(dbToResult));
-      setMetrics((mRes.data ?? []).map(dbToMetric));
-      if (!sRes.error) setSessions((sRes.data ?? []).map(dbToSession));
-      setLoading(false);
-    }
-    load();
-  }, [client]);
+      loadData(user.id);
+    });
+    
+    const darkMatch = window.matchMedia("(prefers-color-scheme: dark)");
+    setIsDark(darkMatch.matches);
+    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
+    darkMatch.addEventListener("change", handler);
+    return () => darkMatch.removeEventListener("change", handler);
+  }, []);
 
-  const resultsByTest = useMemo(() => {
-    const map = new Map<string, BiomarkerResult[]>();
-    for (const r of results) {
-      const arr = map.get(r.testId) ?? [];
-      arr.push(r);
-      map.set(r.testId, arr);
+  async function loadData(uid: string) {
+    const cl = supabase();
+    const [tRes, rRes, mRes, sRes] = await Promise.all([
+      cl.from("biomarker_tests").select("*").eq("user_id", uid).order("sort_order"),
+      cl.from("biomarker_results").select("*").eq("user_id", uid).order("test_date", { ascending: false }),
+      cl.from("body_metrics").select("*").eq("user_id", uid).order("measured_at", { ascending: false }),
+      cl.from("biomarker_sessions").select("*").eq("user_id", uid).order("session_date", { ascending: false }),
+    ]);
+    
+    if (tRes.data) setTests(tRes.data.map(dbToTest));
+    if (rRes.data) {
+      const rs = rRes.data.map(dbToResult);
+      setResults(rs);
+      // Auto-select first date for "By Date" tab
+      if (rs.length > 0 && !selectedDate) {
+        setSelectedDate(rs[0].testDate);
+      }
+      // Auto-select dates for compare
+      const uniqueDates = Array.from(new Set(rs.map(r => r.testDate))).sort().reverse();
+      if (uniqueDates.length >= 2) {
+        if (!compareDate1) setCompareDate1(uniqueDates[0]);
+        if (!compareDate2) setCompareDate2(uniqueDates[1]);
+      }
     }
-    for (const arr of map.values()) arr.sort((a, b) => a.testDate.localeCompare(b.testDate));
+    if (mRes.data) setMetrics(mRes.data.map(dbToMetric));
+    if (sRes.data) setSessions(sRes.data.map(dbToSession));
+  }
+
+  // ============= COMPUTED DATA =============
+  const testMap = useMemo(() => new Map(tests.map(t => [t.id, t])), [tests]);
+  
+  const latestResults = useMemo(() => {
+    const map = new Map<string, BiomarkerResult>();
+    results.forEach(r => {
+      if (!map.has(r.testId)) map.set(r.testId, r);
+    });
     return map;
   }, [results]);
 
-  const latestByTest = useMemo(() => {
+  const previousResults = useMemo(() => {
     const map = new Map<string, BiomarkerResult>();
-    for (const [testId, arr] of resultsByTest.entries()) {
-      if (arr.length) map.set(testId, arr[arr.length - 1]);
-    }
+    results.forEach(r => {
+      const existing = map.get(r.testId);
+      if (!existing) {
+        // Find second-latest
+        const testResults = results.filter(res => res.testId === r.testId);
+        if (testResults.length >= 2) map.set(r.testId, testResults[1]);
+      }
+    });
     return map;
-  }, [resultsByTest]);
-
-  const prevByTest = useMemo(() => {
-    const map = new Map<string, BiomarkerResult | undefined>();
-    for (const [testId, arr] of resultsByTest.entries()) {
-      map.set(testId, arr.length > 1 ? arr[arr.length - 2] : undefined);
-    }
-    return map;
-  }, [resultsByTest]);
-
-  const groups = useMemo(() => {
-    const grouped = new Map<string, BiomarkerTest[]>();
-    for (const test of tests) {
-      const arr = grouped.get(test.groupName) ?? [];
-      arr.push(test);
-      grouped.set(test.groupName, arr);
-    }
-    for (const arr of grouped.values()) arr.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
-    return Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [tests]);
-
-  const distinctDates = useMemo(() => Array.from(new Set(results.map((r) => r.testDate))).sort(dateKeySortDesc), [results]);
-  useEffect(() => {
-    if (!compareLeft && distinctDates[0]) setCompareLeft(distinctDates[0]);
-    if (!compareRight && distinctDates[1]) setCompareRight(distinctDates[1]);
-  }, [distinctDates, compareLeft, compareRight]);
-
-  const compareRows = useMemo<CompareRow[]>(() => {
-    if (!compareLeft || !compareRight) return [];
-    const leftMap = new Map(results.filter((r) => r.testDate === compareLeft).map((r) => [r.testId, r]));
-    const rightMap = new Map(results.filter((r) => r.testDate === compareRight).map((r) => [r.testId, r]));
-    const rows: CompareRow[] = [];
-    for (const test of tests) {
-      const prev = rightMap.get(test.id);
-      const curr = leftMap.get(test.id);
-      if (!prev && !curr) continue;
-      const d = deltaPct(prev?.valueNum ?? null, curr?.valueNum ?? null);
-      rows.push({
-        testId: test.id,
-        name: test.name,
-        groupName: test.groupName,
-        prevVal: prev?.valueNum ?? null,
-        currVal: curr?.valueNum ?? null,
-        prevText: prev?.valueText ?? "",
-        currText: curr?.valueText ?? "",
-        delta: d.delta,
-        pct: d.pct,
-        prevStatus: markerStatus(prev, test),
-        currStatus: markerStatus(curr, test),
-      });
-    }
-    return rows.sort((a, b) => Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0));
-  }, [compareLeft, compareRight, results, tests]);
+  }, [results]);
 
   const summary = useMemo(() => {
-    let abnormal = 0;
-    let newlyAbnormal = 0;
-    let backToNormal = 0;
-    for (const test of tests) {
-      const latest = latestByTest.get(test.id);
-      const prev = prevByTest.get(test.id);
-      const ls = markerStatus(latest, test);
-      const ps = markerStatus(prev, test);
-      const latestBad = ls === "low" || ls === "high";
-      const prevBad = ps === "low" || ps === "high";
-      if (latestBad) abnormal += 1;
-      if (latestBad && !prevBad) newlyAbnormal += 1;
-      if (!latestBad && prevBad) backToNormal += 1;
-    }
-    return { abnormal, newlyAbnormal, backToNormal, tracked: tests.length };
-  }, [tests, latestByTest, prevByTest]);
+    let tracked = 0, abnormal = 0, newlyAbnormal = 0, backToNormal = 0;
+    tests.forEach(t => {
+      const latest = latestResults.get(t.id);
+      const prev = previousResults.get(t.id);
+      if (!latest) return;
+      tracked++;
+      const currStatus = getStatus(latest.valueNum, t.refMin, t.refMax, latest.valueText);
+      const prevStatus = prev ? getStatus(prev.valueNum, t.refMin, t.refMax, prev.valueText) : "missing";
+      
+      if (currStatus === "high" || currStatus === "low") abnormal++;
+      if ((currStatus === "high" || currStatus === "low") && prevStatus === "normal") newlyAbnormal++;
+      if (currStatus === "normal" && (prevStatus === "high" || prevStatus === "low")) backToNormal++;
+    });
+    return { tracked, abnormal, newlyAbnormal, backToNormal };
+  }, [tests, latestResults, previousResults]);
 
   const abnormalRows = useMemo(() => {
-    return tests
-      .map((test) => {
-        const latest = latestByTest.get(test.id);
-        const prev = prevByTest.get(test.id);
-        const status = markerStatus(latest, test);
-        const prevStatus = markerStatus(prev, test);
-        const d = deltaPct(prev?.valueNum ?? null, latest?.valueNum ?? null);
-        return { test, latest, prev, status, prevStatus, delta: d.delta, pct: d.pct };
-      })
-      .filter((row) => row.status === "low" || row.status === "high")
-      .sort((a, b) => a.test.groupName.localeCompare(b.test.groupName) || a.test.name.localeCompare(b.test.name));
-  }, [tests, latestByTest, prevByTest]);
-
-  const staleRows = useMemo(() => {
-    return tests
-      .map((test) => {
-        const latest = latestByTest.get(test.id);
-        return { test, latest, days: latest ? daysSince(latest.testDate) : null };
-      })
-      .filter((row) => row.days == null || row.days > 180)
-      .sort((a, b) => (b.days ?? 9999) - (a.days ?? 9999));
-  }, [tests, latestByTest]);
-
-  const sessionsByDate = useMemo(() => {
-    const map = new Map<string, BiomarkerResult[]>();
-    for (const r of results) {
-      const arr = map.get(r.testDate) ?? [];
-      arr.push(r);
-      map.set(r.testDate, arr);
-    }
-    return Array.from(map.entries())
-      .map(([date, rows]) => {
-        const abnormalCount = rows.filter((r) => {
-          const t = tests.find((x) => x.id === r.testId);
-          return t && (markerStatus(r, t) === "low" || markerStatus(r, t) === "high");
-        }).length;
-        const session = sessions.find((s) => s.sessionDate === date);
-        return { date, rows, abnormalCount, session };
-      })
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [results, tests, sessions]);
-
-  const bodyLatest = metrics[0] ?? null;
-
-  const existingGroups = useMemo(() => groups.map(([groupName]) => groupName), [groups]);
+    const rows: { test: BiomarkerTest; latest: BiomarkerResult; delta: number | null; pct: number | null; status: MarkerStatus }[] = [];
+    tests.forEach(t => {
+      const latest = latestResults.get(t.id);
+      if (!latest) return;
+      const status = getStatus(latest.valueNum, t.refMin, t.refMax, latest.valueText);
+      if (status !== "high" && status !== "low") return;
+      
+      const prev = previousResults.get(t.id);
+      let delta: number | null = null;
+      let pct: number | null = null;
+      if (latest.valueNum != null && prev?.valueNum != null) {
+        delta = latest.valueNum - prev.valueNum;
+        pct = Math.round((delta / prev.valueNum) * 100);
+      }
+      rows.push({ test: t, latest, delta, pct, status });
+    });
+    return rows;
+  }, [tests, latestResults, previousResults]);
 
   const groupCards = useMemo(() => {
-    return groups.map(([groupName, list]) => {
-      const abnormal = list.filter((test) => {
-        const status = markerStatus(latestByTest.get(test.id), test);
-        return status === "low" || status === "high";
-      }).length;
-      return { groupName, tests: list, abnormal };
-    });
-  }, [groups, latestByTest]);
-
-  const corrPairs = useMemo(() => {
-    const names = tests.map((t) => ({ id: t.id, name: t.name }));
-    return names;
-  }, [tests]);
-  const [corrA, setCorrA] = useState("");
-  const [corrB, setCorrB] = useState("");
-  useEffect(() => {
-    if (!corrA && corrPairs[0]) setCorrA(corrPairs[0].id);
-    if (!corrB && corrPairs[1]) setCorrB(corrPairs[1].id);
-  }, [corrPairs, corrA, corrB]);
-
-  useEffect(() => {
-    if (showAddResult || showAddMetric || showImport || showAddTest) {
-      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
-      if (typeof document !== "undefined") document.body.style.overflow = "hidden";
-    } else {
-      if (typeof document !== "undefined") document.body.style.overflow = "";
-    }
-    return () => {
-      if (typeof document !== "undefined") document.body.style.overflow = "";
-    };
-  }, [showAddResult, showAddMetric, showImport, showAddTest]);
-  const corrData = useMemo(() => {
-    if (!corrA || !corrB || corrA === corrB) return { points: [] as { date: string; a: number; b: number }[], r: null as number | null };
-    const aMap = new Map((resultsByTest.get(corrA) ?? []).filter((x) => x.valueNum != null).map((x) => [x.testDate, x.valueNum as number]));
-    const points = (resultsByTest.get(corrB) ?? [])
-      .filter((x) => x.valueNum != null && aMap.has(x.testDate))
-      .map((x) => ({ date: x.testDate, a: aMap.get(x.testDate) as number, b: x.valueNum as number }));
-    if (points.length < 2) return { points, r: null };
-    const ax = points.map((p) => p.a);
-    const bx = points.map((p) => p.b);
-    const avgA = ax.reduce((s, v) => s + v, 0) / ax.length;
-    const avgB = bx.reduce((s, v) => s + v, 0) / bx.length;
-    const num = points.reduce((s, p) => s + (p.a - avgA) * (p.b - avgB), 0);
-    const denA = Math.sqrt(points.reduce((s, p) => s + (p.a - avgA) ** 2, 0));
-    const denB = Math.sqrt(points.reduce((s, p) => s + (p.b - avgB) ** 2, 0));
-    return { points, r: denA && denB ? Number((num / (denA * denB)).toFixed(2)) : null };
-  }, [corrA, corrB, resultsByTest]);
-
-  async function saveResults() {
-    if (!userId) return;
-    const rows = tests
-      .map((test) => ({ test, value: addValues[test.id]?.trim() ?? "" }))
-      .filter(({ value }) => value !== "")
-      .map(({ test, value }) => {
-        const numeric = numericInputForTest(test);
-        const num = Number(value);
-        return {
-          user_id: userId,
-          test_id: test.id,
-          test_date: addDate,
-          value_num: numeric && Number.isFinite(num) ? num : null,
-          value_text: numeric ? "" : value,
-          notes: "",
-        };
-      });
-
-    if (!rows.length) {
-      showToast("Add at least one result");
-      return;
-    }
-
-    const { data, error } = await client.from("biomarker_results").upsert(rows, { onConflict: "test_id,test_date" }).select("*");
-    if (error) {
-      showToast(error.message);
-      return;
-    }
-
-    if (sessionCost.trim() || sessionNote.trim()) {
-      await client.from("biomarker_lab_sessions").upsert({
-        user_id: userId,
-        session_date: addDate,
-        total_paid_aed: sessionCost.trim() ? Number(sessionCost) : null,
-        notes: sessionNote.trim(),
-      }, { onConflict: "user_id,session_date" });
-    }
-
-    const saved = (data ?? []).map(dbToResult);
-    setResults((prev) => {
-      const keep = prev.filter((r) => !saved.some((s) => s.testId === r.testId && s.testDate === r.testDate));
-      return [...saved, ...keep].sort((a, b) => b.testDate.localeCompare(a.testDate));
-    });
-    if (sessionCost.trim() || sessionNote.trim()) {
-      const { data: sessionRows } = await client.from("biomarker_lab_sessions").select("*").eq("user_id", userId).eq("session_date", addDate).limit(1);
-      if (sessionRows?.[0]) {
-        setSessions((prev) => [dbToSession(sessionRows[0]), ...prev.filter((s) => s.sessionDate !== addDate)]);
+    const groups = new Map<string, { groupName: string; tests: BiomarkerTest[]; abnormal: number }>();
+    tests.forEach(t => {
+      if (!groups.has(t.groupName)) {
+        groups.set(t.groupName, { groupName: t.groupName, tests: [], abnormal: 0 });
       }
-    }
-    setAddValues({});
-    setSessionCost("");
-    setSessionNote("");
-    closeModal(setShowAddResult);
-    showToast(`Saved ${rows.length} results`);
-  }
-
-  async function saveMetric() {
-    if (!userId) return;
-    const w = metricForm.weightKg ? Number(metricForm.weightKg) : null;
-    const h = metricForm.heightCm ? Number(metricForm.heightCm) : null;
-    const bmi = w && h ? Number((w / ((h / 100) ** 2)).toFixed(1)) : null;
-    const payload = {
-      user_id: userId,
-      measured_at: metricForm.measuredAt,
-      weight_kg: w,
-      height_cm: h,
-      bmi,
-      body_fat_pct: metricForm.bodyFatPct ? Number(metricForm.bodyFatPct) : null,
-      visceral_fat_l: metricForm.visceralFatL ? Number(metricForm.visceralFatL) : null,
-      skeletal_muscle_kg: metricForm.skeletalMuscleKg ? Number(metricForm.skeletalMuscleKg) : null,
-      notes: metricForm.notes,
-    };
-    const { data, error } = await client.from("body_metrics").upsert(payload, { onConflict: "user_id,measured_at" }).select("*").single();
-    if (error) {
-      showToast(error.message);
-      return;
-    }
-    if (data) {
-      setMetrics((prev) => [dbToMetric(data), ...prev.filter((m) => m.measuredAt !== data.measured_at)].sort((a, b) => b.measuredAt.localeCompare(a.measuredAt)));
-      closeModal(setShowAddMetric);
-      showToast("Body metrics saved");
-    }
-  }
-
-  async function importBulk() {
-    if (!userId) return;
-    const lines = importText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-    if (!lines.length) {
-      showToast("Paste something first");
-      return;
-    }
-    const rows: { user_id: string; test_id: string; test_date: string; value_num: number | null; value_text: string; notes: string }[] = [];
-    for (const line of lines) {
-      const parts = line.split(/[\t,|]/).map((x) => x.trim());
-      const [name, value, date, notes = ""] = parts;
-      if (!name || !value || !date) continue;
-      const test = tests.find((t) => t.name.toLowerCase() === name.toLowerCase());
-      if (!test) continue;
-      const numeric = numericInputForTest(test);
-      const num = Number(value);
-      rows.push({
-        user_id: userId,
-        test_id: test.id,
-        test_date: date,
-        value_num: numeric && Number.isFinite(num) ? num : null,
-        value_text: numeric ? "" : value,
-        notes,
-      });
-    }
-    if (!rows.length) {
-      showToast("Nothing matched your test names");
-      return;
-    }
-    const { data, error } = await client.from("biomarker_results").upsert(rows, { onConflict: "test_id,test_date" }).select("*");
-    if (error) {
-      showToast(error.message);
-      return;
-    }
-    const saved = (data ?? []).map(dbToResult);
-    setResults((prev) => {
-      const keep = prev.filter((r) => !saved.some((s) => s.testId === r.testId && s.testDate === r.testDate));
-      return [...saved, ...keep].sort((a, b) => b.testDate.localeCompare(a.testDate));
+      const g = groups.get(t.groupName)!;
+      g.tests.push(t);
+      const latest = latestResults.get(t.id);
+      if (latest) {
+        const status = getStatus(latest.valueNum, t.refMin, t.refMax, latest.valueText);
+        if (status === "high" || status === "low") g.abnormal++;
+      }
     });
-    closeModal(setShowImport);
-    setImportText("");
-    showToast(`Imported ${saved.length} results`);
+    return Array.from(groups.values()).sort((a, b) => a.groupName.localeCompare(b.groupName));
+  }, [tests, latestResults]);
+
+  const resultsByDate = useMemo(() => {
+    const map = new Map<string, BiomarkerResult[]>();
+    results.forEach(r => {
+      if (!map.has(r.testDate)) map.set(r.testDate, []);
+      map.get(r.testDate)!.push(r);
+    });
+    return map;
+  }, [results]);
+
+  const uniqueDates = useMemo(() => 
+    Array.from(new Set(results.map(r => r.testDate))).sort().reverse(),
+    [results]
+  );
+
+  const compareData = useMemo((): CompareRow[] => {
+    if (!compareDate1 || !compareDate2) return [];
+    const date1Results = results.filter(r => r.testDate === compareDate1);
+    const date2Results = results.filter(r => r.testDate === compareDate2);
+    
+    const rows: CompareRow[] = [];
+    tests.forEach(t => {
+      const r1 = date1Results.find(r => r.testId === t.id);
+      const r2 = date2Results.find(r => r.testId === t.id);
+      if (!r1 && !r2) return;
+      
+      const currVal = r1?.valueNum ?? null;
+      const prevVal = r2?.valueNum ?? null;
+      const delta = currVal != null && prevVal != null ? currVal - prevVal : null;
+      const pct = delta != null && prevVal != null ? Math.round((delta / prevVal) * 100) : null;
+      
+      rows.push({
+        testId: t.id,
+        name: t.name,
+        groupName: t.groupName,
+        prevVal,
+        currVal,
+        prevText: r2?.valueText ?? "",
+        currText: r1?.valueText ?? "",
+        delta,
+        pct,
+        prevStatus: getStatus(prevVal, t.refMin, t.refMax, r2?.valueText ?? ""),
+        currStatus: getStatus(currVal, t.refMin, t.refMax, r1?.valueText ?? ""),
+      });
+    });
+    
+    return rows.sort((a, b) => a.groupName.localeCompare(b.groupName) || a.name.localeCompare(b.name));
+  }, [tests, results, compareDate1, compareDate2]);
+
+  // ============= ACTIONS =============
+  async function saveTestName(testId: string, newName: string) {
+    if (!newName.trim()) return;
+    const cl = supabase();
+    await cl.from("biomarker_tests").update({ name: newName.trim() }).eq("id", testId);
+    setTests(prev => prev.map(t => t.id === testId ? { ...t, name: newName.trim() } : t));
+    setEditingTestId(null);
   }
 
-  async function saveTestDefinition() {
-    if (!userId) return;
-    const groupName = testForm.groupName === "__new__" ? testForm.newGroupName.trim() : testForm.groupName.trim();
-    if (!testForm.name.trim() || !groupName) {
-      showToast("Name and group are required");
-      return;
-    }
-    const payload = {
-      user_id: userId,
-      name: testForm.name.trim(),
-      group_name: groupName,
-      method: testForm.method.trim() || null,
-      unit: testForm.unit.trim() || null,
-      ref_min: testForm.refMin === "" ? null : Number(testForm.refMin),
-      ref_max: testForm.refMax === "" ? null : Number(testForm.refMax),
-      ref_range: null,
-      sort_order: Number(testForm.sortOrder || 0),
-    };
-    const { data, error } = await client.from("biomarker_tests").insert(payload).select("*").single();
-    if (error) { showToast(error.message); return; }
-    if (data) {
-      const mapped = dbToTest(data);
-      setTests((prev) => [...prev, mapped].sort((a, b) => a.groupName.localeCompare(b.groupName) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)));
-      closeModal(setShowAddTest);
-      setTestForm({ name: "", groupName: "", newGroupName: "", method: "", unit: "", refMin: "", refMax: "", sortOrder: "0" });
-      setAddValues((prev) => ({ ...prev, [mapped.id]: "" }));
-      showToast("Marker created");
-    }
+  async function updateTestGroup(testId: string, newGroup: string) {
+    const cl = supabase();
+    await cl.from("biomarker_tests").update({ group_name: newGroup }).eq("id", testId);
+    setTests(prev => prev.map(t => t.id === testId ? { ...t, groupName: newGroup } : t));
   }
 
-  if (loading) {
-    return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: V.bg, color: V.muted }}>Loading biomarkers…</div>;
+  async function deleteTest(testId: string) {
+    if (!confirm("Delete this marker and all its results?")) return;
+    const cl = supabase();
+    await Promise.all([
+      cl.from("biomarker_results").delete().eq("test_id", testId),
+      cl.from("biomarker_tests").delete().eq("id", testId),
+    ]);
+    setTests(prev => prev.filter(t => t.id !== testId));
+    setResults(prev => prev.filter(r => r.testId !== testId));
   }
 
+  // ============= STYLES =============
+  const V = isDark
+    ? { bg: "#0d0f14", text: "#f8fafc", muted: "#94a3b8", faint: "#64748b", border: "#1e293b", accent: "#14b8a6", surface: "#1a1f2e" }
+    : { bg: "#f9f8f5", text: "#111827", muted: "#6b7280", faint: "#9ca3af", border: "#e5e7eb", accent: "#0d9488", surface: "#ffffff" };
+
+  const tab = (isActive: boolean) => ({
+    padding: "10px 18px",
+    fontSize: 13,
+    fontWeight: 700,
+    border: "none",
+    background: isActive ? V.accent : "transparent",
+    color: isActive ? "#fff" : V.text,
+    borderRadius: 8,
+    cursor: "pointer",
+    transition: "all 0.2s",
+  });
+
+  const section = {
+    background: V.surface,
+    border: `1px solid ${V.border}`,
+    borderRadius: 16,
+  };
+
+  const btn = {
+    padding: "8px 16px",
+    fontSize: 13,
+    fontWeight: 700,
+    border: `1px solid ${V.border}`,
+    borderRadius: 8,
+    background: V.surface,
+    color: V.text,
+    cursor: "pointer",
+  };
+
+  // ============= RENDER =============
   return (
     <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 10, background: isDark ? "rgba(13,15,20,0.9)" : "rgba(249,248,245,0.9)", backdropFilter: "blur(12px)", borderBottom: `1px solid ${V.border}`, padding: "14px 24px", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontSize: 24, fontWeight: 800 }}>Bio<span style={{ color: V.accent }}>Markers</span></div>
-          <div style={{ fontSize: 12, color: V.muted }}>Monitor what changed, not just what exists.</div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={btn} onClick={() => openModal(setShowImport)}>Bulk import</button>
-          <button style={btn} onClick={() => openModal(setShowAddMetric)}>+ Body metrics</button>
-          <button style={btn} onClick={() => openModal(setShowAddTest)}>+ Marker</button>
-          <button style={btnP} onClick={() => openModal(setShowAddResult)}>+ Lab session</button>
-        </div>
+      {/* Header */}
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: isDark ? "rgba(13,15,20,0.9)" : "rgba(249,248,245,0.9)", backdropFilter: "blur(12px)", borderBottom: `1px solid ${V.border}`, padding: "14px 24px" }}>
+        <div style={{ fontSize: 24, fontWeight: 800 }}>Bio<span style={{ color: V.accent }}>Markers</span></div>
+        <div style={{ fontSize: 12, color: V.muted }}>Monitor what changed, not just what exists.</div>
       </div>
 
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 20, display: "grid", gap: 18 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
-          {[
-            { label: "Tracked markers", value: summary.tracked, color: isDark ? "#f8fafc" : "#111827" },
-            { label: "Currently abnormal", value: summary.abnormal, color: "#dc2626" },
-            { label: "Newly abnormal", value: summary.newlyAbnormal, color: "#d97706" },
-            { label: "Back to normal", value: summary.backToNormal, color: "#059669" },
-          ].map((card) => (
-            <div key={card.label} style={{ ...section, padding: 16 }}>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800 }}>{card.label}</div>
-              <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6, color: card.color }}>{card.value}</div>
-            </div>
-          ))}
-        </div>
+      {/* Tab Bar */}
+      <div style={{ background: V.surface, borderBottom: `1px solid ${V.border}`, padding: "12px 24px", display: "flex", gap: 8, overflowX: "auto" }}>
+        <button style={tab(activeTab === "overview")} onClick={() => setActiveTab("overview")}>Overview</button>
+        <button style={tab(activeTab === "groups")} onClick={() => setActiveTab("groups")}>By Groups</button>
+        <button style={tab(activeTab === "dates")} onClick={() => setActiveTab("dates")}>By Date</button>
+        <button style={tab(activeTab === "compare")} onClick={() => setActiveTab("compare")}>Compare</button>
+        <button style={tab(activeTab === "metrics")} onClick={() => setActiveTab("metrics")}>Body Metrics</button>
+        <button style={tab(activeTab === "manage")} onClick={() => setActiveTab("manage")}>Manage</button>
+      </div>
 
-        <div style={{ ...section, padding: 16 }}>
-          <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Current issues</div>
-          {abnormalRows.length === 0 ? (
-            <div style={{ color: V.muted, fontSize: 13 }}>Nothing abnormal in the latest set. Rare and beautiful.</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10 }}>
-              {abnormalRows.map(({ test, latest, delta, pct, status }) => {
-                const tone = statusTone(status);
-                return (
-                  <Link key={test.id} href={`/dashboard/biomarkers/${test.id}`} style={{ textDecoration: "none", color: V.text }}>
-                    <div style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.7fr", gap: 10, alignItems: "center" }}>
-                      <div>
-                        <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{test.groupName}</div>
-                        <div style={{ fontSize: 15, fontWeight: 800 }}>{test.name}</div>
-                      </div>
-                      <div style={{ fontSize: 14, fontWeight: 800 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 11, color: V.muted }}>{test.unit}</span></div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                        <span style={{ padding: "4px 10px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 11, fontWeight: 800 }}>{tone.label}</span>
-                        <span style={{ fontSize: 12, color: compareTone(delta), fontWeight: 800 }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</span>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      {/* Tab Content */}
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: 20 }}>
+        {activeTab === "overview" && (
+          <OverviewTab 
+            summary={summary}
+            abnormalRows={abnormalRows}
+            uniqueDates={uniqueDates}
+            V={V}
+            section={section}
+            statusTone={statusTone}
+            compareTone={compareTone}
+          />
+        )}
+        
+        {activeTab === "groups" && (
+          <ByGroupsTab
+            groupCards={groupCards}
+            latestResults={latestResults}
+            previousResults={previousResults}
+            testMap={testMap}
+            V={V}
+            section={section}
+            statusTone={statusTone}
+            compareTone={compareTone}
+            editingTestId={editingTestId}
+            editingName={editingName}
+            setEditingTestId={setEditingTestId}
+            setEditingName={setEditingName}
+            saveTestName={saveTestName}
+          />
+        )}
+        
+        {activeTab === "dates" && (
+          <ByDateTab
+            uniqueDates={uniqueDates}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            resultsByDate={resultsByDate}
+            testMap={testMap}
+            sessions={sessions}
+            V={V}
+            section={section}
+            statusTone={statusTone}
+          />
+        )}
+        
+        {activeTab === "compare" && (
+          <CompareTab
+            uniqueDates={uniqueDates}
+            compareDate1={compareDate1}
+            compareDate2={compareDate2}
+            setCompareDate1={setCompareDate1}
+            setCompareDate2={setCompareDate2}
+            compareData={compareData}
+            testMap={testMap}
+            V={V}
+            section={section}
+            statusTone={statusTone}
+            compareTone={compareTone}
+          />
+        )}
+        
+        {activeTab === "metrics" && (
+          <BodyMetricsTab
+            metrics={metrics}
+            V={V}
+            section={section}
+          />
+        )}
+        
+        {activeTab === "manage" && (
+          <ManageTab
+            groupCards={groupCards}
+            selectedGroup={selectedGroup}
+            setSelectedGroup={setSelectedGroup}
+            updateTestGroup={updateTestGroup}
+            deleteTest={deleteTest}
+            editingTestId={editingTestId}
+            editingName={editingName}
+            setEditingTestId={setEditingTestId}
+            setEditingName={setEditingName}
+            saveTestName={saveTestName}
+            V={V}
+            section={section}
+            btn={btn}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 18 }}>
-          <div style={{ ...section, padding: 16 }}>
-            <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Groups at a glance</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
-              {groupCards.map((g) => (
-                <div key={g.groupName} style={{ border: `1px solid ${V.border}`, borderRadius: 14, padding: 14 }}>
-                  <div style={{ fontSize: 15, fontWeight: 800 }}>{g.groupName}</div>
-                  <div style={{ marginTop: 2, fontSize: 12, color: V.muted }}>{g.tests.length} markers · {g.abnormal} abnormal</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-                    {g.tests.slice(0, 6).map((t) => {
-                      const status = markerStatus(latestByTest.get(t.id), t);
-                      const tone = statusTone(status);
-                      return <span key={t.id} style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 11, fontWeight: 700 }}>{t.name}</span>;
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+// ============= TAB COMPONENTS =============
+
+function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTone, compareTone }: any) {
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      {/* Summary Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+        {[
+          { label: "Tracked markers", value: summary.tracked, color: V.text },
+          { label: "Currently abnormal", value: summary.abnormal, color: "#dc2626" },
+          { label: "Newly abnormal", value: summary.newlyAbnormal, color: "#d97706" },
+          { label: "Back to normal", value: summary.backToNormal, color: "#059669" },
+        ].map((card) => (
+          <div key={card.label} style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800 }}>{card.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6, color: card.color }}>{card.value}</div>
           </div>
+        ))}
+      </div>
 
-          <div style={{ ...section, padding: 16 }}>
-            <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Stale or missing</div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {staleRows.length === 0 ? (
-                <div style={{ fontSize: 13, color: V.muted }}>Everything has a reasonably recent result.</div>
-              ) : staleRows.slice(0, 12).map((row) => (
-                <Link key={row.test.id} href={`/dashboard/biomarkers/${row.test.id}`} style={{ textDecoration: "none", color: V.text }}>
-                  <div style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 10, display: "flex", justifyContent: "space-between", gap: 10 }}>
+      {/* Current Issues */}
+      <div style={{ ...section, padding: 16 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Current issues</div>
+        {abnormalRows.length === 0 ? (
+          <div style={{ color: V.muted, fontSize: 13 }}>Nothing abnormal in the latest set. Rare and beautiful.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {abnormalRows.map(({ test, latest, delta, pct, status }: any) => {
+              const tone = statusTone(status);
+              return (
+                <Link key={test.id} href={`/dashboard/biomarkers/${test.id}`} style={{ textDecoration: "none", color: V.text }}>
+                  <div style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.7fr", gap: 10, alignItems: "center" }}>
                     <div>
-                      <div style={{ fontWeight: 800, fontSize: 13 }}>{row.test.name}</div>
-                      <div style={{ fontSize: 11, color: V.muted }}>{row.test.groupName}</div>
+                      <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{test.groupName}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800 }}>{test.name}</div>
                     </div>
-                    <div style={{ fontSize: 12, color: row.days == null ? "#d97706" : "#dc2626", fontWeight: 800 }}>{row.days == null ? "No result" : `${row.days} days ago`}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 11, color: V.muted }}>{test.unit}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <span style={{ padding: "4px 10px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 11, fontWeight: 800 }}>{tone.label}</span>
+                      <span style={{ fontSize: 12, color: compareTone(delta), fontWeight: 800 }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</span>
+                    </div>
                   </div>
                 </Link>
-              ))}
-            </div>
+              );
+            })}
           </div>
-        </div>
+        )}
+      </div>
 
-        <div style={{ ...section, padding: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800 }}>Compare two lab dates</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <select style={input} value={compareLeft} onChange={(e) => setCompareLeft(e.target.value)}>{distinctDates.map((d) => <option key={d} value={d}>{fmtDate(d)}</option>)}</select>
-              <select style={input} value={compareRight} onChange={(e) => setCompareRight(e.target.value)}>{distinctDates.map((d) => <option key={d} value={d}>{fmtDate(d)}</option>)}</select>
-            </div>
-          </div>
+      {/* Recent Sessions */}
+      <div style={{ ...section, padding: 16 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Recent sessions</div>
+        {uniqueDates.length === 0 ? (
+          <div style={{ color: V.muted, fontSize: 13 }}>No test sessions recorded yet.</div>
+        ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {compareRows.slice(0, 18).map((row) => {
-              const tone = statusTone(row.currStatus);
+            {uniqueDates.slice(0, 5).map((date) => (
+              <div key={date} style={{ fontSize: 14, color: V.text }}>• {new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, section, statusTone, compareTone, editingTestId, editingName, setEditingTestId, setEditingName, saveTestName }: any) {
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      {groupCards.map((g: any) => (
+        <div key={g.groupName} style={{ ...section, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{g.groupName} <span style={{ fontSize: 12, color: V.muted }}>({g.tests.length} markers · {g.abnormal} abnormal)</span></div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {g.tests.map((t: any) => {
+              const latest = latestResults.get(t.id);
+              const prev = previousResults.get(t.id);
+              const status = latest ? statusTone(getStatus(latest.valueNum, t.refMin, t.refMax, latest.valueText)) : { label: "—", bg: "#f5f5f5", fg: "#999" };
+              const delta = latest?.valueNum != null && prev?.valueNum != null ? latest.valueNum - prev.valueNum : null;
+              const pct = delta != null && prev?.valueNum != null ? Math.round((delta / prev.valueNum) * 100) : null;
+              
               return (
-                <div key={row.testId} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "1.2fr 0.8fr 0.8fr 0.7fr", gap: 10, alignItems: "center" }}>
+                <div key={t.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 10, alignItems: "center" }}>
                   <div>
-                    <div style={{ fontWeight: 800 }}>{row.name}</div>
-                    <div style={{ fontSize: 11, color: V.muted }}>{row.groupName}</div>
+                    {editingTestId === t.id ? (
+                      <input
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onBlur={() => saveTestName(t.id, editingName)}
+                        onKeyDown={(e) => e.key === "Enter" && saveTestName(t.id, editingName)}
+                        autoFocus
+                        style={{ fontSize: 14, fontWeight: 700, border: `1px solid ${V.accent}`, borderRadius: 4, padding: "2px 6px", background: V.surface, color: V.text, width: "100%" }}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => { setEditingTestId(t.id); setEditingName(t.name); }}>
+                        {t.name} <span style={{ fontSize: 10, color: V.muted }}>✎</span>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: 13, color: V.muted }}>{(row.prevVal ?? row.prevText) || "—"}</div>
-                  <div style={{ fontSize: 13, fontWeight: 800 }}>{(row.currVal ?? row.currText) || "—"}</div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                    <span style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</span>
-                    <span style={{ fontSize: 12, color: compareTone(row.delta), fontWeight: 800 }}>{row.delta == null ? "—" : `${row.delta > 0 ? "+" : ""}${row.delta}${row.pct != null ? ` (${row.pct > 0 ? "+" : ""}${row.pct}%)` : row.prevVal === 0 ? " (New)" : ""}`}</span>
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
+                  <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                  <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(1)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
                 </div>
               );
             })}
           </div>
         </div>
+      ))}
+    </div>
+  );
+}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 18 }}>
-          <div style={{ ...section, padding: 16 }}>
-            <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Lab sessions</div>
-            <div style={{ display: "grid", gap: 10 }}>
-              {sessionsByDate.map((bundle) => (
-                <div key={bundle.date} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 15, fontWeight: 800 }}>{fmtDate(bundle.date)}</div>
-                      <div style={{ fontSize: 12, color: V.muted }}>{bundle.rows.length} tests · {bundle.abnormalCount} abnormal · Total paid {fmtMoney(bundle.session?.totalPaidAed)}</div>
-                    </div>
-                    {bundle.session?.notes && <div style={{ fontSize: 12, color: V.muted, maxWidth: 300 }}>{bundle.session.notes}</div>}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {bundle.rows.slice(0, 10).map((r) => {
-                      const t = tests.find((x) => x.id === r.testId);
-                      if (!t) return null;
-                      const tone = statusTone(markerStatus(r, t));
-                      return <span key={r.id} style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 11, fontWeight: 700 }}>{t.name}</span>;
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, testMap, sessions, V, section, statusTone }: any) {
+  const sessionForDate = sessions.find((s: any) => s.sessionDate === selectedDate);
+  const resultsForDate = resultsByDate.get(selectedDate) || [];
+  
+  // Group by test group
+  const grouped = new Map<string, any[]>();
+  resultsForDate.forEach((r: any) => {
+    const test = testMap.get(r.testId);
+    if (!test) return;
+    if (!grouped.has(test.groupName)) grouped.set(test.groupName, []);
+    grouped.get(test.groupName)!.push({ result: r, test });
+  });
+  
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      {/* Date Selector */}
+      <div style={{ ...section, padding: 16 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Select Session Date</div>
+        <select value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: "100%", padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+          {uniqueDates.map((date) => (
+            <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</option>
+          ))}
+        </select>
+      </div>
 
-          <div style={{ ...section, padding: 16 }}>
-            <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Correlation view</div>
-            <div style={{ display: "grid", gap: 10 }}>
-              <select style={input} value={corrA} onChange={(e) => setCorrA(e.target.value)}>{corrPairs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-              <select style={input} value={corrB} onChange={(e) => setCorrB(e.target.value)}>{corrPairs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-              <div style={{ fontSize: 13, color: V.muted }}>Shared dates: <strong style={{ color: V.text }}>{corrData.points.length}</strong>{corrData.r != null ? <> · Approx r = <strong style={{ color: compareTone(corrData.r) }}>{corrData.r}</strong></> : null}</div>
-              <div style={{ display: "grid", gap: 6 }}>
-                {corrData.points.slice(-8).map((p) => (
-                  <div key={p.date} style={{ display: "grid", gridTemplateColumns: "0.8fr 1fr 1fr", gap: 10, padding: 8, borderRadius: 10, background: V.input }}>
-                    <div style={{ fontSize: 12, color: V.muted }}>{fmtShort(p.date)}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700 }}>{p.a}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700 }}>{p.b}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* Session Info */}
+      {sessionForDate && (
+        <div style={{ ...section, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>Session Details</div>
+          <div style={{ marginTop: 8, fontSize: 13, color: V.muted }}>
+            {sessionForDate.totalPaidAed && <div>Cost: AED {sessionForDate.totalPaidAed}</div>}
+            {sessionForDate.notes && <div style={{ marginTop: 4 }}>Notes: {sessionForDate.notes}</div>}
           </div>
         </div>
+      )}
 
-        <div style={{ ...section, padding: 16 }}>
-          <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Tracked markers</div>
-          <div style={{ display: "grid", gap: 14 }}>
-            {groups.map(([groupName, list]) => {
-              const collapsed = !!collapsedGroups[groupName];
+      {/* Results Grouped by Test Group */}
+      {Array.from(grouped.entries()).map(([groupName, items]) => (
+        <div key={groupName} style={{ ...section, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{groupName} <span style={{ fontSize: 12, color: V.muted }}>({items.length} tests)</span></div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {items.map(({ result, test }: any) => {
+              const status = statusTone(getStatus(result.valueNum, test.refMin, test.refMax, result.valueText));
               return (
-              <div key={groupName}>
-                <button style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, background: "transparent", border: "none", color: V.text, cursor: "pointer", padding: 0 }} onClick={() => setCollapsedGroups((p) => ({ ...p, [groupName]: !p[groupName] }))}><span style={{ fontSize: 15, fontWeight: 800 }}>{groupName}</span><span style={{ fontSize: 12, color: V.muted }}>{collapsed ? "Show" : "Hide"}</span></button>
-                {!collapsed && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
-                  {list.map((test) => {
-                    const latest = latestByTest.get(test.id);
-                    const prev = prevByTest.get(test.id);
-                    const status = markerStatus(latest, test);
-                    const tone = statusTone(status);
-                    const d = deltaPct(prev?.valueNum ?? null, latest?.valueNum ?? null);
-                    return (
-                      <Link key={test.id} href={`/dashboard/biomarkers/${test.id}`} style={{ textDecoration: "none", color: V.text }}>
-                        <div style={{ border: `1px solid ${V.border}`, borderRadius: 14, padding: 12 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                            <div style={{ fontSize: 14, fontWeight: 800 }}>{test.name}</div>
-                            <span style={{ padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</span>
-                          </div>
-                          <div style={{ fontSize: 22, fontWeight: 900, color: isDark ? "#f8fafc" : V.text }}>{(latest?.valueNum ?? latest?.valueText) || "—"}</div>
-                          <div style={{ fontSize: 12, color: V.muted }}>{rangeLabel(test)}</div>
-                          <div style={{ fontSize: 12, color: deltaColorForTest(d.delta, latest?.valueNum ?? null, test), fontWeight: 800, marginTop: 8 }}>{d.delta == null ? "No numeric delta yet" : `${d.delta > 0 ? "+" : ""}${d.delta}${d.pct != null ? ` (${d.pct > 0 ? "+" : ""}${d.pct}%)` : ""}`}</div>
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>}
-              </div>
-            )})}
+                <div key={result.id} style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10, alignItems: "center" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{test.name}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{result.valueNum ?? result.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test.unit}</span></div>
+                  <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
+      ))}
+      
+      {resultsForDate.length === 0 && (
+        <div style={{ ...section, padding: 16, color: V.muted }}>No results for this date.</div>
+      )}
+    </div>
+  );
+}
 
-        <div style={{ ...section, padding: 16 }}>
-          <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Body metrics</div>
-          {bodyLatest ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
-              {[
-                ["Weight", bodyLatest.weightKg, "kg", "weight"],
-                ["BMI", bodyLatest.bmi, "", "bmi"],
-                ["Body fat", bodyLatest.bodyFatPct, "%", "fat"],
-                ["Visceral fat", bodyLatest.visceralFatL, "L", "visceral"],
-                ["Skeletal muscle", bodyLatest.skeletalMuscleKg, "kg", "skeletal"],
-              ].map(([label, val, unit, kind]) => {
-                const tone = bodyMetricTone(String(kind), typeof val === "number" ? val : null);
-                return (
-                <div key={String(label)} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12 }}>
-                  <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{label}</div>
-                  <div style={{ fontSize: 22, fontWeight: 900, marginTop: 4 }}>{val ?? "—"} <span style={{ fontSize: 12, color: V.muted }}>{unit}</span></div>
-                  <div style={{ marginTop: 8, display: "inline-flex", padding: "4px 8px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 10, fontWeight: 800 }}>{tone.label}</div>
-                </div>
-              )})}
-              <div style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, gridColumn: "1/-1" }}>
-                <div style={{ fontSize: 12, color: V.muted }}>Latest on {fmtDate(bodyLatest.measuredAt)}</div>
-              </div>
-            </div>
-          ) : <div style={{ color: V.muted, fontSize: 13 }}>No body metrics yet.</div>}
+function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, setCompareDate2, compareData, testMap, V, section, statusTone, compareTone }: any) {
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      {/* Date Selectors */}
+      <div style={{ ...section, padding: 16 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Compare Dates</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 12, alignItems: "center" }}>
+          <select value={compareDate1} onChange={(e) => setCompareDate1(e.target.value)} style={{ padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+            {uniqueDates.map((date) => (
+              <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 18, fontWeight: 800, color: V.accent }}>vs</div>
+          <select value={compareDate2} onChange={(e) => setCompareDate2(e.target.value)} style={{ padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+            {uniqueDates.map((date) => (
+              <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {showAddResult && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
-          <div style={{ width: "min(920px,100%)", maxHeight: "90vh", overflow: "auto", ...section }}>
-            <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Add lab session</div>
-                <div style={{ fontSize: 12, color: V.muted }}>Numeric tests get numeric input. Text-only tests stop polluting the chart. A modest miracle.</div>
-              </div>
-              <button style={btn} onClick={() => closeModal(setShowAddResult)}>Close</button>
-            </div>
-            <div style={{ padding: 18, display: "grid", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Test date</span><input style={input} type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} /></label>
-                <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Total paid that day (AED)</span><input style={input} type="number" min="0" value={sessionCost} onChange={(e) => setSessionCost(e.target.value)} /></label>
-                <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Session note</span><input style={input} value={sessionNote} onChange={(e) => setSessionNote(e.target.value)} placeholder="Optional" /></label>
-              </div>
-              {groups.map(([groupName, list]) => (
-                <div key={groupName}>
-                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>{groupName}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
-                    {list.map((test) => (
-                      <label key={test.id} style={{ display: "grid", gap: 6 }}>
-                        <span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>{test.name} {test.unit ? `(${test.unit})` : ""}</span>
-                        <input
-                          style={input}
-                          type={numericInputForTest(test) ? "number" : "text"}
-                          step={numericInputForTest(test) ? "0.01" : undefined}
-                          value={addValues[test.id] ?? ""}
-                          onChange={(e) => setAddValues((prev) => ({ ...prev, [test.id]: e.target.value }))}
-                          placeholder={numericInputForTest(test) ? `Numeric · ref ${test.refRange || "—"}` : "Text result"}
-                        />
-                      </label>
-                    ))}
+      {/* Comparison Table */}
+      <div style={{ ...section, overflow: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: isDark ? "#1a1f2e" : "#f3f4f6", borderBottom: `2px solid ${V.border}` }}>
+              <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>Test Name</th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>{new Date(compareDate1).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>{new Date(compareDate2).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>Δ</th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {compareData.map((row: CompareRow) => {
+              const test = testMap.get(row.testId);
+              const currTone = statusTone(row.currStatus);
+              const prevTone = statusTone(row.prevStatus);
+              
+              return (
+                <tr key={row.testId} style={{ borderBottom: `1px solid ${V.border}` }}>
+                  <td style={{ padding: "12px 16px" }}>
+                    <div style={{ fontSize: 10, color: V.faint, textTransform: "uppercase" }}>{row.groupName}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>{row.name}</div>
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{row.currVal ?? row.currText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
+                    <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: currTone.bg, color: currTone.fg, fontSize: 10, fontWeight: 800 }}>{currTone.label}</span>
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{row.prevVal ?? row.prevText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
+                    <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: prevTone.bg, color: prevTone.fg, fontSize: 10, fontWeight: 800 }}>{prevTone.label}</span>
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
+                    {row.delta == null ? "—" : `${row.delta > 0 ? "↑ +" : "↓ "}${row.delta.toFixed(1)}`}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
+                    {row.pct == null ? "—" : `${row.pct > 0 ? "+" : ""}${row.pct}%`}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        
+        {compareData.length === 0 && (
+          <div style={{ padding: "40px 16px", textAlign: "center", color: V.muted }}>No common tests between these two dates.</div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div style={{ ...section, padding: 16 }}>
+        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 8 }}>Legend</div>
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12 }}>
+          <div>✅ Normal</div>
+          <div>⚠️ Abnormal</div>
+          <div>↑ Increased</div>
+          <div>↓ Decreased</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BodyMetricsTab({ metrics, V, section }: any) {
+  const latest = metrics[0];
+  const previous = metrics[1];
+  
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      {latest ? (
+        <>
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>Latest Measurements</div>
+            <div style={{ fontSize: 13, color: V.muted, marginBottom: 16 }}>{new Date(latest.measuredAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</div>
+            
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 16 }}>
+              {[
+                { label: "Weight", value: latest.weightKg, unit: "kg", prev: previous?.weightKg },
+                { label: "Height", value: latest.heightCm, unit: "cm", prev: previous?.heightCm },
+                { label: "BMI", value: latest.bmi, unit: "", prev: previous?.bmi },
+                { label: "Body Fat", value: latest.bodyFatPct, unit: "%", prev: previous?.bodyFatPct },
+                { label: "Visceral Fat", value: latest.visceralFatL, unit: "L", prev: previous?.visceralFatL },
+                { label: "Skeletal Muscle", value: latest.skeletalMuscleKg, unit: "kg", prev: previous?.skeletalMuscleKg },
+              ].map((m) => {
+                const delta = m.value != null && m.prev != null ? m.value - m.prev : null;
+                return (
+                  <div key={m.label} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 14 }}>
+                    <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{m.label}</div>
+                    <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4 }}>{m.value ?? "—"} <span style={{ fontSize: 14, color: V.muted }}>{m.unit}</span></div>
+                    {delta !== null && (
+                      <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: delta > 0 ? "#c00" : delta < 0 ? "#070" : "#999" }}>
+                        {delta > 0 ? "+" : ""}{delta.toFixed(1)} {m.unit}
+                      </div>
+                    )}
                   </div>
+                );
+              })}
+            </div>
+            
+            {latest.notes && (
+              <div style={{ marginTop: 16, padding: 12, background: isDark ? "#1a1f2e" : "#f3f4f6", borderRadius: 8, fontSize: 13 }}>
+                <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800, marginBottom: 4 }}>Notes</div>
+                {latest.notes}
+              </div>
+            )}
+          </div>
+
+          {/* History */}
+          <div style={{ ...section, padding: 16 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>History</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {metrics.slice(0, 10).map((m: any) => (
+                <div key={m.id} style={{ padding: "8px 12px", border: `1px solid ${V.border}`, borderRadius: 8, fontSize: 13 }}>
+                  <strong>{new Date(m.measuredAt).toLocaleDateString()}</strong> — Weight: {m.weightKg ?? "—"} kg, BMI: {m.bmi ?? "—"}
                 </div>
               ))}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button style={btn} onClick={() => closeModal(setShowAddResult)}>Cancel</button>
-                <button style={btnP} onClick={saveResults}>Save session</button>
-              </div>
             </div>
+          </div>
+        </>
+      ) : (
+        <div style={{ ...section, padding: 40, textAlign: "center", color: V.muted }}>
+          No body metrics recorded yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ManageTab({ groupCards, selectedGroup, setSelectedGroup, updateTestGroup, deleteTest, editingTestId, editingName, setEditingTestId, setEditingName, saveTestName, V, section, btn }: any) {
+  const group = groupCards.find((g: any) => g.groupName === selectedGroup);
+  
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      {/* Group Selector */}
+      <div style={{ ...section, padding: 16 }}>
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Select Group to Manage</div>
+        <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)} style={{ width: "100%", padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+          <option value="">-- Select a group --</option>
+          {groupCards.map((g: any) => (
+            <option key={g.groupName} value={g.groupName}>{g.groupName} ({g.tests.length} markers)</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Group Management */}
+      {group && (
+        <div style={{ ...section, padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 12 }}>{group.groupName}</div>
+          
+          <div style={{ display: "grid", gap: 8 }}>
+            {group.tests.map((t: any) => (
+              <div key={t.id} style={{ padding: "10px 12px", border: `1px solid ${V.border}`, borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  {editingTestId === t.id ? (
+                    <input
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      onBlur={() => saveTestName(t.id, editingName)}
+                      onKeyDown={(e) => e.key === "Enter" && saveTestName(t.id, editingName)}
+                      autoFocus
+                      style={{ fontSize: 14, fontWeight: 700, border: `1px solid ${V.accent}`, borderRadius: 4, padding: "2px 6px", background: V.surface, color: V.text }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 14, fontWeight: 700, cursor: "pointer" }} onClick={() => { setEditingTestId(t.id); setEditingName(t.name); }}>
+                      {t.name} <span style={{ fontSize: 10, color: V.muted }}>✎</span>
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => deleteTest(t.id)} style={{ ...btn, padding: "6px 12px", fontSize: 11, color: "#dc2626", borderColor: "#dc2626" }}>Delete</button>
+              </div>
+            ))}
           </div>
         </div>
       )}
-
-
-      {showAddTest && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
-          <div style={{ width: "min(760px,100%)", ...section }}>
-            <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Create marker</div>
-                <div style={{ fontSize: 12, color: V.muted }}>Add a new tracked test and put it into an existing or new group.</div>
-              </div>
-              <button style={btn} onClick={() => closeModal(setShowAddTest)}>Close</button>
-            </div>
-            <div style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Test name</span><input style={input} value={testForm.name} onChange={(e) => setTestForm((p) => ({ ...p, name: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Group</span><select style={input} value={testForm.groupName} onChange={(e) => setTestForm((p) => ({ ...p, groupName: e.target.value }))}><option value="">Select group</option>{existingGroups.map((g) => <option key={g} value={g}>{g}</option>)}<option value="__new__">+ Create new group</option></select></label>
-              {testForm.groupName === "__new__" && <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>New group name</span><input style={input} value={testForm.newGroupName} onChange={(e) => setTestForm((p) => ({ ...p, newGroupName: e.target.value }))} /></label>}
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Method</span><input style={input} value={testForm.method} onChange={(e) => setTestForm((p) => ({ ...p, method: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Unit</span><input style={input} value={testForm.unit} onChange={(e) => setTestForm((p) => ({ ...p, unit: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref min</span><input style={input} type="number" value={testForm.refMin} onChange={(e) => setTestForm((p) => ({ ...p, refMin: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Ref max</span><input style={input} type="number" value={testForm.refMax} onChange={(e) => setTestForm((p) => ({ ...p, refMax: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Sort order</span><input style={input} type="number" value={testForm.sortOrder} onChange={(e) => setTestForm((p) => ({ ...p, sortOrder: e.target.value }))} /></label>
-              <div style={{ gridColumn: "1/-1", display: "flex", justifyContent: "flex-end", gap: 8 }}><button style={btn} onClick={() => closeModal(setShowAddTest)}>Cancel</button><button style={btnP} onClick={saveTestDefinition}>Save marker</button></div>
-            </div>
-          </div>
+      
+      {!selectedGroup && (
+        <div style={{ ...section, padding: 40, textAlign: "center", color: V.muted }}>
+          Select a group above to manage its markers.
         </div>
       )}
-
-      {showAddMetric && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
-          <div style={{ width: "min(660px,100%)", ...section }}>
-            <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>Add body metrics</div>
-              <button style={btn} onClick={() => closeModal(setShowAddMetric)}>Close</button>
-            </div>
-            <div style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 12 }}>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Date</span><input style={input} type="date" value={metricForm.measuredAt} onChange={(e) => setMetricForm((p) => ({ ...p, measuredAt: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Weight (kg)</span><input style={input} type="number" value={metricForm.weightKg} onChange={(e) => setMetricForm((p) => ({ ...p, weightKg: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Height (cm)</span><input style={input} type="number" value={metricForm.heightCm} onChange={(e) => setMetricForm((p) => ({ ...p, heightCm: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Body fat %</span><input style={input} type="number" value={metricForm.bodyFatPct} onChange={(e) => setMetricForm((p) => ({ ...p, bodyFatPct: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Visceral fat (L)</span><input style={input} type="number" value={metricForm.visceralFatL} onChange={(e) => setMetricForm((p) => ({ ...p, visceralFatL: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6 }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Skeletal muscle (kg)</span><input style={input} type="number" value={metricForm.skeletalMuscleKg} onChange={(e) => setMetricForm((p) => ({ ...p, skeletalMuscleKg: e.target.value }))} /></label>
-              <label style={{ display: "grid", gap: 6, gridColumn: "1/-1" }}><span style={{ fontSize: 12, color: V.muted, fontWeight: 700 }}>Notes</span><textarea style={{ ...input, minHeight: 90, resize: "vertical" }} value={metricForm.notes} onChange={(e) => setMetricForm((p) => ({ ...p, notes: e.target.value }))} /></label>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, gridColumn: "1/-1" }}>
-                <button style={btn} onClick={() => closeModal(setShowAddMetric)}>Cancel</button>
-                <button style={btnP} onClick={saveMetric}>Save</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showImport && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.56)", display: "grid", alignItems: "start", justifyItems: "center", padding: "72px 16px 24px", zIndex: 50 }}>
-          <div style={{ width: "min(760px,100%)", ...section }}>
-            <div style={{ padding: 18, borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Bulk import</div>
-                <div style={{ fontSize: 12, color: V.muted }}>Paste rows like: <code>Name,Value,YYYY-MM-DD,Optional notes</code></div>
-              </div>
-              <button style={btn} onClick={() => closeModal(setShowImport)}>Close</button>
-            </div>
-            <div style={{ padding: 18, display: "grid", gap: 12 }}>
-              <textarea style={{ ...input, minHeight: 220, resize: "vertical", fontFamily: "ui-monospace,monospace" }} value={importText} onChange={(e) => setImportText(e.target.value)} placeholder={`LDL,132,2026-03-18\nVitamin D,31,2026-03-18\nCOVID PCR,Negative,2026-03-18`} />
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                <button style={btn} onClick={() => closeModal(setShowImport)}>Cancel</button>
-                <button style={btnP} onClick={importBulk}>Import</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {toast && <div style={{ position: "fixed", right: 16, bottom: 16, padding: "10px 14px", borderRadius: 12, background: isDark ? "#16352a" : "#ecfdf5", color: "#10b981", border: "1px solid rgba(16,185,129,0.25)", fontSize: 13, fontWeight: 800 }}>{toast}</div>}
     </div>
   );
 }
