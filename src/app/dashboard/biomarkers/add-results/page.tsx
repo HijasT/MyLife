@@ -221,7 +221,6 @@ export default function AddResultsPage() {
 
     try {
       const cl = supabase();
-      const testDateTime = `${selectedDate}T${selectedTime}:00`;
 
       // 1. Try to save session details (optional - table might not exist)
       try {
@@ -251,10 +250,10 @@ export default function AddResultsPage() {
         if (!value.valueNum && !value.valueText) return;
 
         resultsToSave.push({
-          user_id: userId,  // ← ADDED THIS!
+          user_id: userId,
           test_id: testId,
           test_date: selectedDate,
-          test_datetime: testDateTime,
+          // Removed test_datetime - column doesn't exist
           value_num: value.valueNum ? parseFloat(value.valueNum) : null,
           value_text: value.valueText || null,
           notes: value.notes || null,
