@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { nowDubai } from "@/lib/timezone";
 
 const supabase = createClient;
 
@@ -33,8 +32,16 @@ export default function AddResultsPage() {
   const [saving, setSaving] = useState(false);
   
   // Session details
-  const [selectedDate, setSelectedDate] = useState(nowDubai().format("YYYY-MM-DD"));
-  const [selectedTime, setSelectedTime] = useState(nowDubai().format("HH:mm"));
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date();
+    return now.toISOString().split('T')[0]; // YYYY-MM-DD
+  });
+  const [selectedTime, setSelectedTime] = useState(() => {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`; // HH:mm
+  });
   const [costAed, setCostAed] = useState("");
   const [clinicName, setClinicName] = useState("");
   const [sessionNotes, setSessionNotes] = useState("");

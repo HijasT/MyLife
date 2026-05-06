@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { nowDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
@@ -495,8 +496,29 @@ export default function BioMarkersPage() {
 // ============= TAB COMPONENTS =============
 
 function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTone, compareTone }: any) {
+  const router = useRouter();
+  
+  const btnStyle = {
+    padding: "12px 20px",
+    fontSize: 14,
+    fontWeight: 700,
+    border: "none",
+    borderRadius: 10,
+    background: V.accent,
+    color: "#fff",
+    cursor: "pointer",
+    transition: "all 0.2s",
+  };
+  
   return (
     <div style={{ display: "grid", gap: 18 }}>
+      {/* Add Results Button */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+        <button style={btnStyle} onClick={() => router.push('/dashboard/biomarkers/add-results')}>
+          + Add Results
+        </button>
+      </div>
+      
       {/* Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
         {[
