@@ -175,28 +175,55 @@ export default function RemittancePage() {
   }
 
   async function updateStatus(record: MonthRecord, status: Status) {
-    if (!userId) return;
+    if (!userId) {
+      console.error('❌ No userId');
+      return;
+    }
     if (record.isLocked) {
       showToast("That month is locked");
       return;
     }
-    const { error } = await supabase.from("due_month_settings").upsert({
-      user_id: userId,
-      month: record.month,
-      remittance_paid: status === "paid",
-      remittance_inr: record.remittanceInr,
-      remittance_rate: record.fxRate,
-      note: record.note,
-      cash_in: { __remittance_status: status },
-      is_locked: record.isLocked,
-    }, { onConflict: "user_id,month" });
 
-    if (error) {
-      showToast(error.message);
-      return;
-    }
+    console.log('🔄 Updating status:', { month: record.month, oldStatus: record.status, newStatus: status });
+
+    // Optimistic update (immediate UI feedback)
+    const previousRecords = records;
     setRecords((p) => p.map((r) => r.month === record.month ? { ...r, status } : r));
-    showToast(`Status updated to ${status}`);
+
+    try {
+      const updateData = {
+        user_id: userId,
+        month: record.month,
+        remittance_paid: status === "paid",
+        remittance_inr: record.remittanceInr,
+        remittance_rate: record.fxRate,
+        note: record.note,
+        cash_in: { __remittance_status: status },
+        is_locked: record.isLocked,
+      };
+
+      console.log('📤 Sending to database:', updateData);
+
+      const { data, error } = await supabase
+        .from("due_month_settings")
+        .upsert(updateData, { onConflict: "user_id,month" });
+
+      if (error) {
+        console.error('❌ Database error:', error);
+        showToast(`Failed: ${error.message}`);
+        // Revert optimistic update
+        setRecords(previousRecords);
+        return;
+      }
+
+      console.log('✅ Status saved successfully:', { month: record.month, status });
+      showToast(`Status updated to ${status}`);
+    } catch (err) {
+      console.error('❌ Unexpected error:', err);
+      showToast('Failed to save. Check console (F12)');
+      // Revert optimistic update
+      setRecords(previousRecords);
+    }
   }
 
   const totalSent = useMemo(() => records.reduce((sum, record) => sum + record.remittanceAed, 0), [records]);
