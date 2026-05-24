@@ -14,7 +14,7 @@
     "@tailwindcss/postcss": "^4.2.2",
     "clsx": "^2.1.1",
     "lucide-react": "^1.7.0",
-    "next": "^16.2.2",
+    "next": "^9.3.3",
     "react": "^19",
     "react-dom": "^19",
     "recharts": "^3.8.1"
