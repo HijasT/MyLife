@@ -161,7 +161,7 @@ function Stars({ value, size = 16 }: { value: number | null; size?: number }) {
   return (
     <div style={{ display: "flex", gap: 2 }}>
       {[1, 2, 3, 4, 5].map((n) => (
-        <span key={n} style={{ fontSize: size, color: n <= v ? "#F5A623" : "#d1d5db" }}>
+        <span key={n} style={{ fontSize: size, color: n <= v ? "#ec4899" : "#d1d5db" }}>
           ★
         </span>
       ))}
@@ -542,7 +542,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     inputBg: isDark ? "#1e2130" : "#f9fafb",
-    accent: "#F5A623",
+    accent: "#ec4899",
   };
 
   if (loading) {
@@ -702,7 +702,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
                 <span style={labelStyle}>Rating</span>
                 <div style={{ display: "flex", gap: 4 }}>
                   {[1, 2, 3, 4, 5].map((s) => (
-                    <button key={s} onClick={() => update({ ratingStars: s })} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 24, color: s <= (item.ratingStars ?? 0) ? "#F5A623" : V.border }}>
+                    <button key={s} onClick={() => update({ ratingStars: s })} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 24, color: s <= (item.ratingStars ?? 0) ? "#ec4899" : V.border }}>
                       ★
                     </button>
                   ))}
@@ -711,7 +711,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
             )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10 }}>
               {priceStats && priceStats.totalSpent > 0 && <div style={{ background: V.inputBg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${V.border}` }}><span style={labelStyle}>Total spent</span><span style={{ fontSize: 13, fontWeight: 700 }}>{fmtMoney(priceStats.totalSpent)}</span></div>}
-              {priceStats && priceStats.price100ml > 0 && <div style={{ background: V.inputBg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${V.border}` }}><span style={labelStyle}>Per 100ml</span><span style={{ fontSize: 13, fontWeight: 700, color: "#F5A623" }}>AED {priceStats.price100ml.toFixed(0)}</span></div>}
+              {priceStats && priceStats.price100ml > 0 && <div style={{ background: V.inputBg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${V.border}` }}><span style={labelStyle}>Per 100ml</span><span style={{ fontSize: 13, fontWeight: 700, color: "#ec4899" }}>AED {priceStats.price100ml.toFixed(0)}</span></div>}
               <div style={{ background: V.inputBg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${V.border}` }}><span style={labelStyle}>Longevity</span>{isEdit ? <select style={inputStyle} value={item.longevity} onChange={(e) => update({ longevity: e.target.value })}>{LONGEVITY_OPTIONS.map((opt) => <option key={opt}>{opt}</option>)}</select> : <span style={valueStyle}>{item.longevity || "—"}</span>}</div>
               <div style={{ background: V.inputBg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${V.border}` }}><span style={labelStyle}>Projection</span>{isEdit ? <select style={inputStyle} value={item.sillage} onChange={(e) => update({ sillage: e.target.value })}>{PROJECTION_OPTIONS.map((opt) => <option key={opt}>{opt}</option>)}</select> : <span style={valueStyle}>{item.sillage || "—"}</span>}</div>
               <div style={{ background: V.inputBg, borderRadius: 10, padding: "10px 12px", border: `1px solid ${V.border}` }}><span style={labelStyle}>Gender</span>{isEdit ? <select style={inputStyle} value={String(item.genderScale)} onChange={(e) => update({ genderScale: Number(e.target.value) as GenderScale })}>{[0,1,2,3,4].map((n) => <option key={n} value={n}>{genderLabel(n as GenderScale)}</option>)}</select> : <span style={valueStyle}>{genderLabel(item.genderScale)}</span>}</div>

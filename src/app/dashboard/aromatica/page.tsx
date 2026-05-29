@@ -119,7 +119,7 @@ function Stars({ value, size = 14 }: { value: number | null; size?: number }) {
   return (
     <span style={{ display: "inline-flex", gap: 1 }}>
       {Array.from({ length: 5 }).map((_, i) => (
-        <span key={i} style={{ color: i < value ? "#F5A623" : "#e5e7eb", fontSize: size }}>★</span>
+        <span key={i} style={{ color: i < value ? "#ec4899" : "#e5e7eb", fontSize: size }}>★</span>
       ))}
       <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 3 }}>{value.toFixed(1)}</span>
     </span>
@@ -343,7 +343,7 @@ export default function PerfumesPage() {
     muted:  isDark ? "#9ba3b2"  : "#6b7280",
     faint:  isDark ? "#5c6375"  : "#9ca3af",
     input:  isDark ? "#1e2130"  : "#f9fafb",
-    accent: "#F5A623",
+    accent: "#ec4899",
   };
 
   const btn   = { padding:"8px 14px", borderRadius:10, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:13, fontWeight:600 } as const;
@@ -599,7 +599,7 @@ export default function PerfumesPage() {
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Rating
                 <div style={{ display:"flex", gap:4 }}>
-                  {[1,2,3,4,5].map(s => <button key={s} onClick={() => setAf(f => ({ ...f, rating: s }))} style={{ background:"none", border:"none", cursor:"pointer", fontSize:22, color: s <= af.rating ? "#F5A623" : V.border, padding:2 }}>★</button>)}
+                  {[1,2,3,4,5].map(s => <button key={s} onClick={() => setAf(f => ({ ...f, rating: s }))} style={{ background:"none", border:"none", cursor:"pointer", fontSize:22, color: s <= af.rating ? "#ec4899" : V.border, padding:2 }}>★</button>)}
                 </div>
               </label>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em", gridColumn:"1/-1" }}>

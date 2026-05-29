@@ -25,8 +25,8 @@ function fmtMonth(m: string) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
-  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
-  if (status === "waived") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
+  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#ef4444" };
+  if (status === "waived") return { bg: "rgba(245,166,35,0.14)", fg: "#ef4444" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
 
@@ -238,7 +238,7 @@ export default function RemittancePage() {
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
-    accent: "#F5A623",
+    accent: "#ef4444",
   };
   const btn = { padding: "7px 13px", borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600 } as const;
   const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700 } as const;

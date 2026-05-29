@@ -220,7 +220,7 @@ function getTheme(isDark: boolean): ThemeVars {
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
-    accent: "#F5A623",
+    accent: "#ef4444",
   };
 }
 
@@ -234,7 +234,7 @@ function isPaid(status: Status) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
-  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
+  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#ef4444" };
   if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
@@ -1194,10 +1194,10 @@ export default function DueTrackerPage() {
                           {!overdue && upcoming && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "rgba(59,130,246,0.1)", color: "#3b82f6" }}>Upcoming</span>}
                         </div>
                         <div style={{ fontSize: 11, color: V.muted, marginTop: 3, display: "flex", flexDirection: "column", gap: 2 }}>
-                          {!isSettled(status) && cycle?.statementDate ? <span style={{ fontWeight: 600, color: "#F5A623" }}>Statement: {fmtMonthDay(cycle.statementDate)}</span> : null}
+                          {!isSettled(status) && cycle?.statementDate ? <span style={{ fontWeight: 600, color: "#ef4444" }}>Statement: {fmtMonthDay(cycle.statementDate)}</span> : null}
                           {!isSettled(status) && cycle?.dueDate ? <span style={{ fontWeight: 600, color: "#ef4444" }}>Due: {fmtMonthDay(cycle.dueDate)}</span> : null}
                           {!isSettled(status) && cycle?.nextDate && cycle.nextLabel ? (
-                            <span style={{ color: cycle.nextLabel === "statement" ? "#F5A623" : "#ef4444" }}>
+                            <span style={{ color: cycle.nextLabel === "statement" ? "#ef4444" : "#ef4444" }}>
                               {cycle.daysUntilNext === 0 ? "Today" : `${cycle.daysUntilNext} day${cycle.daysUntilNext === 1 ? "" : "s"}` } for the {cycle.nextLabel === "statement" ? "Statement" : "Due"}: {fmtMonthDay(cycle.nextDate)}
                             </span>
                           ) : null}

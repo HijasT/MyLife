@@ -354,7 +354,7 @@ export default function BioMarkersPage() {
 
   // ============= STYLES =============
   const V = isDark
-    ? { bg: "#0d0f14", text: "#f8fafc", muted: "#94a3b8", faint: "#64748b", border: "#1e293b", accent: "#14b8a6", surface: "#1a1f2e" }
+    ? { bg: "#0d0f14", text: "#f8fafc", muted: "#94a3b8", faint: "#64748b", border: "#1e293b", accent: "#10b981", surface: "#1a1f2e" }
     : { bg: "#f9f8f5", text: "#111827", muted: "#6b7280", faint: "#9ca3af", border: "#e5e7eb", accent: "#0d9488", surface: "#ffffff" };
 
   const tab = (isActive: boolean) => ({

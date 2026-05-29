@@ -354,7 +354,7 @@ const dbToEvent = (r: any): CalEvent => {
     sourceModule: r.source_module ?? "manual",
     workStart: r.work_start ?? undefined,
     workEnd: r.work_end ?? undefined,
-    color: r.color ?? "#F5A623",
+    color: r.color ?? "#3b82f6",
     notes: r.notes ?? "",
     isRecurring: r.is_recurring ?? false,
     recurType: r.recur_type ?? undefined,
@@ -1047,7 +1047,7 @@ export default function CalendarPage() {
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
-    accent: "#F5A623",
+    accent: "#3b82f6",
   };
 
   const btn = {

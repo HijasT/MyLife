@@ -647,7 +647,7 @@ export default function SettingsPage() {
                 style={{
                   background: hiddenModules.includes(m.id)
                     ? "var(--card-border)"
-                    : "#F5A623",
+                    : "#eb6607",
                 }}
                 aria-label={`Toggle ${m.label}`}
               >

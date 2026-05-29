@@ -225,7 +225,7 @@ export default function InventoryPage() {
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
-    accent:"#F5A623",
+    accent:"#f59e0b",
   };
   const btn = { padding:"8px 14px", borderRadius:10, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:13, fontWeight:600 } as const;
   const btnP = { ...btn, background:V.accent, border:"none", color:"#fff", fontWeight:700 } as const;

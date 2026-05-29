@@ -93,7 +93,7 @@ function ordinal(n: number) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
-  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#F5A623" };
+  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#ef4444" };
   if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
@@ -570,7 +570,7 @@ export default function DueItemDetailPage() {
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
-    accent: "#F5A623",
+    accent: "#ef4444",
   };
   const btn = { padding: "7px 13px", borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600 } as const;
   const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700 } as const;
@@ -609,13 +609,13 @@ export default function DueItemDetailPage() {
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 {!editingDates ? (
                   <>
-                    {item.statementDay ? <span style={{ fontSize: 13, fontWeight: 700 }}>📋 Statement: <span style={{ color: "#F5A623" }}>{ordinal(item.statementDay)}</span></span> : <span style={{ fontSize: 13, color: V.faint }}>No statement date</span>}
+                    {item.statementDay ? <span style={{ fontSize: 13, fontWeight: 700 }}>📋 Statement: <span style={{ color: "#ef4444" }}>{ordinal(item.statementDay)}</span></span> : <span style={{ fontSize: 13, color: V.faint }}>No statement date</span>}
                     {item.dueDay ? <span style={{ fontSize: 13, fontWeight: 700 }}>📅 Due: <span style={{ color: "#ef4444" }}>{ordinal(item.dueDay)}</span></span> : <span style={{ fontSize: 13, color: V.faint }}>No due date</span>}
                   </>
                 ) : (
                   <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                     <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 600 }}>
-                      <span style={{ color: "#F5A623" }}>Statement day:</span>
+                      <span style={{ color: "#ef4444" }}>Statement day:</span>
                       <input type="number" min="1" max="31" style={{ ...inp, width: 70, padding: "5px 8px" }} value={editStatDay} onChange={(e) => setEditStatDay(e.target.value)} />
                     </label>
                     <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 600 }}>
@@ -662,7 +662,7 @@ export default function DueItemDetailPage() {
               <div style={{ fontSize: 12, color: V.muted, marginBottom: 10 }}>Last {chart.points.length} month{chart.points.length > 1 ? "s" : ""} · Average {nativeCurrency} {chart.avg.toFixed(0)}</div>
               <div style={{ position: "relative", height: 180, border: `1px solid ${V.border}`, borderRadius: 12, padding: "12px 8px 28px", overflow: "hidden" }}>
                 <svg width="100%" height="140" viewBox={`0 0 ${Math.max(chart.points.length, 1) * 44} 140`} preserveAspectRatio="none">
-                  <line x1="0" y1={140 - (chart.avgPct / 100) * 120} x2={Math.max(chart.points.length, 1) * 44} y2={140 - (chart.avgPct / 100) * 120} stroke="#F5A623" strokeDasharray="5 5" strokeWidth="2" opacity="0.95" />
+                  <line x1="0" y1={140 - (chart.avgPct / 100) * 120} x2={Math.max(chart.points.length, 1) * 44} y2={140 - (chart.avgPct / 100) * 120} stroke="#ef4444" strokeDasharray="5 5" strokeWidth="2" opacity="0.95" />
                   {chart.points.map((point, index) => {
                     const x = index * 44 + 22;
                     const h = Math.max((point.pct / 100) * 120, 4);
@@ -767,7 +767,7 @@ export default function DueItemDetailPage() {
                           return (
                             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
                               <div style={{ flex: 1, height: 6, background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", borderRadius: 999, overflow: "hidden" }}>
-                                <div style={{ height: "100%", width: `${pct}%`, background: isComplete ? "#16a34a" : "linear-gradient(90deg,#F5A623 0%,#f59e0b 100%)", borderRadius: 999, transition: "width 0.3s" }} />
+                                <div style={{ height: "100%", width: `${pct}%`, background: isComplete ? "#16a34a" : "linear-gradient(90deg,#ef4444 0%,#f59e0b 100%)", borderRadius: 999, transition: "width 0.3s" }} />
                               </div>
                               <span style={{ fontSize: 10, fontWeight: 800, color: isComplete ? "#16a34a" : V.accent, minWidth: 34, textAlign: "right" }}>{pct}%</span>
                             </div>

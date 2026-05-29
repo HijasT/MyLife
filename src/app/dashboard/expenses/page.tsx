@@ -6,7 +6,7 @@ export default function ExpensesPage() {
       icon="💳"
       title="Expense Tracker"
       description="Log daily spending, tag by category, and let the Finance Hub do the maths across your budget and portfolio."
-      color="#F5A623"
+      color="#eb6607"
       phase={2}
       features={[
         "Quick-add form — amount, category, merchant, note",
