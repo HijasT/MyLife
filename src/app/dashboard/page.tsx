@@ -9,7 +9,7 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const cardStyle = {
     display: "block",
     borderRadius: mylifeBorderRadius.xl,
-    padding: mylifeSpacing[6],
+    padding: `${mylifeSpacing[6]} ${mylifeSpacing[6]}`,
     border: "1px solid var(--card-border)",
     transition: "all 200ms ease-in-out",
     backgroundColor: "var(--card-bg)",
@@ -17,40 +17,58 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
     opacity: isComingSoon ? 0.8 : 1,
   } as const;
 
+  const headerStyle = {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: mylifeSpacing[4],
+  };
+
+  const iconStyle = {
+    fontSize: "1.5rem",
+  };
+
+  const badgeStyle = {
+    fontSize: "11px",
+    fontWeight: 600,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase" as const,
+    padding: `${mylifeSpacing[1]} ${mylifeSpacing[2]}`,
+    borderRadius: mylifeBorderRadius.full,
+    backgroundColor: "var(--main-bg2)",
+    color: "var(--text-muted)",
+  };
+
+  const titleStyle = {
+    fontWeight: 600,
+    color: "var(--text-primary)",
+    marginBottom: mylifeSpacing[1],
+    fontSize: "16px",
+  };
+
+  const descriptionStyle = {
+    fontSize: "14px",
+    color: "var(--text-muted)",
+    lineHeight: "1.5",
+  };
+
+  const accentBarStyle = {
+    marginTop: mylifeSpacing[4],
+    height: "2px",
+    width: mylifeSpacing[8],
+    borderRadius: mylifeBorderRadius.full,
+    background: module.color || "var(--color-accent)",
+  };
+
   const content = (
     <>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: mylifeSpacing[4] }}>
-        <span style={{ fontSize: "1.5rem" }}>{module.icon}</span>
-        {isComingSoon && (
-          <span style={{
-            fontSize: "10px",
-            fontWeight: "600",
-            letterSpacing: "0.1em",
-            textTransform: "uppercase",
-            padding: `${mylifeSpacing[1]} ${mylifeSpacing[2]}`,
-            borderRadius: mylifeBorderRadius.full,
-            backgroundColor: "var(--main-bg2)",
-            color: "var(--text-muted)"
-          }}>
-            Coming soon
-          </span>
-        )}
+      <div style={headerStyle}>
+        <span style={iconStyle}>{module.icon}</span>
+        {isComingSoon && <span style={badgeStyle}>Coming soon</span>}
       </div>
-      <p style={{ fontWeight: "600", color: "var(--text-primary)", marginBottom: mylifeSpacing[1] }}>
-        {module.label}
-      </p>
-      <p style={{ fontSize: "14px", color: "var(--text-muted)" }}>
-        {module.description}
-      </p>
-      {!isComingSoon && (
-        <div style={{
-          marginTop: mylifeSpacing[4],
-          height: "2px",
-          width: mylifeSpacing[8],
-          borderRadius: mylifeBorderRadius.full,
-          background: module.color
-        }} />
-      )}
+      <p style={titleStyle}>{module.label}</p>
+      <p style={descriptionStyle}>{module.description}</p>
+      {!isComingSoon && <div style={accentBarStyle} />}
     </>
   );
 
