@@ -6,7 +6,7 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const isComingSoon = module.status === "coming-soon";
 
   const cardClass =
-    "module-card block rounded-2xl p-6 border transition-colors bg-[var(--card-bg)] border-[var(--card-border)]";
+  "module-card block rounded-2xl p-6 border transition-colors bg-[var(--mylife-surface)] border-[var(--mylife-border)] hover:border-[var(--mylife-primary)] hover:shadow-[var(--mylife-shadow-lg)]";
 
   const content = (
     <>
@@ -18,8 +18,8 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
           </span>
         )}
       </div>
-      <p className="font-semibold text-[var(--text-primary)] mb-1">{module.label}</p>
-      <p className="text-sm text-[var(--text-muted)]">{module.description}</p>
+      <p className="font-semibold text-[var(--mylife-text)] mb-1">{module.label}</p>
+	  <p className="text-sm text-[var(--mylife-text-muted)]">{module.description}</p>
       {!isComingSoon && (
         <div className="mt-4 h-0.5 w-8 rounded-full" style={{ background: module.color }} />
       )}
