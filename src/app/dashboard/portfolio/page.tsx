@@ -900,14 +900,19 @@ export default function PortfolioPage() {
   }, [items, allStats]);
 
   const V = {
-    bg: isDark ? "#0d0f14" : "#f9f8f5",
+    bg: isDark ? "#0d0f14" : "#faf8f4",
     card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)",
+    border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
     text: isDark ? "#f0ede8" : "#1a1a1a",
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
-    accent: "#F5A623",
+    accent: "#eb6607",
+    accentSoft: isDark ? "rgba(235,102,7,0.16)" : "rgba(235,102,7,0.10)",
+    shadow: isDark
+      ? "0 1px 3px rgba(0,0,0,0.45)"
+      : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)",
+    shadowAccent: "0 4px 14px rgba(235,102,7,0.30)",
   };
 
   const btn = {
@@ -919,6 +924,8 @@ export default function PortfolioPage() {
     cursor: "pointer",
     fontSize: 13,
     fontWeight: 600,
+    boxShadow: V.shadow,
+    transition: "all 150ms ease",
   } as const;
 
   const btnP = {
@@ -927,6 +934,7 @@ export default function PortfolioPage() {
     border: "none",
     color: "#fff",
     fontWeight: 700,
+    boxShadow: V.shadowAccent,
   } as const;
 
   const inp = {
@@ -1377,7 +1385,8 @@ export default function PortfolioPage() {
                   background: V.card,
                   border: `1px solid ${V.border}`,
                   borderRadius: 12,
-                  padding: "12px 14px",
+                  padding: "14px 16px",
+                  boxShadow: V.shadow,
                 }}
               >
                 <div
