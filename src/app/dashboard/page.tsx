@@ -1,10 +1,7 @@
-'use client';
-
+import { createClient } from "@/lib/supabase/server";
 import { MODULES } from "@/lib/modules";
 import Link from "next/link";
 import { mylifeBorderRadius, mylifeSpacing } from "@/lib/mylife-design-tokens";
-import { createClient } from "@/utils/supabase/client";
-import { useEffect, useState } from "react";
 
 function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const isComingSoon = module.status === "coming-soon";
@@ -27,6 +24,10 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
     marginBottom: mylifeSpacing[4],
   };
 
+  const iconStyle = {
+    fontSize: "1.5rem",
+  };
+
   const badgeStyle = {
     fontSize: "11px",
     fontWeight: 600,
@@ -45,6 +46,12 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
     fontSize: "16px",
   };
 
+  const descriptionStyle = {
+    fontSize: "14px",
+    color: "var(--text-muted)",
+    lineHeight: "1.5",
+  };
+
   const accentBarStyle = {
     marginTop: mylifeSpacing[4],
     height: "2px",
@@ -56,13 +63,11 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const content = (
     <>
       <div style={headerStyle}>
-        <span style={{ fontSize: "1.5rem" }}>{module.icon}</span>
+        <span style={iconStyle}>{module.icon}</span>
         {isComingSoon && <span style={badgeStyle}>Coming soon</span>}
       </div>
       <p style={titleStyle}>{module.label}</p>
-      <p style={{ fontSize: "14px", color: "var(--text-muted)", lineHeight: "1.5" }}>
-        {module.description}
-      </p>
+      <p style={descriptionStyle}>{module.description}</p>
       {!isComingSoon && <div style={accentBarStyle} />}
     </>
   );
@@ -82,191 +87,57 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   );
 }
 
-type CalEvent = {
-  id: string;
-  title: string;
-  event_type: string;
-  work_start?: string;
-  work_end?: string;
-  color?: string;
-  date: string;
-};
+export default async function DashboardPage() {
+  const supabase = await createClient();
 
-type PortfolioPurchase = {
-  id: string;
-  purchased_at: string;
-  transaction_type: string | null;
-  portfolio_items?: { symbol?: string; name?: string } | null;
-};
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-type PortfolioItem = {
-  id: string;
-  current_price: number | null;
-};
+  let displayName = "";
+  let hiddenModules: string[] = [];
+  let timezone = "UTC";
 
-type PortfolioStatRow = {
-  item_id: string;
-  units: number;
-  total_paid: number;
-  currency: string;
-  transaction_type: string | null;
-};
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("display_name, hidden_modules, timezone")
+      .eq("id", user.id)
+      .single();
 
-type ExpiryItem = {
-  id: string;
-  name: string;
-  expiry_date: string;
-  category: string;
-  location?: string;
-};
-
-export default function DashboardPage() {
-  const [displayName, setDisplayName] = useState("");
-  const [hiddenModules, setHiddenModules] = useState<string[]>([]);
-  const [timezone, setTimezone] = useState("UTC");
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [dubaiTemp, setDubaiTemp] = useState<number | null>(null);
-  const [weatherCode, setWeatherCode] = useState<number | null>(null);
-  const [todayEvents, setTodayEvents] = useState<CalEvent[]>([]);
-  const [tomorrowEvents, setTomorrowEvents] = useState<CalEvent[]>([]);
-  const [todayPortfolio, setTodayPortfolio] = useState<PortfolioPurchase[]>([]);
-  const [portfolioCurrentAed, setPortfolioCurrentAed] = useState(0);
-  const [expiringItems, setExpiringItems] = useState<ExpiryItem[]>([]);
-
-  useEffect(() => {
-    const initializeData = async () => {
-      const supabase = createClient();
-
-      // Get user
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      setUser(authUser);
-
-      if (authUser) {
-        // Get profile
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("display_name, hidden_modules, timezone")
-          .eq("id", authUser.id)
-          .single();
-
-        setDisplayName(profile?.display_name ?? "");
-        setHiddenModules(profile?.hidden_modules ?? []);
-        setTimezone(profile?.timezone ?? "UTC");
-      }
-
-      // Get weather
-      try {
-        const wRes = await fetch(
-          "https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,weather_code",
-          { next: { revalidate: 1800 } }
-        );
-        const wData = await wRes.json();
-        setDubaiTemp(wData?.current?.temperature_2m ?? null);
-        setWeatherCode(wData?.current?.weather_code ?? null);
-      } catch {
-        // Skip weather errors
-      }
-
-      // Get calendar and portfolio data if user exists
-      if (authUser) {
-        const now = new Date();
-        const today = new Intl.DateTimeFormat("en-CA", {
-          timeZone: timezone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(now).replace(/\//g, "-");
-
-        const tomorrowDate = new Date(now);
-        tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-        const tomorrow = new Intl.DateTimeFormat("en-CA", {
-          timeZone: timezone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }).format(tomorrowDate).replace(/\//g, "-");
-
-        const weekFromNow = new Date(now);
-        weekFromNow.setDate(weekFromNow.getDate() + 7);
-        const weekStr = weekFromNow.toLocaleDateString("en-CA", { timeZone: timezone });
-
-        const [calendarRes, portfolioRes, itemRes, statRes, expiryRes] = await Promise.all([
-          supabase
-            .from("calendar_events")
-            .select("id,title,event_type,work_start,work_end,color,date")
-            .eq("user_id", authUser.id)
-            .in("date", [today, tomorrow])
-            .order("work_start", { ascending: true }),
-          supabase
-            .from("portfolio_purchases")
-            .select("id,purchased_at,transaction_type,portfolio_items(symbol,name)")
-            .eq("user_id", authUser.id)
-            .gte("purchased_at", `${today}T00:00:00`)
-            .lte("purchased_at", `${today}T23:59:59`)
-            .order("purchased_at", { ascending: false }),
-          supabase
-            .from("portfolio_items")
-            .select("id,current_price")
-            .eq("user_id", authUser.id),
-          supabase
-            .from("portfolio_purchases")
-            .select("item_id,units,total_paid,currency,transaction_type")
-            .eq("user_id", authUser.id),
-          supabase
-            .from("inventory_items")
-            .select("id,name,expiry_date,category,location")
-            .eq("user_id", authUser.id)
-            .eq("is_finished", false)
-            .not("expiry_date", "is", null)
-            .lte("expiry_date", weekStr)
-            .order("expiry_date", { ascending: true }),
-        ]);
-
-        const allCalEvents = (calendarRes.data ?? []) as CalEvent[];
-        setTodayEvents(allCalEvents.filter(e => e.date === today));
-        setTomorrowEvents(allCalEvents.filter(e => e.date === tomorrow));
-        setTodayPortfolio((portfolioRes.data ?? []) as PortfolioPurchase[]);
-        setExpiringItems((expiryRes.data ?? []) as ExpiryItem[]);
-
-        const items = (itemRes.data ?? []) as PortfolioItem[];
-        const stats = (statRes.data ?? []) as PortfolioStatRow[];
-
-        const statMap = new Map<string, number>();
-        for (const row of stats) {
-          const tx =
-            row.transaction_type ??
-            (((Number(row.units) || 0) < 0 || (Number(row.total_paid) || 0) < 0) ? "sell" : "buy");
-          const absUnits = Math.abs(Number(row.units) || 0);
-          const existing = statMap.get(row.item_id) ?? 0;
-          statMap.set(row.item_id, tx === "buy" ? existing + absUnits : existing - absUnits);
-        }
-
-        let totalAed = 0;
-        for (const item of items) {
-          const units = Math.max(0, statMap.get(item.id) ?? 0);
-          totalAed += (item.current_price ?? 0) * units;
-        }
-        setPortfolioCurrentAed(totalAed);
-      }
-
-      setLoading(false);
-    };
-
-    initializeData();
-  }, [timezone]);
+    displayName = profile?.display_name ?? "";
+    hiddenModules = profile?.hidden_modules ?? [];
+    timezone = profile?.timezone ?? "UTC";
+  }
 
   const now = new Date();
-  const hour = Number(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      hour: "numeric",
-      hour12: false,
-    }).format(now)
-  );
 
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  const firstName = displayName || user?.email?.split("@")[0] || "there";
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(now)
+    .replace(/\//g, "-");
+
+  const tomorrowDate = new Date(now);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(tomorrowDate)
+    .replace(/\//g, "-");
+
+  const timeNow = now.toLocaleTimeString("en-AE", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
 
   const dateLong = now.toLocaleDateString("en-AE", {
     timeZone: timezone,
@@ -276,33 +147,151 @@ export default function DashboardPage() {
     year: "numeric",
   });
 
-  const timeNow = now.toLocaleTimeString("en-AE", {
-    timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      hour12: false,
+    }).format(now)
+  );
 
-  const weatherEmoji = (code: number | null, hr: number): string => {
+  // Dubai weather
+  let dubaiTemp: number | null = null;
+  let weatherCode: number | null = null;
+  try {
+    const wRes = await fetch(
+      "https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,weather_code&timezone=Asia%2FDubai",
+      { next: { revalidate: 1800 } }
+    );
+    const wData = await wRes.json();
+    dubaiTemp = wData?.current?.temperature_2m ?? null;
+    weatherCode = wData?.current?.weather_code ?? null;
+  } catch { /* skip */ }
+
+  function weatherEmoji(code: number | null, hr: number): string {
     if (code === null) return "";
     const isNight = hr < 6 || hr >= 19;
     if (code === 0) return isNight ? "🌙" : "☀️";
-    if (code <= 2) return isNight ? "🌙" : "🌤️";
-    if (code <= 3) return "⛅";
+    if (code <= 2)  return isNight ? "🌙" : "🌤️";
+    if (code <= 3)  return "⛅";
     if (code <= 49) return "🌫️";
     if (code <= 69) return "🌧️";
     if (code <= 79) return "🌨️";
     if (code <= 99) return "⛈️";
     return "🌤️";
+  }
+
+  const greeting =
+    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  const firstName = displayName || user?.email?.split("@")[0] || "there";
+
+  type CalEvent = {
+    id: string;
+    title: string;
+    event_type: string;
+    work_start?: string;
+    work_end?: string;
+    color?: string;
+    date: string;
   };
 
-  const fmt12 = (t?: string) => {
+  type PortfolioPurchase = {
+    id: string;
+    purchased_at: string;
+    transaction_type: string | null;
+    portfolio_items?: { symbol?: string; name?: string } | null;
+  };
+
+  type PortfolioItem = {
+    id: string;
+    current_price: number | null;
+  };
+
+  type PortfolioStatRow = {
+    item_id: string;
+    units: number;
+    total_paid: number;
+    currency: string;
+    transaction_type: string | null;
+  };
+
+  let todayEvents: CalEvent[] = [];
+  let tomorrowEvents: CalEvent[] = [];
+  let todayPortfolio: PortfolioPurchase[] = [];
+  let portfolioCurrentAed = 0;
+  type ExpiryItem = { id: string; name: string; expiry_date: string; category: string; location: string | null };
+  let expiringItems: ExpiryItem[] = [];
+
+  if (user) {
+    const weekFromNow = new Date(now);
+    weekFromNow.setDate(weekFromNow.getDate() + 7);
+    const weekStr = weekFromNow.toLocaleDateString("en-CA", { timeZone: timezone });
+
+    const [calendarRes, portfolioRes, itemRes, statRes, expiryRes] = await Promise.all([
+      supabase
+        .from("calendar_events")
+        .select("id,title,event_type,work_start,work_end,color,date")
+        .eq("user_id", user.id)
+        .in("date", [today, tomorrow])
+        .order("work_start", { ascending: true }),
+      supabase
+        .from("portfolio_purchases")
+        .select("id,purchased_at,transaction_type,portfolio_items(symbol,name)")
+        .eq("user_id", user.id)
+        .gte("purchased_at", `${today}T00:00:00`)
+        .lte("purchased_at", `${today}T23:59:59`)
+        .order("purchased_at", { ascending: false }),
+      supabase
+        .from("portfolio_items")
+        .select("id,current_price")
+        .eq("user_id", user.id),
+      supabase
+        .from("portfolio_purchases")
+        .select("item_id,units,total_paid,currency,transaction_type")
+        .eq("user_id", user.id),
+      supabase
+        .from("inventory_items")
+        .select("id,name,expiry_date,category,location")
+        .eq("user_id", user.id)
+        .eq("is_finished", false)
+        .not("expiry_date", "is", null)
+        .lte("expiry_date", weekStr)
+        .order("expiry_date", { ascending: true }),
+    ]);
+
+    const allCalEvents = (calendarRes.data ?? []) as CalEvent[];
+    todayEvents = allCalEvents.filter(e => e.date === today);
+    tomorrowEvents = allCalEvents.filter(e => e.date === tomorrow);
+    todayPortfolio = (portfolioRes.data ?? []) as PortfolioPurchase[];
+    expiringItems = (expiryRes.data ?? []) as ExpiryItem[];
+
+    const items = (itemRes.data ?? []) as PortfolioItem[];
+    const stats = (statRes.data ?? []) as PortfolioStatRow[];
+
+    const statMap = new Map<string, number>();
+    for (const row of stats) {
+      const tx =
+        row.transaction_type ??
+        ((Number(row.units) || 0) < 0 || (Number(row.total_paid) || 0) < 0 ? "sell" : "buy");
+      const absUnits = Math.abs(Number(row.units) || 0);
+      const existing = statMap.get(row.item_id) ?? 0;
+      statMap.set(row.item_id, tx === "buy" ? existing + absUnits : existing - absUnits);
+    }
+
+    for (const item of items) {
+      const units = Math.max(0, statMap.get(item.id) ?? 0);
+      portfolioCurrentAed += (item.current_price ?? 0) * units;
+    }
+  }
+
+  function fmt12(t?: string) {
     if (!t) return "";
     const [h, m] = t.split(":").map(Number);
     const ampm = h >= 12 ? "PM" : "AM";
     const h12 = h % 12 || 12;
     return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
-  };
+  }
 
   const workToday = todayEvents.filter((e) => e.event_type === "work");
   const otherToday = todayEvents.filter((e) => e.event_type !== "work");
@@ -311,258 +300,50 @@ export default function DashboardPage() {
   const financeModules = visibleModules.filter((m) => m.group === "finance");
   const lifestyleModules = visibleModules.filter((m) => m.group === "lifestyle");
 
-  const containerStyle = {
-    padding: `${mylifeSpacing[6]}`,
-    maxWidth: "80rem",
-    marginLeft: "auto",
-    marginRight: "auto",
-  };
-
-  const headerSectionStyle = {
-    marginBottom: mylifeSpacing[10],
-  };
-
-  const greetingStyle = {
-    fontFamily: "var(--font-display)",
-    fontSize: "1.875rem",
-    marginBottom: mylifeSpacing[1],
-    color: "var(--text-primary)",
-  };
-
-  const dateTimeStyle = {
-    fontSize: "0.875rem",
-    color: "var(--text-muted)",
-  };
-
-  const dateHighlightStyle = {
-    color: "var(--text-primary)",
-  };
-
-  const dateWeatherStyle = {
-    color: "var(--text-muted)",
-  };
-
-  const snapshotContainerStyle = {
-    marginTop: mylifeSpacing[5],
-    borderRadius: mylifeBorderRadius.xl,
-    border: "1px solid var(--card-border)",
-    overflow: "hidden",
-    background: "var(--card-bg)",
-  };
-
-  const snapshotHeaderStyle = {
-    paddingLeft: mylifeSpacing[4],
-    paddingRight: mylifeSpacing[4],
-    paddingTop: mylifeSpacing[3],
-    paddingBottom: mylifeSpacing[3],
-    borderBottom: "1px solid var(--card-border)",
-    background: "var(--main-bg2)",
-  };
-
-  const snapshotHeaderTextStyle = {
-    fontSize: "11px",
-    fontWeight: "bold",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase" as const,
-    color: "var(--text-muted)",
-  };
-
-  const gridContainerStyle = {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-    gap: "0px",
-  };
-
-  const gridItemStyle = {
-    padding: mylifeSpacing[4],
-    borderBottom: "1px solid var(--card-border)",
-  };
-
-  const gridItemLastRowStyle = {
-    ...gridItemStyle,
-    borderBottom: "none",
-  };
-
-  const itemLabelStyle = {
-    fontSize: "11px",
-    fontWeight: "bold",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase" as const,
-    marginBottom: mylifeSpacing[2],
-    color: "var(--text-muted)",
-  };
-
-  const eventListStyle = {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: mylifeSpacing[2],
-  };
-
-  const eventItemStyle = {
-    fontSize: "14px",
-    color: "var(--text-primary)",
-  };
-
-  const eventTimeStyle = {
-    fontSize: "12px",
-    color: "var(--text-muted)",
-  };
-
-  const portfolioValueStyle = {
-    fontSize: "1.5rem",
-    fontWeight: "bold",
-    color: "var(--text-primary)",
-  };
-
-  const expiringAlertStyle = {
-    marginBottom: mylifeSpacing[8],
-  };
-
-  const expiringContainerStyle = {
-    borderRadius: mylifeBorderRadius.xl,
-    border: "1px solid var(--card-border)",
-    overflow: "hidden",
-    background: "var(--card-bg)",
-  };
-
-  const expiringHeaderStyle = {
-    paddingLeft: mylifeSpacing[4],
-    paddingRight: mylifeSpacing[4],
-    paddingTop: mylifeSpacing[3],
-    paddingBottom: mylifeSpacing[3],
-    borderBottom: "1px solid var(--card-border)",
-    display: "flex",
-    alignItems: "center",
-    gap: mylifeSpacing[2],
-  };
-
-  const expiringHeaderIconStyle = {
-    fontSize: "1.25rem",
-  };
-
-  const expiringHeaderTextStyle = {
-    fontSize: "11px",
-    fontWeight: "bold",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase" as const,
-    color: "var(--text-muted)",
-  };
-
-  const expiringItemStyle = {
-    paddingLeft: mylifeSpacing[4],
-    paddingRight: mylifeSpacing[4],
-    paddingTop: mylifeSpacing[3],
-    paddingBottom: mylifeSpacing[3],
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottom: "1px solid var(--card-border)",
-  };
-
-  const expiringItemLastStyle = {
-    ...expiringItemStyle,
-    borderBottom: "none",
-  };
-
-  const expiringItemNameStyle = {
-    fontSize: "14px",
-    fontWeight: "500",
-    color: "var(--text-primary)",
-  };
-
-  const expiringItemMetaStyle = {
-    fontSize: "12px",
-    color: "var(--text-muted)",
-  };
-
-  const expiringItemStatusStyle = {
-    fontSize: "12px",
-    fontWeight: "bold",
-    flexShrink: 0,
-  };
-
-  const moduleSectionStyle = {
-    marginBottom: mylifeSpacing[10],
-  };
-
-  const moduleSectionHeaderStyle = {
-    display: "flex",
-    alignItems: "center",
-    gap: mylifeSpacing[3],
-    marginBottom: mylifeSpacing[4],
-  };
-
-  const moduleSectionTitleStyle = {
-    fontSize: "11px",
-    fontWeight: "bold",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase" as const,
-    color: "var(--color-accent)",
-  };
-
-  const moduleSectionLineStyle = {
-    flex: 1,
-    height: "1px",
-    background: "var(--divider)",
-  };
-
-  const moduleSectionDescStyle = {
-    fontSize: "12px",
-    color: "var(--text-muted)",
-  };
-
-  const moduleGridStyle = {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-    gap: mylifeSpacing[4],
-  };
-
-  if (loading) {
-    return (
-      <div style={containerStyle}>
-        <div style={{ color: "var(--text-muted)", textAlign: "center", paddingTop: mylifeSpacing[8] }}>
-          Loading...
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div style={containerStyle}>
-      {/* Header Section */}
-      <div style={headerSectionStyle}>
-        <h1 style={greetingStyle}>
-          {greeting}, <span style={{ color: "var(--color-accent)", fontStyle: "italic" }}>{firstName}.</span>
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="mb-10">
+        <h1 className="font-display text-3xl mb-1" style={{ color: "var(--text-primary)" }}>
+          {greeting}, <span className="text-accent italic">{firstName}.</span>
         </h1>
-        <p style={dateTimeStyle}>
-          {dateLong} · <span style={dateHighlightStyle}>{timeNow}</span>
+
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          {dateLong} · <span style={{ color: "var(--text-primary)" }}>{timeNow}</span>
           {dubaiTemp !== null && (
-            <span style={dateWeatherStyle}>
+            <span style={{ color: "var(--text-muted)" }}>
               {" "}· {weatherEmoji(weatherCode, hour)}{" "}
-              <span style={dateHighlightStyle}>{dubaiTemp.toFixed(0)}°C</span>
+              <span style={{ color: "var(--text-primary)" }}>{dubaiTemp.toFixed(0)}°C</span>
             </span>
           )}
         </p>
 
-        {/* Daily Snapshot */}
-        <div style={snapshotContainerStyle}>
-          <div style={snapshotHeaderStyle}>
-            <span style={snapshotHeaderTextStyle}>Daily snapshot</span>
+        <div
+          className="mt-5 rounded-2xl border overflow-hidden"
+          style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
+        >
+          <div
+            className="px-4 py-3 border-b"
+            style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
+          >
+            <span className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
+              Daily snapshot
+            </span>
           </div>
 
-          <div style={gridContainerStyle}>
-            {/* Today's Work */}
-            <div style={gridItemStyle}>
-              <div style={itemLabelStyle}>Today's work</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Today&apos;s work
+              </div>
               {workToday.length > 0 ? (
-                <div style={eventListStyle}>
+                <div className="flex flex-col gap-2">
                   {workToday.map((ev) => (
                     <div key={ev.id}>
-                      <div style={eventItemStyle}>
-                        {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
+                      <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                        {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "") : ev.title}
                       </div>
                       {ev.work_start && ev.work_end && (
-                        <div style={eventTimeStyle}>
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
                           {fmt12(ev.work_start)} to {fmt12(ev.work_end)}
                         </div>
                       )}
@@ -570,120 +351,103 @@ export default function DashboardPage() {
                   ))}
                 </div>
               ) : (
-                <div style={{ fontSize: "14px", color: "var(--text-muted)" }}>No work logged</div>
+                <div className="text-sm" style={{ color: "var(--text-muted)" }}>No work logged today</div>
               )}
 
               {tomorrowEvents.filter((e) => e.event_type === "work").length > 0 && (
                 <>
-                  <div style={{ ...itemLabelStyle, marginTop: mylifeSpacing[4] }}>Tomorrow's work</div>
-                  <div style={eventListStyle}>
-                    {tomorrowEvents
-                      .filter((e) => e.event_type === "work")
-                      .map((ev) => (
-                        <div key={ev.id}>
-                          <div style={eventItemStyle}>
-                            {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
-                          </div>
-                          {ev.work_start && ev.work_end && (
-                            <div style={eventTimeStyle}>
-                              {fmt12(ev.work_start)} – {fmt12(ev.work_end)}
-                            </div>
-                          )}
+                  <div className="text-[11px] font-bold tracking-widest uppercase mb-2 mt-4" style={{ color: "var(--text-muted)" }}>
+                    Tomorrow&apos;s work
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {tomorrowEvents.filter((e) => e.event_type === "work").map((ev) => (
+                      <div key={ev.id}>
+                        <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                          {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
                         </div>
-                      ))}
+                        {ev.work_start && ev.work_end && (
+                          <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                            {fmt12(ev.work_start)} – {fmt12(ev.work_end)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
             </div>
 
-            {/* Events & Portfolio */}
-            <div style={gridItemStyle}>
-              <div style={itemLabelStyle}>Events & portfolio</div>
-              <div style={eventListStyle}>
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Events & portfolio
+              </div>
+              <div className="flex flex-col gap-2">
                 {otherToday.slice(0, 2).map((ev) => (
-                  <div key={ev.id} style={eventItemStyle}>
-                    {ev.title}
-                  </div>
+                  <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>{ev.title}</div>
                 ))}
                 {todayPortfolio.slice(0, 2).map((tx) => (
-                  <div key={tx.id} style={eventItemStyle}>
+                  <div key={tx.id} className="text-sm" style={{ color: "var(--text-primary)" }}>
                     Portfolio: {tx.transaction_type === "sell" ? "Sold" : "Purchased"}{" "}
                     {tx.portfolio_items?.symbol ?? "Asset"}
                   </div>
                 ))}
                 {otherToday.length === 0 && todayPortfolio.length === 0 && (
-                  <div style={{ fontSize: "14px", color: "var(--text-muted)" }}>Quiet day</div>
+                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>Quiet day so far</div>
                 )}
               </div>
 
               {tomorrowEvents.filter((e) => e.event_type !== "work").length > 0 && (
                 <>
-                  <div style={{ ...itemLabelStyle, marginTop: mylifeSpacing[4] }}>Tomorrow</div>
-                  <div style={eventListStyle}>
-                    {tomorrowEvents
-                      .filter((e) => e.event_type !== "work")
-                      .slice(0, 2)
-                      .map((ev) => (
-                        <div key={ev.id} style={eventItemStyle}>
-                          {ev.title}
-                        </div>
-                      ))}
+                  <div className="text-[11px] font-bold tracking-widest uppercase mb-2 mt-4" style={{ color: "var(--text-muted)" }}>
+                    Tomorrow
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {tomorrowEvents.filter((e) => e.event_type !== "work").slice(0, 2).map((ev) => (
+                      <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>{ev.title}</div>
+                    ))}
                   </div>
                 </>
               )}
             </div>
 
-            {/* Portfolio Snapshot */}
-            <div style={gridItemLastRowStyle}>
-              <div style={itemLabelStyle}>Portfolio snapshot</div>
-              <div style={portfolioValueStyle}>
-                AED {portfolioCurrentAed.toLocaleString("en-AE", { minimumFractionDigits: 2 })}
+            <div className="p-4">
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Portfolio snapshot
               </div>
-              <div style={{ fontSize: "12px", marginTop: mylifeSpacing[1], color: "var(--text-muted)" }}>
-                Current value
+              <div className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
+                AED {portfolioCurrentAed.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
+              <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Current portfolio value</div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Expiring Items Alert */}
+      {/* Expiring items alert */}
       {expiringItems.length > 0 && (
-        <section style={expiringAlertStyle}>
-          <div style={expiringContainerStyle}>
-            <div style={expiringHeaderStyle}>
-              <span style={expiringHeaderIconStyle}>⏰</span>
-              <span style={expiringHeaderTextStyle}>
-                Expiring within 7 days — {expiringItems.length} item{expiringItems.length !== 1 ? "s" : ""}
+        <section className="mb-8">
+          <div className="rounded-2xl border overflow-hidden" style={{ background:"var(--card-bg)", borderColor:"rgba(239,68,68,0.3)" }}>
+            <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor:"rgba(239,68,68,0.2)", background:"rgba(239,68,68,0.05)" }}>
+              <span>⏰</span>
+              <span className="text-xs font-bold tracking-widest uppercase" style={{ color:"#ef4444" }}>
+                Expiring within 7 days — {expiringItems.length} item{expiringItems.length > 1 ? "s" : ""}
               </span>
             </div>
-            <div>
-              {expiringItems.map((item, idx) => {
-                const days = Math.ceil((new Date(item.expiry_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            <div className="divide-y" style={{ borderColor:"var(--card-border)" }}>
+              {expiringItems.map(item => {
+                const days = Math.ceil((new Date(item.expiry_date).getTime() - new Date(today).getTime()) / 86400000);
                 const isExpired = days < 0;
                 const isToday = days === 0;
-                const isLast = idx === expiringItems.length - 1;
-
                 return (
-                  <div key={item.id} style={isLast ? expiringItemLastStyle : expiringItemStyle}>
+                  <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-4">
                     <div>
-                      <div style={expiringItemNameStyle}>{item.name}</div>
-                      <div style={expiringItemMetaStyle}>
-                        {item.category}
-                        {item.location ? ` · ${item.location}` : ""}
+                      <div className="text-sm font-semibold" style={{ color:"var(--text-primary)" }}>{item.name}</div>
+                      <div className="text-xs" style={{ color:"var(--text-muted)" }}>
+                        {item.category}{item.location ? ` · ${item.location}` : ""}
                       </div>
                     </div>
-                    <div
-                      style={{
-                        ...expiringItemStatusStyle,
-                        color: isExpired ? "#ef4444" : isToday ? "#f59e0b" : "var(--text-muted)",
-                      }}
-                    >
-                      {isExpired
-                        ? `Expired ${Math.abs(days)}d ago`
-                        : isToday
-                        ? "Expires today"
-                        : `${days}d left`}
+                    <div className="text-xs font-bold shrink-0" style={{ color: isExpired ? "#ef4444" : isToday ? "#ef4444" : days <= 3 ? "#f59e0b" : "#eab308" }}>
+                      {isExpired ? `Expired ${Math.abs(days)}d ago` : isToday ? "Expires today!" : days === 1 ? "Tomorrow" : `${days} days`}
                     </div>
                   </div>
                 );
@@ -693,43 +457,32 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {/* Finance Modules */}
       {financeModules.length > 0 && (
-        <section style={moduleSectionStyle}>
-          <div style={moduleSectionHeaderStyle}>
-            <div style={{ display: "flex", alignItems: "center", gap: mylifeSpacing[2] }}>
-              <div
-                style={{
-                  width: mylifeSpacing[2],
-                  height: mylifeSpacing[2],
-                  borderRadius: mylifeBorderRadius.full,
-                  background: "var(--color-accent)",
-                }}
-              />
-              <h2 style={moduleSectionTitleStyle}>Finance</h2>
+        <section className="mb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-accent hub-pulse" />
+              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">Finance Hub</h2>
             </div>
-            <div style={moduleSectionLineStyle} />
-            <p style={moduleSectionDescStyle}>These modules support your financial goals</p>
+            <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>These modules share a financial ledger</p>
           </div>
-          <div style={moduleGridStyle}>
-            {financeModules.map((m) => (
-              <ModuleCard key={m.id} module={m} />
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {financeModules.map((m) => <ModuleCard key={m.id} module={m} />)}
           </div>
         </section>
       )}
 
-      {/* Lifestyle Modules */}
       {lifestyleModules.length > 0 && (
-        <section style={moduleSectionStyle}>
-          <div style={moduleSectionHeaderStyle}>
-            <h2 style={moduleSectionTitleStyle}>Lifestyle</h2>
-            <div style={moduleSectionLineStyle} />
+        <section className="mb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <h2 className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
+              Lifestyle
+            </h2>
+            <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
           </div>
-          <div style={moduleGridStyle}>
-            {lifestyleModules.map((m) => (
-              <ModuleCard key={m.id} module={m} />
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {lifestyleModules.map((m) => <ModuleCard key={m.id} module={m} />)}
           </div>
         </section>
       )}
