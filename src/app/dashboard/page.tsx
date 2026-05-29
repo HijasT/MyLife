@@ -2,44 +2,77 @@ import { createClient } from "@/lib/supabase/server";
 import { MODULES } from "@/lib/modules";
 import Link from "next/link";
 
+import { MODULES } from "@/lib/modules";
+import Link from "next/link";
+import { mylifeBorderRadius, mylifeSpacing } from "@/lib/mylife-design-tokens";
+
 function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const isComingSoon = module.status === "coming-soon";
 
-  const cardClass =
-  "module-card block rounded-2xl p-6 border transition-colors bg-[var(--mylife-surface)] border-[var(--mylife-border)] hover:border-[var(--mylife-primary)] hover:shadow-[var(--mylife-shadow-lg)]";
+  const cardStyle = {
+    display: "block",
+    borderRadius: mylifeBorderRadius.xl,
+    padding: mylifeSpacing[6],
+    border: "1px solid var(--card-border)",
+    transition: "all 200ms ease-in-out",
+    backgroundColor: "var(--card-bg)",
+    cursor: isComingSoon ? "default" : "pointer",
+    opacity: isComingSoon ? 0.8 : 1,
+  } as const;
 
   const content = (
     <>
-      <div className="flex items-start justify-between mb-4">
-        <span className="text-2xl">{module.icon}</span>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: mylifeSpacing[4] }}>
+        <span style={{ fontSize: "1.5rem" }}>{module.icon}</span>
         {isComingSoon && (
-          <span className="text-[10px] font-semibold tracking-widest uppercase px-2 py-1 rounded-full bg-[var(--main-bg2)] text-[var(--text-muted)]">
+          <span style={{
+            fontSize: "10px",
+            fontWeight: "600",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            padding: `${mylifeSpacing[1]} ${mylifeSpacing[2]}`,
+            borderRadius: mylifeBorderRadius.full,
+            backgroundColor: "var(--main-bg2)",
+            color: "var(--text-muted)"
+          }}>
             Coming soon
           </span>
         )}
       </div>
-      <p className="font-semibold text-[var(--mylife-text)] mb-1">{module.label}</p>
-	  <p className="text-sm text-[var(--mylife-text-muted)]">{module.description}</p>
+      <p style={{ fontWeight: "600", color: "var(--text-primary)", marginBottom: mylifeSpacing[1] }}>
+        {module.label}
+      </p>
+      <p style={{ fontSize: "14px", color: "var(--text-muted)" }}>
+        {module.description}
+      </p>
       {!isComingSoon && (
-        <div className="mt-4 h-0.5 w-8 rounded-full" style={{ background: module.color }} />
+        <div style={{
+          marginTop: mylifeSpacing[4],
+          height: "2px",
+          width: mylifeSpacing[8],
+          borderRadius: mylifeBorderRadius.full,
+          background: module.color
+        }} />
       )}
     </>
   );
 
   if (isComingSoon) {
     return (
-      <div className={`${cardClass} cursor-default opacity-80`} aria-disabled="true">
+      <div style={cardStyle} aria-disabled="true">
         {content}
       </div>
     );
   }
 
   return (
-    <Link href={module.href} className={`${cardClass} cursor-pointer`}>
+    <Link href={module.href} style={cardStyle}>
       {content}
     </Link>
   );
 }
+
+export default ModuleCard;
 
 export default async function DashboardPage() {
   const supabase = await createClient();
