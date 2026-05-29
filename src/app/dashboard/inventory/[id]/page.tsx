@@ -54,7 +54,18 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
   const [toast, setToast] = useState("");
   const [showDelete, setShowDelete] = useState(false);
 
-  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const [isDark, setIsDark] = useState(
+    typeof document !== "undefined" &&
+      document.documentElement.classList.contains("dark")
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const read = () => setIsDark(document.documentElement.classList.contains("dark"));
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     async function load() {

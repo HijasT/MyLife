@@ -396,9 +396,18 @@ export default function CalendarPage() {
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedPanelRef = useRef<HTMLDivElement | null>(null);
 
-  const isDark =
+  const [isDark, setIsDark] = useState(
     typeof document !== "undefined" &&
-    document.documentElement.classList.contains("dark");
+      document.documentElement.classList.contains("dark")
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const read = () => setIsDark(document.documentElement.classList.contains("dark"));
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
 
   const todayStr = getTodayInTz(timezone);
 

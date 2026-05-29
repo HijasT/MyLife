@@ -93,7 +93,18 @@ export default function InventoryPage() {
   const [toast, setToast] = useState("");
   const [sortBy, setSortBy] = useState<"name"|"expiry"|"quantity"|"location">("name");
 
-  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const [isDark, setIsDark] = useState(
+    typeof document !== "undefined" &&
+      document.documentElement.classList.contains("dark")
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const read = () => setIsDark(document.documentElement.classList.contains("dark"));
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
 
   useEffect(() => {
     async function load() {

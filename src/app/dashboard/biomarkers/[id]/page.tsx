@@ -132,7 +132,18 @@ export default function BiomarkerDetailPage({ params }: { params: Promise<{ id: 
   const [editFields, setEditFields] = useState({ method: "", refMin: "", refMax: "", unit: "", groupName: "", newGroupName: "" });
   const [historyEditMode, setHistoryEditMode] = useState(false);
   const [editingResults, setEditingResults] = useState<Record<string, { valueNum: string; valueText: string; notes: string }>>({});
-  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
+  const [isDark, setIsDark] = useState(
+    typeof document !== "undefined" &&
+      document.documentElement.classList.contains("dark")
+  );
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const read = () => setIsDark(document.documentElement.classList.contains("dark"));
+    read();
+    const obs = new MutationObserver(read);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
   const V = { bg: isDark ? "#0d0f14" : "#f9f8f5", card: isDark ? "#16191f" : "#ffffff", border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)", text: isDark ? "#f0ede8" : "#1a1a1a", muted: isDark ? "#9ba3b2" : "#6b7280", faint: isDark ? "#6b7280" : "#9ca3af", input: isDark ? "#1e2130" : "#f7f7f8", accent: "#10b981" };
   const btn = { padding: "10px 16px", minWidth: 92, height: 44, borderRadius: 14, border: `1px solid ${V.border}`, background: isDark ? "rgba(255,255,255,0.03)" : "#fff", color: V.text, cursor: "pointer", fontSize: 13, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", boxShadow: isDark ? "0 10px 24px rgba(0,0,0,0.18)" : "0 10px 24px rgba(15,23,42,0.06)" } as const;
   const btnP = { ...btn, minWidth: 160, background: "linear-gradient(135deg, #10b981 0%, #14b8a6 100%)", color: "#fff", border: "none" } as const;
