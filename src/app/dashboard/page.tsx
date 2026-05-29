@@ -1,9 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { MODULES } from "@/lib/modules";
 import Link from "next/link";
-
-import { MODULES } from "@/lib/modules";
-import Link from "next/link";
 import { mylifeBorderRadius, mylifeSpacing } from "@/lib/mylife-design-tokens";
 
 function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
@@ -71,8 +68,6 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
     </Link>
   );
 }
-
-export default ModuleCard;
 
 export default async function DashboardPage() {
   const supabase = await createClient();
