@@ -1,85 +1,99 @@
-// MyLife Service Worker - Basic offline support
+// MyLife Service Worker - offline support (v2, redirect-safe)
 
-const CACHE_NAME = 'mylife-v1';
-const RUNTIME_CACHE = 'mylife-runtime';
+const CACHE_NAME = 'mylife-v2';
+const RUNTIME_CACHE = 'mylife-runtime-v2';
 
-// Assets to cache on install
+// Only precache truly static, public, non-redirecting assets.
+// NOTE: never precache auth-gated HTML routes like /dashboard — they answer
+// with a redirect in a logged-out / SW context, and a cached redirected
+// response cannot be returned for a navigation (causes ERR_FAILED).
 const PRECACHE_ASSETS = [
-  '/dashboard',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
 ];
 
-// Install event - cache core assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(PRECACHE_ASSETS);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_ASSETS))
   );
   self.skipWaiting();
 });
 
-// Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
+    caches.keys().then((names) =>
+      Promise.all(
+        names
           .filter((name) => name !== CACHE_NAME && name !== RUNTIME_CACHE)
           .map((name) => caches.delete(name))
-      );
-    })
+      )
+    )
   );
   self.clients.claim();
 });
 
-// Fetch event - network first, fallback to cache
+// Only cache responses safe to replay: same-origin, 200, not a followed
+// redirect, and a normal ("basic") response.
+function isCacheable(response) {
+  return (
+    response &&
+    response.status === 200 &&
+    !response.redirected &&
+    response.type === 'basic'
+  );
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  
-  // Skip cross-origin requests
-  if (!request.url.startsWith(self.location.origin)) {
-    return;
-  }
 
-  // Network first strategy for API calls
-  if (request.url.includes('/api/') || request.url.includes('supabase')) {
+  if (!request.url.startsWith(self.location.origin)) return;
+
+  // Page navigations (HTML): NETWORK-FIRST so auth + fresh content always win.
+  // Never serve a cached redirect here.
+  if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          // Clone and cache successful responses
-          if (response.status === 200) {
-            const responseClone = response.clone();
-            caches.open(RUNTIME_CACHE).then((cache) => {
-              cache.put(request, responseClone);
-            });
+          if (isCacheable(response)) {
+            const clone = response.clone();
+            caches.open(RUNTIME_CACHE).then((c) => c.put(request, clone));
           }
           return response;
         })
-        .catch(() => {
-          // Fallback to cache on network failure
-          return caches.match(request);
+        .catch(async () => {
+          const cached = await caches.match(request);
+          if (cached && !cached.redirected) return cached;
+          return Response.error();
         })
     );
     return;
   }
 
-  // Cache first for static assets
-  event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
+  // API / Supabase: network-first
+  if (request.url.includes('/api/') || request.url.includes('supabase')) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (isCacheable(response)) {
+            const clone = response.clone();
+            caches.open(RUNTIME_CACHE).then((c) => c.put(request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
 
+  // Static assets: cache-first
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) return cached;
       return fetch(request).then((response) => {
-        // Cache successful responses
-        if (response.status === 200) {
-          const responseClone = response.clone();
-          caches.open(RUNTIME_CACHE).then((cache) => {
-            cache.put(request, responseClone);
-          });
+        if (isCacheable(response)) {
+          const clone = response.clone();
+          caches.open(RUNTIME_CACHE).then((c) => c.put(request, clone));
         }
         return response;
       });
