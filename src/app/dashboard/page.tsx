@@ -17,6 +17,17 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
     opacity: isComingSoon ? 0.8 : 1,
   } as const;
 
+  const headerStyle = {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: mylifeSpacing[4],
+  };
+
+  const iconStyle = {
+    fontSize: "1.5rem",
+  };
+
   const badgeStyle = {
     fontSize: "11px",
     fontWeight: 600,
@@ -28,35 +39,52 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
     color: "var(--text-muted)",
   };
 
+  const titleStyle = {
+    fontWeight: 600,
+    color: "var(--text-primary)",
+    marginBottom: mylifeSpacing[1],
+    fontSize: "16px",
+  };
+
+  const descriptionStyle = {
+    fontSize: "14px",
+    color: "var(--text-muted)",
+    lineHeight: "1.5",
+  };
+
+  const accentBarStyle = {
+    marginTop: mylifeSpacing[4],
+    height: "2px",
+    width: mylifeSpacing[8],
+    borderRadius: mylifeBorderRadius.full,
+    background: module.color || "var(--color-accent)",
+  };
+
   const content = (
     <>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: mylifeSpacing[4] }}>
-        <span style={{ fontSize: "1.5rem" }}>{module.icon}</span>
+      <div style={headerStyle}>
+        <span style={iconStyle}>{module.icon}</span>
         {isComingSoon && <span style={badgeStyle}>Coming soon</span>}
       </div>
-      <p style={{ fontWeight: 600, color: "var(--text-primary)", marginBottom: mylifeSpacing[1], fontSize: "16px" }}>
-        {module.label}
-      </p>
-      <p style={{ fontSize: "14px", color: "var(--text-muted)", lineHeight: "1.5" }}>
-        {module.description}
-      </p>
-      {!isComingSoon && (
-        <div style={{
-          marginTop: mylifeSpacing[4],
-          height: "2px",
-          width: mylifeSpacing[8],
-          borderRadius: mylifeBorderRadius.full,
-          background: module.color || "var(--color-accent)",
-        }} />
-      )}
+      <p style={titleStyle}>{module.label}</p>
+      <p style={descriptionStyle}>{module.description}</p>
+      {!isComingSoon && <div style={accentBarStyle} />}
     </>
   );
 
   if (isComingSoon) {
-    return <div style={cardStyle} aria-disabled="true">{content}</div>;
+    return (
+      <div style={cardStyle} aria-disabled="true">
+        {content}
+      </div>
+    );
   }
 
-  return <Link href={module.href} style={cardStyle}>{content}</Link>;
+  return (
+    <Link href={module.href} style={cardStyle}>
+      {content}
+    </Link>
+  );
 }
 
 export default async function DashboardPage() {
@@ -79,7 +107,18 @@ export default async function DashboardPage() {
 
     displayName = profile?.display_name ?? "";
     hiddenModules = profile?.hidden_modules ?? [];
-    timezone = profile?.timezone ?? "UTC";
+	
+	const rawTz = profile?.timezone;
+	const isValidTz = (tz: unknown): tz is string => {
+      if (typeof tz !== "string" || tz.trim() === "") return false;
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    timezone = isValidTz(rawTz) ? rawTz : "UTC";
   }
 
   const now = new Date();
@@ -132,22 +171,20 @@ export default async function DashboardPage() {
   let weatherCode: number | null = null;
   try {
     const wRes = await fetch(
-      "https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,weather_code",
+      "https://api.open-meteo.com/v1/forecast?latitude=25.2048&longitude=55.2708&current=temperature_2m,weather_code&timezone=Asia%2FDubai",
       { next: { revalidate: 1800 } }
     );
     const wData = await wRes.json();
     dubaiTemp = wData?.current?.temperature_2m ?? null;
     weatherCode = wData?.current?.weather_code ?? null;
-  } catch {
-    /* skip */
-  }
+  } catch { /* skip */ }
 
   function weatherEmoji(code: number | null, hr: number): string {
     if (code === null) return "";
     const isNight = hr < 6 || hr >= 19;
     if (code === 0) return isNight ? "🌙" : "☀️";
-    if (code <= 2) return isNight ? "🌙" : "🌤️";
-    if (code <= 3) return "⛅";
+    if (code <= 2)  return isNight ? "🌙" : "🌤️";
+    if (code <= 3)  return "⛅";
     if (code <= 49) return "🌫️";
     if (code <= 69) return "🌧️";
     if (code <= 79) return "🌨️";
@@ -194,7 +231,7 @@ export default async function DashboardPage() {
   let tomorrowEvents: CalEvent[] = [];
   let todayPortfolio: PortfolioPurchase[] = [];
   let portfolioCurrentAed = 0;
-  type ExpiryItem = { id: string; name: string; expiry_date: string; category: string; location?: string };
+  type ExpiryItem = { id: string; name: string; expiry_date: string; category: string; location: string | null };
   let expiringItems: ExpiryItem[] = [];
 
   if (user) {
@@ -235,8 +272,8 @@ export default async function DashboardPage() {
     ]);
 
     const allCalEvents = (calendarRes.data ?? []) as CalEvent[];
-    todayEvents = allCalEvents.filter((e) => e.date === today);
-    tomorrowEvents = allCalEvents.filter((e) => e.date === tomorrow);
+    todayEvents = allCalEvents.filter(e => e.date === today);
+    tomorrowEvents = allCalEvents.filter(e => e.date === tomorrow);
     todayPortfolio = (portfolioRes.data ?? []) as PortfolioPurchase[];
     expiringItems = (expiryRes.data ?? []) as ExpiryItem[];
 
@@ -274,37 +311,14 @@ export default async function DashboardPage() {
   const financeModules = visibleModules.filter((m) => m.group === "finance");
   const lifestyleModules = visibleModules.filter((m) => m.group === "lifestyle");
 
-  // ===== Style objects using design tokens =====
-  const labelStyle = {
-    fontSize: "11px",
-    fontWeight: "bold",
-    letterSpacing: "0.1em",
-    textTransform: "uppercase" as const,
-    marginBottom: mylifeSpacing[2],
-    color: "var(--text-muted)",
-  };
-
-  const cellStyle = {
-    padding: mylifeSpacing[4],
-    borderColor: "var(--card-border)",
-  };
-
-  const eventTextStyle = { fontSize: "14px", color: "var(--text-primary)" };
-  const eventTimeStyle = { fontSize: "12px", color: "var(--text-muted)" };
-  const mutedTextStyle = { fontSize: "14px", color: "var(--text-muted)" };
-
   return (
-    <div style={{ padding: mylifeSpacing[6], maxWidth: "64rem", marginLeft: "auto", marginRight: "auto" }}>
-      {/* Header */}
-      <div style={{ marginBottom: mylifeSpacing[10] }}>
-        <h1
-          className="font-display"
-          style={{ fontSize: "1.875rem", marginBottom: mylifeSpacing[1], color: "var(--text-primary)" }}
-        >
-          {greeting}, <span style={{ color: "var(--color-accent)", fontStyle: "italic" }}>{firstName}.</span>
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="mb-10">
+        <h1 className="font-display text-3xl mb-1" style={{ color: "var(--text-primary)" }}>
+          {greeting}, <span className="text-accent italic">{firstName}.</span>
         </h1>
 
-        <p style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
           {dateLong} · <span style={{ color: "var(--text-primary)" }}>{timeNow}</span>
           {dubaiTemp !== null && (
             <span style={{ color: "var(--text-muted)" }}>
@@ -314,52 +328,33 @@ export default async function DashboardPage() {
           )}
         </p>
 
-        {/* Daily snapshot */}
         <div
-          style={{
-            marginTop: mylifeSpacing[5],
-            borderRadius: mylifeBorderRadius.xl,
-            border: "1px solid var(--card-border)",
-            overflow: "hidden",
-            background: "var(--card-bg)",
-          }}
+          className="mt-5 rounded-2xl border overflow-hidden"
+          style={{ background: "var(--card-bg)", borderColor: "var(--card-border)" }}
         >
           <div
-            style={{
-              paddingLeft: mylifeSpacing[4],
-              paddingRight: mylifeSpacing[4],
-              paddingTop: mylifeSpacing[3],
-              paddingBottom: mylifeSpacing[3],
-              borderBottom: "1px solid var(--card-border)",
-              background: "var(--main-bg2)",
-            }}
+            className="px-4 py-3 border-b"
+            style={{ borderColor: "var(--card-border)", background: "var(--main-bg2)" }}
           >
-            <span
-              style={{
-                fontSize: "12px",
-                fontWeight: "bold",
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                color: "var(--text-muted)",
-              }}
-            >
+            <span className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
               Daily snapshot
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3">
-            {/* Today's work */}
-            <div style={{ ...cellStyle, borderBottom: "1px solid var(--card-border)" }} className="md:border-b-0 md:border-r">
-              <div style={labelStyle}>Today&apos;s work</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Today&apos;s work
+              </div>
               {workToday.length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: mylifeSpacing[2] }}>
+                <div className="flex flex-col gap-2">
                   {workToday.map((ev) => (
                     <div key={ev.id}>
-                      <div style={{ ...eventTextStyle, fontWeight: 600 }}>
-                        {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
+                      <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                        {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "") : ev.title}
                       </div>
                       {ev.work_start && ev.work_end && (
-                        <div style={eventTimeStyle}>
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
                           {fmt12(ev.work_start)} to {fmt12(ev.work_end)}
                         </div>
                       )}
@@ -367,78 +362,73 @@ export default async function DashboardPage() {
                   ))}
                 </div>
               ) : (
-                <div style={mutedTextStyle}>No work logged</div>
+                <div className="text-sm" style={{ color: "var(--text-muted)" }}>No work logged today</div>
               )}
 
               {tomorrowEvents.filter((e) => e.event_type === "work").length > 0 && (
                 <>
-                  <div style={{ ...labelStyle, marginTop: mylifeSpacing[4] }}>Tomorrow&apos;s work</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: mylifeSpacing[2] }}>
-                    {tomorrowEvents
-                      .filter((e) => e.event_type === "work")
-                      .map((ev) => (
-                        <div key={ev.id}>
-                          <div style={{ ...eventTextStyle, fontWeight: 600 }}>
-                            {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
-                          </div>
-                          {ev.work_start && ev.work_end && (
-                            <div style={eventTimeStyle}>
-                              {fmt12(ev.work_start)} – {fmt12(ev.work_end)}
-                            </div>
-                          )}
+                  <div className="text-[11px] font-bold tracking-widest uppercase mb-2 mt-4" style={{ color: "var(--text-muted)" }}>
+                    Tomorrow&apos;s work
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {tomorrowEvents.filter((e) => e.event_type === "work").map((ev) => (
+                      <div key={ev.id}>
+                        <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                          {ev.title.startsWith("Work:") ? ev.title.replace("Work:", "").trim() : ev.title}
                         </div>
-                      ))}
+                        {ev.work_start && ev.work_end && (
+                          <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                            {fmt12(ev.work_start)} – {fmt12(ev.work_end)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
             </div>
 
-            {/* Events & portfolio */}
-            <div style={{ ...cellStyle, borderBottom: "1px solid var(--card-border)" }} className="md:border-b-0 md:border-r">
-              <div style={labelStyle}>Events &amp; portfolio</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: mylifeSpacing[2] }}>
+            <div className="p-4 border-b md:border-b-0 md:border-r" style={{ borderColor: "var(--card-border)" }}>
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Events & portfolio
+              </div>
+              <div className="flex flex-col gap-2">
                 {otherToday.slice(0, 2).map((ev) => (
-                  <div key={ev.id} style={eventTextStyle}>
-                    {ev.title}
-                  </div>
+                  <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>{ev.title}</div>
                 ))}
                 {todayPortfolio.slice(0, 2).map((tx) => (
-                  <div key={tx.id} style={eventTextStyle}>
+                  <div key={tx.id} className="text-sm" style={{ color: "var(--text-primary)" }}>
                     Portfolio: {tx.transaction_type === "sell" ? "Sold" : "Purchased"}{" "}
                     {tx.portfolio_items?.symbol ?? "Asset"}
                   </div>
                 ))}
                 {otherToday.length === 0 && todayPortfolio.length === 0 && (
-                  <div style={mutedTextStyle}>Quiet day</div>
+                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>Quiet day so far</div>
                 )}
               </div>
 
               {tomorrowEvents.filter((e) => e.event_type !== "work").length > 0 && (
                 <>
-                  <div style={{ ...labelStyle, marginTop: mylifeSpacing[4] }}>Tomorrow</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: mylifeSpacing[2] }}>
-                    {tomorrowEvents
-                      .filter((e) => e.event_type !== "work")
-                      .slice(0, 2)
-                      .map((ev) => (
-                        <div key={ev.id} style={eventTextStyle}>
-                          {ev.title}
-                        </div>
-                      ))}
+                  <div className="text-[11px] font-bold tracking-widest uppercase mb-2 mt-4" style={{ color: "var(--text-muted)" }}>
+                    Tomorrow
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {tomorrowEvents.filter((e) => e.event_type !== "work").slice(0, 2).map((ev) => (
+                      <div key={ev.id} className="text-sm" style={{ color: "var(--text-primary)" }}>{ev.title}</div>
+                    ))}
                   </div>
                 </>
               )}
             </div>
 
-            {/* Portfolio snapshot */}
-            <div style={cellStyle}>
-              <div style={labelStyle}>Portfolio snapshot</div>
-              <div style={{ fontSize: "1.5rem", fontWeight: "bold", color: "var(--text-primary)" }}>
-                AED {portfolioCurrentAed.toLocaleString("en-AE", { minimumFractionDigits: 2 })}
+            <div className="p-4">
+              <div className="text-[11px] font-bold tracking-widest uppercase mb-2" style={{ color: "var(--text-muted)" }}>
+                Portfolio snapshot
               </div>
-              <div style={{ fontSize: "12px", marginTop: mylifeSpacing[1], color: "var(--text-muted)" }}>
-                Current value
+              <div className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
+                AED {portfolioCurrentAed.toLocaleString("en-AE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
+              <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Current portfolio value</div>
             </div>
           </div>
         </div>
@@ -446,85 +436,29 @@ export default async function DashboardPage() {
 
       {/* Expiring items alert */}
       {expiringItems.length > 0 && (
-        <section style={{ marginBottom: mylifeSpacing[8] }}>
-          <div
-            style={{
-              borderRadius: mylifeBorderRadius.xl,
-              border: "1px solid var(--card-border)",
-              overflow: "hidden",
-              background: "var(--card-bg)",
-            }}
-          >
-            <div
-              style={{
-                paddingLeft: mylifeSpacing[4],
-                paddingRight: mylifeSpacing[4],
-                paddingTop: mylifeSpacing[3],
-                paddingBottom: mylifeSpacing[3],
-                borderBottom: "1px solid var(--card-border)",
-                display: "flex",
-                alignItems: "center",
-                gap: mylifeSpacing[2],
-              }}
-            >
+        <section className="mb-8">
+          <div className="rounded-2xl border overflow-hidden" style={{ background:"var(--card-bg)", borderColor:"rgba(239,68,68,0.3)" }}>
+            <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor:"rgba(239,68,68,0.2)", background:"rgba(239,68,68,0.05)" }}>
               <span>⏰</span>
-              <span
-                style={{
-                  fontSize: "12px",
-                  fontWeight: "bold",
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  color: "var(--text-muted)",
-                }}
-              >
-                Expiring within 7 days — {expiringItems.length} item{expiringItems.length !== 1 ? "s" : ""}
+              <span className="text-xs font-bold tracking-widest uppercase" style={{ color:"#ef4444" }}>
+                Expiring within 7 days — {expiringItems.length} item{expiringItems.length > 1 ? "s" : ""}
               </span>
             </div>
-            <div>
-              {expiringItems.map((item, idx) => {
-                const days = Math.ceil(
-                  (new Date(item.expiry_date).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24)
-                );
+            <div className="divide-y" style={{ borderColor:"var(--card-border)" }}>
+              {expiringItems.map(item => {
+                const days = Math.ceil((new Date(item.expiry_date).getTime() - new Date(today).getTime()) / 86400000);
                 const isExpired = days < 0;
                 const isToday = days === 0;
-                const isLast = idx === expiringItems.length - 1;
-
                 return (
-                  <div
-                    key={item.id}
-                    style={{
-                      paddingLeft: mylifeSpacing[4],
-                      paddingRight: mylifeSpacing[4],
-                      paddingTop: mylifeSpacing[3],
-                      paddingBottom: mylifeSpacing[3],
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      borderBottom: isLast ? "none" : "1px solid var(--card-border)",
-                    }}
-                  >
+                  <div key={item.id} className="px-4 py-3 flex items-center justify-between gap-4">
                     <div>
-                      <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary)" }}>
-                        {item.name}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                        {item.category}
-                        {item.location ? ` · ${item.location}` : ""}
+                      <div className="text-sm font-semibold" style={{ color:"var(--text-primary)" }}>{item.name}</div>
+                      <div className="text-xs" style={{ color:"var(--text-muted)" }}>
+                        {item.category}{item.location ? ` · ${item.location}` : ""}
                       </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: "bold",
-                        flexShrink: 0,
-                        color: isExpired ? "#ef4444" : isToday ? "#f59e0b" : "var(--text-muted)",
-                      }}
-                    >
-                      {isExpired
-                        ? `Expired ${Math.abs(days)}d ago`
-                        : isToday
-                        ? "Expires today"
-                        : `${days}d left`}
+                    <div className="text-xs font-bold shrink-0" style={{ color: isExpired ? "#ef4444" : isToday ? "#ef4444" : days <= 3 ? "#f59e0b" : "#eab308" }}>
+                      {isExpired ? `Expired ${Math.abs(days)}d ago` : isToday ? "Expires today!" : days === 1 ? "Tomorrow" : `${days} days`}
                     </div>
                   </div>
                 );
@@ -534,64 +468,32 @@ export default async function DashboardPage() {
         </section>
       )}
 
-      {/* Finance modules */}
       {financeModules.length > 0 && (
-        <section style={{ marginBottom: mylifeSpacing[10] }}>
-          <div style={{ display: "flex", alignItems: "center", gap: mylifeSpacing[3], marginBottom: mylifeSpacing[4] }}>
-            <div style={{ display: "flex", alignItems: "center", gap: mylifeSpacing[2] }}>
-              <div
-                className="hub-pulse"
-                style={{
-                  width: mylifeSpacing[2],
-                  height: mylifeSpacing[2],
-                  borderRadius: mylifeBorderRadius.full,
-                  background: "var(--color-accent)",
-                }}
-              />
-              <h2
-                style={{
-                  fontSize: "12px",
-                  fontWeight: "bold",
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  color: "var(--color-accent)",
-                }}
-              >
-                Finance
-              </h2>
+        <section className="mb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-accent hub-pulse" />
+              <h2 className="text-xs font-bold tracking-widest uppercase text-accent">Finance Hub</h2>
             </div>
-            <div style={{ flex: 1, height: "1px", background: "var(--divider)" }} />
-            <p style={{ fontSize: "12px", color: "var(--text-muted)" }}>These modules sync together</p>
+            <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>These modules share a financial ledger</p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3" style={{ gap: mylifeSpacing[4] }}>
-            {financeModules.map((m) => (
-              <ModuleCard key={m.id} module={m} />
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {financeModules.map((m) => <ModuleCard key={m.id} module={m} />)}
           </div>
         </section>
       )}
 
-      {/* Lifestyle modules */}
       {lifestyleModules.length > 0 && (
-        <section style={{ marginBottom: mylifeSpacing[10] }}>
-          <div style={{ display: "flex", alignItems: "center", gap: mylifeSpacing[3], marginBottom: mylifeSpacing[4] }}>
-            <h2
-              style={{
-                fontSize: "12px",
-                fontWeight: "bold",
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                color: "var(--text-muted)",
-              }}
-            >
+        <section className="mb-10">
+          <div className="flex items-center gap-3 mb-4">
+            <h2 className="text-xs font-bold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
               Lifestyle
             </h2>
-            <div style={{ flex: 1, height: "1px", background: "var(--divider)" }} />
+            <div className="flex-1 h-px" style={{ background: "var(--divider)" }} />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" style={{ gap: mylifeSpacing[4] }}>
-            {lifestyleModules.map((m) => (
-              <ModuleCard key={m.id} module={m} />
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {lifestyleModules.map((m) => <ModuleCard key={m.id} module={m} />)}
           </div>
         </section>
       )}
