@@ -2048,7 +2048,7 @@ export default function CalendarPage() {
             WebkitBackdropFilter: "blur(4px)",
             zIndex: 50,
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "center",
             padding: "24px 16px",
             overflowY: "auto",
@@ -2064,9 +2064,8 @@ export default function CalendarPage() {
               border: `1px solid ${V.border}`,
               borderRadius: 18,
               width: "min(620px,100%)",
-              maxHeight: "90vh",
-              overflow: "auto",
-              margin: "auto",
+              maxHeight: "calc(100vh - 48px)",
+              overflowY: "auto",
               boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
             }}
             onClick={(e) => e.stopPropagation()}
