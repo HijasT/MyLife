@@ -1040,14 +1040,20 @@ export default function CalendarPage() {
   }, [selectedDate, eventsByDate, filteredEvents]);
 
   const V = {
-    bg: isDark ? "#0d0f14" : "#f9f8f5",
+    bg: isDark ? "#0d0f14" : "#f7f6f3",
     card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)",
+    cardAlt: isDark ? "#1b1f27" : "#f4f2ee",
+    border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
     text: isDark ? "#f0ede8" : "#1a1a1a",
     muted: isDark ? "#9ba3b2" : "#6b7280",
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
     accent: "#3b82f6",
+    accentSoft: isDark ? "rgba(59,130,246,0.16)" : "rgba(59,130,246,0.10)",
+    shadow: isDark
+      ? "0 1px 3px rgba(0,0,0,0.45)"
+      : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)",
+    shadowAccent: "0 4px 14px rgba(59,130,246,0.30)",
   };
 
   const btn = {
@@ -1059,6 +1065,8 @@ export default function CalendarPage() {
     cursor: "pointer",
     fontSize: 13,
     fontWeight: 600,
+    boxShadow: V.shadow,
+    transition: "all 150ms ease",
   } as const;
 
   const btnP = {
@@ -1067,6 +1075,7 @@ export default function CalendarPage() {
     border: "none",
     color: "#fff",
     fontWeight: 700,
+    boxShadow: V.shadowAccent,
   } as const;
 
   const inp = {
@@ -1406,42 +1415,61 @@ export default function CalendarPage() {
         />
       </div>
 
-      <div style={{ padding: "10px 24px 0", display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div
+        style={{
+          padding: "14px 24px 0",
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+          gap: 12,
+        }}
+      >
         {[
-          { label: "Work days", value: monthStats.days, color: "#3b82f6" },
-          { label: "Work hours", value: `${monthStats.hours}h`, color: "#3b82f6" },
-          { label: "Regular shifts", value: monthStats.regular, color: "#3b82f6" },
-          { label: "Extra shifts", value: monthStats.extra, color: "#ef4444" },
-          { label: "Leaves", value: monthStats.leaves, color: "#22c55e" },
-          { label: "Off days earned", value: monthStats.offDays, color: "#f59e0b" },
+          { label: "Work days", value: monthStats.days, color: V.accent },
+          { label: "Work hours", value: `${monthStats.hours}h`, color: V.accent },
+          {
+            label: "Events",
+            value: events.filter(
+              (e) => e.date.startsWith(month) && e.eventType !== "work"
+            ).length,
+            color: "#7c5cff",
+          },
+          { label: "Off days", value: monthStats.offDays, color: "#f59e0b" },
         ].map((s) => (
           <div
             key={s.label}
             style={{
               background: V.card,
               border: `1px solid ${V.border}`,
-              borderRadius: 10,
-              padding: "7px 13px",
-              display: "flex",
-              gap: 7,
-              alignItems: "center",
+              borderRadius: 14,
+              padding: "14px 16px",
+              boxShadow: V.shadow,
             }}
           >
-            <span style={{ fontSize: 15, fontWeight: 800, color: s.color }}>{s.value}</span>
-            <span style={{ fontSize: 11, color: V.faint }}>{s.label}</span>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: V.faint,
+              }}
+            >
+              {s.label}
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: s.color, marginTop: 4, lineHeight: 1.1 }}>
+              {s.value}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Off days breakdown */}
       {monthStats.days > 0 && (
-        <div style={{ padding: "6px 24px 0", fontSize: 11, color: V.faint }}>
-          🟡 Off days: <strong style={{ color: "#f59e0b" }}>{monthStats.offDays}</strong>
-          {" "}= base ({monthStats.days} days ÷ 5 × 2 = <strong>{monthStats.baseOffDays}</strong>)
+        <div style={{ padding: "8px 24px 0", fontSize: 11, color: V.faint }}>
+          Off days earned: <strong style={{ color: "#f59e0b" }}>{monthStats.offDays}</strong>
+          {" "}· every 5 days worked → 2 off
           {monthStats.extraDaysWorked > 0 && (
-            <> + extra days worked ({monthStats.extraDaysWorked})</>
+            <> · +{monthStats.extraDaysWorked} from extra days</>
           )}
-          {" "}· Formula: every 5 days worked → 2 off days
         </div>
       )}
 
@@ -1498,16 +1526,13 @@ export default function CalendarPage() {
                     key={day}
                     onClick={() => setSelectedDate(isSel ? null : dateStr)}
                     style={{
-                      minHeight: 78,
-                      borderRadius: 9,
-                      border: `1px solid ${isSel ? "rgba(245,166,35,0.6)" : V.border}`,
-                      background: isToday
-                        ? `${V.accent}15`
-                        : isSel
-                        ? "rgba(245,166,35,0.05)"
-                        : V.card,
+                      minHeight: 92,
+                      borderRadius: 12,
+                      border: `1px solid ${isSel ? V.accent : isToday ? V.accentSoft : V.border}`,
+                      background: isToday || isSel ? V.accentSoft : V.card,
+                      boxShadow: isSel ? `0 0 0 1px ${V.accent}` : V.shadow,
                       cursor: "pointer",
-                      padding: "5px 5px",
+                      padding: "7px 7px",
                       transition: "all 0.12s",
                     }}
                   >
@@ -1523,14 +1548,14 @@ export default function CalendarPage() {
                         style={{
                           fontSize: 12,
                           fontWeight: isToday ? 800 : 600,
-                          color: isToday ? V.accent : V.text,
-                          width: 20,
-                          height: 20,
+                          color: isToday ? "#fff" : V.text,
+                          width: 22,
+                          height: 22,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
                           borderRadius: "50%",
-                          background: isToday ? `${V.accent}20` : "transparent",
+                          background: isToday ? V.accent : "transparent",
                         }}
                       >
                         {day}
@@ -1557,11 +1582,11 @@ export default function CalendarPage() {
                         <div
                           key={ev.id}
                           style={{
-                            fontSize: 9,
+                            fontSize: 10,
                             fontWeight: 600,
-                            padding: "1px 4px",
-                            borderRadius: 3,
-                            background: `${ev.color}20`,
+                            padding: "2px 6px",
+                            borderRadius: 5,
+                            background: `${ev.color}22`,
                             color: ev.color,
                             whiteSpace: "nowrap",
                             overflow: "hidden",
@@ -1572,7 +1597,7 @@ export default function CalendarPage() {
                         </div>
                       ))}
                       {dayEvs.length > 2 && (
-                        <div style={{ fontSize: 9, color: V.faint }}>+{dayEvs.length - 2}</div>
+                        <div style={{ fontSize: 10, color: V.faint, paddingLeft: 2 }}>+{dayEvs.length - 2} more</div>
                       )}
                     </div>
                   </div>
