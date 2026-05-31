@@ -234,7 +234,7 @@ function isPaid(status: Status) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
-  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#ef4444" };
+  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "#ef4444" };
   if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
@@ -342,6 +342,7 @@ export default function DueTrackerPage() {
   const [showAddItem, setShowAddItem] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const [showOverflow, setShowOverflow] = useState(false);
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sortBy, setSortBy] = useState<SortKey>("manual");
@@ -961,8 +962,12 @@ export default function DueTrackerPage() {
   }, [items, prevEntries, settings.fxRates]);
 
   const V = getTheme(isDark);
-  const btn = { padding: "8px 14px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 13, fontWeight: 600 } as const;
-  const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700 } as const;
+  const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
+  const shadow = isDark
+    ? "0 1px 3px rgba(0,0,0,0.45)"
+    : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)";
+  const btn = { padding: "8px 14px", borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 13, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
+  const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700, boxShadow: "0 4px 14px rgba(239,68,68,0.30)" } as const;
   const inp = { padding: "8px 12px", borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
 
   if (loading) {
@@ -976,16 +981,59 @@ export default function DueTrackerPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
-      <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+      <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 800 }}>Due <span style={{ color: V.accent, fontStyle: "italic" }}>Tracker</span></div>
-          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>Track and manage your recurring payments with status tracking.</div>
+          <div style={{ fontSize: 13, color: V.accent, fontWeight: 700, letterSpacing: "0.04em" }}>DUE TRACKER</div>
+          <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.1, marginTop: 2 }}>{fmtMonth(month)}</div>
+          <div style={{ fontSize: 13, color: V.faint, marginTop: 4 }}>Recurring payments &amp; status</div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={btn} onClick={() => setShowHidden((v) => !v)}>{showHidden ? "Hide hidden" : "Show hidden"}</button>
-          <button style={btn} onClick={() => setShowSettings(true)}>⚙ Settings</button>
-          <button style={settings.isLocked ? btnP : btn} onClick={() => void toggleMonthLock(settings.isLocked ? false : true)}>{settings.isLocked ? "🔒 Unlock month" : "🔓 Lock month"}</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <button style={settings.isLocked ? btnP : btn} onClick={() => void toggleMonthLock(settings.isLocked ? false : true)}>{settings.isLocked ? "Unlock month" : "Lock month"}</button>
           <button style={btnP} onClick={() => setShowAddItem(true)}>+ Add due</button>
+          <div style={{ position: "relative" }}>
+            <button
+              style={{ ...btn, padding: "8px 12px" }}
+              onClick={() => setShowOverflow((v) => !v)}
+              aria-label="More options"
+            >
+              ⋯
+            </button>
+            {showOverflow && (
+              <>
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 19 }}
+                  onClick={() => setShowOverflow(false)}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    minWidth: 180,
+                    background: V.card,
+                    border: `1px solid ${V.border}`,
+                    borderRadius: 12,
+                    boxShadow: shadow,
+                    overflow: "hidden",
+                    zIndex: 20,
+                  }}
+                >
+                  <button
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", color: V.text, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                    onClick={() => { setShowHidden((v) => !v); setShowOverflow(false); }}
+                  >
+                    {showHidden ? "Hide hidden dues" : "Show hidden dues"}
+                  </button>
+                  <button
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", borderTop: `1px solid ${V.border}`, color: V.text, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                    onClick={() => { setShowSettings(true); setShowOverflow(false); }}
+                  >
+                    Settings
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -994,6 +1042,7 @@ export default function DueTrackerPage() {
         <span style={{ fontSize: 18, fontWeight: 700, minWidth: 180, textAlign: "center" }}>{fmtMonth(month)}</span>
         <button style={btn} onClick={() => void changeMonth(nextMonth(month))}>›</button>
         <button style={{ ...btn, fontSize: 12, padding: "6px 12px" }} onClick={() => void changeMonth(nowMonth())}>Today</button>
+        <div style={{ flex: 1 }} />
         <select value={filter} onChange={(e) => setFilter(e.target.value as FilterKey)} style={{ ...inp, minWidth: 120 }}>
           <option value="all">All</option>
           <option value="pending">Pending</option>
@@ -1012,39 +1061,43 @@ export default function DueTrackerPage() {
         </select>
       </div>
 
-      <div style={{ padding: "12px 24px 0", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(155px,1fr))", gap: 10 }}>
+      <div style={{ padding: "14px 24px 0", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
         {[
-          { label: "Total due (AED)", value: `AED ${stats.totalAed.toFixed(0)}`, color: V.accent },
+          { label: "Total due (AED)", value: `AED ${stats.totalAed.toFixed(0)}`, color: V.text },
           { label: "Paid", value: `AED ${stats.paidAed.toFixed(0)}`, color: "#16a34a" },
-          { label: "Pending", value: `AED ${stats.pendingAed.toFixed(0)}`, color: "#ef4444" },
-          { label: "Settled", value: `${stats.settledCount}/${stats.totalCount}`, color: V.muted },
+          { label: "Pending", value: `AED ${stats.pendingAed.toFixed(0)}`, color: V.accent },
         ].map((card) => (
-          <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{card.label}</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: card.color }}>{card.value}</div>
+          <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>{card.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: card.color, marginTop: 4, lineHeight: 1.1 }}>{card.value}</div>
           </div>
         ))}
-      </div>
-
-      <div style={{ margin: "10px 24px 0", background: V.card, border: `1px solid ${V.border}`, borderRadius: 12, padding: "12px 16px" }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>vs last month</div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 16, fontWeight: 800, color: stats.totalAed > lastMonthTotal ? "#ef4444" : stats.totalAed < lastMonthTotal ? "#16a34a" : V.muted }}>
-            {stats.totalAed > lastMonthTotal ? "▲" : stats.totalAed < lastMonthTotal ? "▼" : "→"} AED {Math.abs(stats.totalAed - lastMonthTotal).toFixed(0)}
-          </span>
-          <span style={{ fontSize: 11, color: V.faint }}>Last month: AED {lastMonthTotal.toFixed(0)}</span>
+        <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Settled</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: V.muted, marginTop: 4, lineHeight: 1.1 }}>{stats.settledCount}/{stats.totalCount}</div>
+          <div style={{ marginTop: 8, height: 5, background: V.input, borderRadius: 3, overflow: "hidden" }}>
+            <div style={{ width: `${stats.totalCount > 0 ? Math.round((stats.settledCount / stats.totalCount) * 100) : 0}%`, height: "100%", background: V.accent }} />
+          </div>
         </div>
       </div>
 
+      <div style={{ margin: "12px 24px 0", background: V.input, borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.06em" }}>vs last month</span>
+        <span style={{ fontSize: 15, fontWeight: 800, color: stats.totalAed > lastMonthTotal ? "#ef4444" : stats.totalAed < lastMonthTotal ? "#16a34a" : V.muted }}>
+          {stats.totalAed > lastMonthTotal ? "AED " + Math.abs(stats.totalAed - lastMonthTotal).toFixed(0) + " higher" : stats.totalAed < lastMonthTotal ? "AED " + Math.abs(stats.totalAed - lastMonthTotal).toFixed(0) + " lower" : "No change"}
+          <span style={{ fontSize: 12, color: V.faint, fontWeight: 400 }}> · was AED {lastMonthTotal.toFixed(0)}</span>
+        </span>
+      </div>
+
       {settings.isLocked && (
-        <div style={{ margin: "10px 24px 0", padding: "9px 14px", background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, fontSize: 13 }}>
-          🔒 This month is locked. Use Unlock month to edit anything.
+        <div style={{ margin: "12px 24px 0", padding: "10px 14px", background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, fontSize: 13, color: V.text }}>
+          This month is locked. Use Unlock month to edit anything.
         </div>
       )}
 
       {settings.note && (
-        <div style={{ margin: "10px 24px 0", padding: "9px 14px", background: "rgba(245,166,35,0.08)", border: "1px solid rgba(245,166,35,0.2)", borderRadius: 10, fontSize: 13 }}>
-          📝 {settings.note}
+        <div style={{ margin: "12px 24px 0", padding: "10px 14px", background: accentSoft, border: `1px solid ${V.accent}33`, borderRadius: 10, fontSize: 13, color: V.text }}>
+          {settings.note}
         </div>
       )}
 
@@ -1084,7 +1137,7 @@ export default function DueTrackerPage() {
           const currLabel = isIndia ? "INR" : "AED";
 
           return (
-            <div key={group} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden" }}>
+            <div key={group} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden", boxShadow: shadow }}>
               <div onClick={() => toggleGroup(group)} style={{ padding: "11px 16px", borderBottom: isCollapsed ? undefined : `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", cursor: "pointer", userSelect: "none" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                   <span style={{ fontSize: 12, color: V.faint, transition: "transform 0.2s", display: "inline-block", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>▾</span>
@@ -1100,7 +1153,7 @@ export default function DueTrackerPage() {
               </div>
 
               {!isCollapsed && !isIndia && group === "UAE" && (
-                <div style={{ padding: "12px 16px", borderBottom: `1px solid ${V.border}`, background: isDark ? "rgba(245,166,35,0.04)" : "rgba(245,166,35,0.02)" }}>
+                <div style={{ padding: "12px 16px", borderBottom: `1px solid ${V.border}`, background: isDark ? "rgba(239,68,68,0.04)" : "rgba(239,68,68,0.02)" }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
                     <select disabled={settings.isLocked} value={settings.remittanceStatus} onChange={(e) => setSettings((p) => ({ ...p, remittanceStatus: e.target.value as Status }))} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12 }}>
                       <option value="pending">Pending</option>
@@ -1136,7 +1189,7 @@ export default function DueTrackerPage() {
                           <option value="paid">Paid</option>
                                                     <option value="waived">Waived</option>
                         </select>
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: V.accent }}>Manual</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(239,68,68,0.12)", color: V.accent }}>Manual</span>
                       </div>
                       {remittanceEditMode && (
                         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
