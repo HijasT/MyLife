@@ -93,7 +93,7 @@ function ordinal(n: number) {
 
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
-  if (status === "partial") return { bg: "rgba(245,166,35,0.14)", fg: "#ef4444" };
+  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "#ef4444" };
   if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
@@ -572,8 +572,12 @@ export default function DueItemDetailPage() {
     input: isDark ? "#1e2130" : "#f9fafb",
     accent: "#ef4444",
   };
-  const btn = { padding: "7px 13px", borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600 } as const;
-  const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700 } as const;
+  const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
+  const shadow = isDark
+    ? "0 1px 3px rgba(0,0,0,0.45)"
+    : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)";
+  const btn = { padding: "7px 13px", borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
+  const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700, boxShadow: "0 4px 14px rgba(239,68,68,0.30)" } as const;
   const inp = { padding: "8px 12px", borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
   const section = { background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden" as const, marginBottom: 16 };
   const sHead = { padding: "11px 16px", borderBottom: `1px solid ${V.border}`, fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: V.faint, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)" };
@@ -599,7 +603,7 @@ export default function DueItemDetailPage() {
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.5px", margin: 0 }}>{item.name}</h1>
-            <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(245,166,35,0.12)", color: V.accent }}>{item.group}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(239,68,68,0.12)", color: V.accent }}>{item.group}</span>
             {item.isFixed && <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(99,102,241,0.1)", color: "#6366f1" }}>Fixed</span>}
             <div style={{ fontSize: 12, color: V.faint, marginTop: 2 }}>When a month is partial or pending, the unpaid amount is carried into the next month on top of the regular monthly due.</div>
           </div>
@@ -647,9 +651,9 @@ export default function DueItemDetailPage() {
               { label: "Settled", value: stats.settledCount, color: V.muted },
               { label: "Waived", value: stats.waived, color: V.faint },
             ].map((card) => (
-              <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 12, padding: "11px 14px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{card.label}</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: card.color }}>{card.value}</div>
+              <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{card.label}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: card.color }}>{card.value}</div>
               </div>
             ))}
           </div>
