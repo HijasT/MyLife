@@ -1632,27 +1632,44 @@ export default function CalendarPage() {
             </button>
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+              gap: 12,
+              marginBottom: 14,
+            }}
+          >
             {[
-              { label: "Days worked", value: weekStats.days, color: "#3b82f6" },
-              { label: "Hours", value: `${weekStats.hours}h`, color: "#3b82f6" },
-              { label: "Regular shifts", value: weekStats.regular, color: "#3b82f6" },
-              { label: "Extra shifts", value: weekStats.extra, color: "#ef4444" },
+              { label: "Days worked", value: weekStats.days, color: V.accent },
+              { label: "Hours", value: `${weekStats.hours}h`, color: V.accent },
+              { label: "Regular", value: weekStats.regular, color: V.accent },
+              { label: "Extra", value: weekStats.extra, color: "#ef4444" },
             ].map((s) => (
               <div
                 key={s.label}
                 style={{
                   background: V.card,
                   border: `1px solid ${V.border}`,
-                  borderRadius: 10,
-                  padding: "8px 14px",
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "center",
+                  borderRadius: 14,
+                  padding: "14px 16px",
+                  boxShadow: V.shadow,
                 }}
               >
-                <span style={{ fontSize: 16, fontWeight: 800, color: s.color }}>{s.value}</span>
-                <span style={{ fontSize: 12, color: V.faint }}>{s.label}</span>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    color: V.faint,
+                  }}
+                >
+                  {s.label}
+                </div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: s.color, marginTop: 4, lineHeight: 1.1 }}>
+                  {s.value}
+                </div>
               </div>
             ))}
           </div>
@@ -1672,14 +1689,11 @@ export default function CalendarPage() {
                   key={dateStr}
                   onClick={() => setSelectedDate(isSel ? null : dateStr)}
                   style={{
-                    background: isSel ? "rgba(245,166,35,0.05)" : V.card,
+                    background: isToday || isSel ? V.accentSoft : V.card,
                     border: `1px solid ${
-                      isSel
-                        ? "rgba(245,166,35,0.5)"
-                        : isToday
-                        ? "rgba(245,166,35,0.3)"
-                        : V.border
+                      isSel ? V.accent : isToday ? V.accentSoft : V.border
                     }`,
+                    boxShadow: isSel ? `0 0 0 1px ${V.accent}` : V.shadow,
                     borderRadius: 12,
                     padding: "10px 10px",
                     cursor: "pointer",
@@ -1693,7 +1707,20 @@ export default function CalendarPage() {
                         timeZone: timezone,
                       })}
                     </div>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: isToday ? V.accent : V.text }}>
+                    <div
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 800,
+                        color: isToday ? "#fff" : V.text,
+                        width: isToday ? 28 : "auto",
+                        height: isToday ? 28 : "auto",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: isToday ? "50%" : 0,
+                        background: isToday ? V.accent : "transparent",
+                      }}
+                    >
                       {d.toLocaleDateString("en-AE", {
                         day: "numeric",
                         timeZone: timezone,
@@ -2016,7 +2043,9 @@ export default function CalendarPage() {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(0,0,0,0.6)",
+            background: "rgba(8,10,14,0.62)",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
             zIndex: 50,
             display: "flex",
             alignItems: "flex-start",
@@ -2037,6 +2066,7 @@ export default function CalendarPage() {
               width: "min(620px,100%)",
               maxHeight: "92vh",
               overflow: "auto",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -2047,10 +2077,24 @@ export default function CalendarPage() {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                position: "sticky",
+                top: 0,
+                background: V.card,
+                zIndex: 2,
               }}
             >
-              <div style={{ fontSize: 18, fontWeight: 800 }}>
-                {editingEvent ? "Edit event" : "Add event"}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div
+                  style={{
+                    width: 8,
+                    height: 24,
+                    borderRadius: 4,
+                    background: V.accent,
+                  }}
+                />
+                <div style={{ fontSize: 18, fontWeight: 800 }}>
+                  {editingEvent ? "Edit event" : "Add event"}
+                </div>
               </div>
               <button
                 style={btn}
@@ -2306,10 +2350,15 @@ export default function CalendarPage() {
 
             <div
               style={{
-                padding: "0 20px 20px",
+                padding: "14px 20px",
                 display: "flex",
                 justifyContent: "flex-end",
                 gap: 8,
+                position: "sticky",
+                bottom: 0,
+                background: V.card,
+                borderTop: `1px solid ${V.border}`,
+                zIndex: 2,
               }}
             >
               <button
