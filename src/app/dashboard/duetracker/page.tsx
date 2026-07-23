@@ -56,6 +56,9 @@ type MonthSettings = {
   remittanceRate: number | null;
   remittanceStatus: Status;
   isLocked: boolean;
+  // Which group is treated as the remittance-tracked destination (defaults to "India"
+  // for backward compatibility). User-editable since groups are free-form/renamable.
+  remittanceGroup: string;
 };
 
 type ThemeVars = {
@@ -96,10 +99,10 @@ function fmtMonth(m: string) {
   });
 }
 
-function fmtDateTime(iso: string | null) {
+function fmtDateTime(iso: string | null, tz: string = APP_TZ) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-AE", {
-    timeZone: "Asia/Dubai",
+    timeZone: tz,
     day: "2-digit",
     month: "short",
     year: "2-digit",
@@ -145,7 +148,11 @@ function getCycleDates(statementDay: number | null, dueDay: number | null, today
     const statementDate = statementDay ? monthDayDate(statementMonth, statementDay) : null;
     let dueDate: Date | null = null;
     if (dueDay) {
-      const dueMonth = statementDay && statementDay < dueDay ? statementMonth : nextMonth(statementMonth);
+      // No statement day at all: the due day is just a same-month recurring date,
+      // there's no statement/due cycle to span a month boundary with.
+      // With a statement day: due falls in the same month if it's after the statement
+      // day within that month, otherwise it spans into the next month.
+      const dueMonth = !statementDay ? statementMonth : statementDay < dueDay ? statementMonth : nextMonth(statementMonth);
       dueDate = monthDayDate(dueMonth, dueDay);
     }
     return { statementDate, dueDate };
@@ -194,6 +201,17 @@ function getCycleDates(statementDay: number | null, dueDay: number | null, today
     }
   }
 
+  // Overdue determination independent of the "what to show next" rolling logic above:
+  // the most recent cycle (previous or current month's) whose due date has actually
+  // passed relative to today. `active`/`nextPair` roll forward once the current cycle's
+  // due date has passed, so they can never be used to detect overdue — this looks at
+  // previousPair/currentPair directly instead.
+  const pastDueDates = [previousPair.dueDate, currentPair.dueDate].filter(
+    (d): d is Date => !!d && d < today,
+  );
+  const mostRecentUnsettledDueDate =
+    pastDueDates.length > 0 ? pastDueDates.reduce((a, b) => (a > b ? a : b)) : null;
+
   return {
     statementDate: active.statementDate,
     dueDate: active.dueDate,
@@ -202,6 +220,7 @@ function getCycleDates(statementDay: number | null, dueDay: number | null, today
     daysUntilNext: nextDate ? daysBetween(today, nextDate) : null,
     previousStatementDate: previousPair.statementDate,
     previousDueDate: previousPair.dueDate,
+    mostRecentUnsettledDueDate,
   };
 }
 
@@ -211,18 +230,22 @@ function toAed(amount: number, currency: Currency, rates: Record<string, number>
   return rate ? amount / rate : amount;
 }
 
-function getTheme(isDark: boolean): ThemeVars {
+function getTheme(): ThemeVars {
   return {
-    bg: isDark ? "#0d0f14" : "#f9f8f5",
-    card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)",
-    text: isDark ? "#f0ede8" : "#1a1a1a",
-    muted: isDark ? "#9ba3b2" : "#6b7280",
-    faint: isDark ? "#5c6375" : "#9ca3af",
-    input: isDark ? "#1e2130" : "#f9fafb",
+    bg: "var(--main-bg)",
+    card: "var(--card-bg)",
+    border: "var(--card-border)",
+    text: "var(--text-primary)",
+    muted: "var(--text-secondary)",
+    faint: "var(--text-muted)",
+    input: "var(--main-bg2)",
     accent: "#ef4444",
   };
 }
+
+// Distinct from the module's red accent — flags the remaining/outstanding amount
+// specifically on a "partial" entry, so it reads differently from a plain pending due.
+const PARTIAL_REMAINING_COLOR = "#f59e0b";
 
 function isSettled(status: Status) {
   return status === "paid" || status === "waived";
@@ -284,13 +307,21 @@ function remittanceStatusFromRow(row: { remittance_paid?: boolean | null; cash_i
   return row.remittance_paid ? "paid" : "pending";
 }
 
+// Which group is the remittance-tracked destination — stored inside the existing
+// cash_in JSONB column (same pattern as __remittance_status) rather than requiring
+// a new due_month_settings column. Defaults to "India" for backward compatibility.
+function remittanceGroupFromRow(row: { cash_in?: Record<string, unknown> | null }): string {
+  const raw = row.cash_in?.__remittance_group;
+  return typeof raw === "string" && raw.trim() ? raw : "India";
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function dbToItem(r: any): DueItem {
   return {
     id: r.id,
     name: r.name,
     group: r.group_name ?? "General",
-    dueDay: r.due_date_day ?? r.due_day ?? null,
+    dueDay: r.due_date_day ?? null,
     statementDay: r.statement_date ?? null,
     defaultCurrency: (r.default_currency ?? "AED") as Currency,
     defaultAmount: r.default_amount ?? null,
@@ -339,6 +370,7 @@ export default function DueTrackerPage() {
     remittanceRate: null,
     remittanceStatus: "pending",
     isLocked: false,
+    remittanceGroup: "India",
   });
   const [showAddItem, setShowAddItem] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -356,6 +388,10 @@ export default function DueTrackerPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
+  // Tracks which item's payment modal is currently being opened (ensureEntry round-trip
+  // in flight) so the row can show visible pending feedback instead of appearing to do
+  // nothing while the network request completes.
+  const [openingPaymentFor, setOpeningPaymentFor] = useState<string | null>(null);
   const [newItem, setNewItem] = useState({
     name: "",
     group: "UAE",
@@ -383,6 +419,15 @@ export default function DueTrackerPage() {
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => obs.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!showOverflow) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowOverflow(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showOverflow]);
 
   useEffect(() => {
     async function load() {
@@ -441,6 +486,7 @@ export default function DueTrackerPage() {
             remittanceRate: s.remittance_rate ?? null,
             remittanceStatus: remittanceStatusFromRow(s),
             isLocked: s.is_locked ?? false,
+            remittanceGroup: remittanceGroupFromRow(s),
           }
         : {
             month: m,
@@ -452,7 +498,8 @@ export default function DueTrackerPage() {
             remittanceInr: null,
             remittanceRate: null,
             remittanceStatus: "pending",
-    isLocked: false,
+            isLocked: false,
+            remittanceGroup: "India",
           },
     );
     markSynced();
@@ -498,7 +545,9 @@ export default function DueTrackerPage() {
       currency = prev.currency;
       carryForwardAmount = getCarryForwardAmount(prev);
       carriedForwardFrom = carryForwardAmount > 0 ? prev.id : null;
-      note = buildCarryForwardNote(prevMonth(month), currency, carryForwardAmount, prev.note);
+      // Base note is "" (not prev.note) — otherwise unrelated freeform notes from the
+      // previous month bleed into every future month forever when there's no carry-forward.
+      note = buildCarryForwardNote(prevMonth(month), currency, carryForwardAmount, "");
       if (item.isFixed) amount = item.defaultAmount ?? prev.amount;
     }
 
@@ -540,6 +589,7 @@ export default function DueTrackerPage() {
       showToast("Month is locked");
       return;
     }
+    setOpeningPaymentFor(item.id);
     try {
       const entry = await ensureEntry(item);
       const totalAmount = getTotalDue(item, entry);
@@ -553,6 +603,8 @@ export default function DueTrackerPage() {
       setPaymentNote("");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not open payment form");
+    } finally {
+      setOpeningPaymentFor(null);
     }
   }
 
@@ -597,6 +649,15 @@ export default function DueTrackerPage() {
     if (status === "paid" || status === "partial") {
       await openPaymentModal(item);
       return;
+    }
+    // Switching an already partial/paid entry back to pending/waived resets its status
+    // with no undo in the UI — confirm first, since there's a recorded payment behind it.
+    const currentStatus = getEntry(item.id)?.status ?? "pending";
+    if (currentStatus === "partial" || currentStatus === "paid") {
+      const ok = window.confirm(
+        `This due is currently "${currentStatus}" with a payment recorded. Switching to "${status}" will clear that status (the payment history itself is not deleted, just the status/paid summary). Continue?`,
+      );
+      if (!ok) return;
     }
     try {
       const entry = await ensureEntry(item);
@@ -643,7 +704,7 @@ export default function DueTrackerPage() {
       month,
       main_currency: settings.mainCurrency,
       note: settings.note,
-      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus },
+      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus, __remittance_group: settings.remittanceGroup },
       fx_rates: settings.fxRates,
       groups: settings.groups,
       remittance_inr: settings.remittanceInr,
@@ -681,7 +742,7 @@ export default function DueTrackerPage() {
       month,
       main_currency: settings.mainCurrency,
       note: settings.note,
-      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus },
+      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus, __remittance_group: settings.remittanceGroup },
       fx_rates: settings.fxRates,
       groups: settings.groups,
       remittance_inr: inr,
@@ -738,6 +799,47 @@ export default function DueTrackerPage() {
     showToast(item.isHidden ? "Item shown" : "Item hidden");
   }
 
+  async function updateDueItemField(item: DueItem, field: "name" | "group_name" | "default_currency" | "is_fixed", value: string | boolean) {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
+    const { error } = await supabase.from("due_items").update({ [field]: value }).eq("id", item.id).eq("user_id", userId ?? "");
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    const fieldMap: Record<typeof field, keyof DueItem> = {
+      name: "name",
+      group_name: "group",
+      default_currency: "defaultCurrency",
+      is_fixed: "isFixed",
+    };
+    const localField = fieldMap[field];
+    setItems((p) => p.map((x) => (x.id === item.id ? { ...x, [localField]: value } as DueItem : x)));
+    showToast("Saved");
+  }
+
+  async function deleteDueItem(item: DueItem) {
+    if (settings.isLocked) {
+      showToast("Month is locked");
+      return;
+    }
+    if (!userId) return;
+    const ok = window.confirm(`Delete "${item.name}"? This also removes all of its monthly due entries and payment history. This cannot be undone.`);
+    if (!ok) return;
+    const { error } = await supabase.from("due_items").delete().eq("id", item.id).eq("user_id", userId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    setItems((p) => p.filter((x) => x.id !== item.id));
+    setEntries((p) => p.filter((e) => e.dueItemId !== item.id));
+    setPrevEntries((p) => p.filter((e) => e.dueItemId !== item.id));
+    if (editItemId === item.id) setEditItemId(null);
+    showToast("Due item deleted");
+  }
+
   async function autoCreateMonthEntries(uid: string, m: string) {
     const previous = prevMonth(m);
     const [itemsRes, entriesRes, prevEntriesRes] = await Promise.all([
@@ -764,7 +866,9 @@ export default function DueTrackerPage() {
 
       const monthlyAmount = item.defaultAmount ?? prev?.amount ?? 0;
       const currency = (prev?.currency ?? item.defaultCurrency) as Currency;
-      const note = buildCarryForwardNote(previous, currency, carryForwardAmount, prev?.note ?? "");
+      // Base note is "" (not prev's note) — this is an auto-created entry with no
+      // user-entered note yet, so only actual carry-forward lines should persist.
+      const note = buildCarryForwardNote(previous, currency, carryForwardAmount, "");
       const { error } = await supabase.from("due_entries").insert({
         user_id: uid,
         due_item_id: item.id,
@@ -807,7 +911,7 @@ export default function DueTrackerPage() {
       month,
       main_currency: merged.mainCurrency,
       note: merged.note,
-      cash_in: { ...merged.cashIn, __remittance_status: merged.remittanceStatus },
+      cash_in: { ...merged.cashIn, __remittance_status: merged.remittanceStatus, __remittance_group: merged.remittanceGroup },
       fx_rates: merged.fxRates,
       groups: merged.groups,
       remittance_inr: merged.remittanceInr,
@@ -846,7 +950,7 @@ export default function DueTrackerPage() {
     if (!userId || loading) return;
     if (settings.isLocked || !allSettled) return;
     void toggleMonthLock(true);
-  }, [allSettled, userId, loading]);
+  }, [allSettled, userId, loading, settings.isLocked]);
 
   const today = todayDubai(timezone);
   const currentDay = Number(today.slice(8, 10));
@@ -861,7 +965,7 @@ export default function DueTrackerPage() {
       const diffAbs = prevAmount == null ? null : amount - prevAmount;
       const diffPct = prevAmount && prevAmount !== 0 ? ((amount - prevAmount) / prevAmount) * 100 : null;
       const cycle = getCycleDates(item.statementDay, item.dueDay, today, entry?.status ?? "pending");
-      const overdue = !!cycle?.dueDate && cycle.dueDate < new Date(`${today}T00:00:00`) && !(entry && isSettled(entry.status));
+      const overdue = !!cycle?.mostRecentUnsettledDueDate && !(entry && isSettled(entry.status));
       const upcoming = !!cycle?.nextDate && (cycle.daysUntilNext ?? 99) >= 0 && (cycle.daysUntilNext ?? 99) <= 3 && !(entry && isSettled(entry.status));
       return { item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle };
     });
@@ -888,25 +992,36 @@ export default function DueTrackerPage() {
   }, [enrichedItems, filter, sortBy]);
 
   const groups = useMemo(() => {
+    const statusRank: Record<Status, number> = { pending: 0, partial: 1, paid: 2, waived: 3 };
     const map = new Map<string, typeof filteredSortedItems>();
     for (const row of filteredSortedItems) {
       const g = row.item.group || "General";
       if (!map.has(g)) map.set(g, []);
       map.get(g)?.push(row);
     }
+    // Within each group, promote pending/partial items above paid/waived ones —
+    // a stable secondary sort layered on top of whatever `sortBy` the user picked
+    // (filteredSortedItems is already sorted by sortBy, so this only reorders by
+    // status, preserving relative order — including manual order — within each status tier).
+    for (const [g, rows] of map) {
+      map.set(
+        g,
+        [...rows].sort((a, b) => statusRank[a.entry?.status ?? "pending"] - statusRank[b.entry?.status ?? "pending"]),
+      );
+    }
     return map;
   }, [filteredSortedItems]);
 
   const indiaTotalInr = useMemo(() => {
     return items
-      .filter((item) => item.group === "India")
+      .filter((item) => item.group === settings.remittanceGroup)
       .reduce((sum, item) => {
         const entry = getEntry(item.id);
         const amount = effectiveAmount(item, entry);
         const cur = effectiveCurrency(item, entry);
         return sum + (cur === "INR" ? amount : toAed(amount, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2));
       }, 0);
-  }, [items, entries, settings.fxRates]);
+  }, [items, entries, settings.fxRates, settings.remittanceGroup]);
 
   const remittanceInr = settings.remittanceInr ?? 0;
   const remittanceRate = settings.remittanceRate ?? settings.fxRates.INR ?? 25.2;
@@ -920,7 +1035,7 @@ export default function DueTrackerPage() {
     let settledCount = 0;
     let itemCount = 0;
 
-    for (const item of items.filter((i) => i.group !== "India")) {
+    for (const item of items.filter((i) => i.group !== settings.remittanceGroup)) {
       const entry = getEntry(item.id);
       const amount = effectiveAmount(item, entry);
       const currency = effectiveCurrency(item, entry);
@@ -944,18 +1059,18 @@ export default function DueTrackerPage() {
       settledCount,
       totalCount: itemCount,
     };
-  }, [items, entries, settings.fxRates, remittanceAed, remittanceInr, settings.remittanceStatus]);
+  }, [items, entries, settings.fxRates, settings.remittanceGroup, remittanceAed, remittanceInr, settings.remittanceStatus]);
 
   const lastMonthTotal = useMemo(() => {
     let total = 0;
-    for (const item of items.filter((i) => i.group !== "India")) {
+    for (const item of items.filter((i) => i.group !== settings.remittanceGroup)) {
       const prev = getPrevEntry(item.id);
       const amount = prev?.amount ?? item.defaultAmount ?? 0;
       const currency = (prev?.currency ?? item.defaultCurrency) as Currency;
       total += toAed(amount, currency, settings.fxRates);
     }
     const prevIndia = items
-      .filter((item) => item.group === "India")
+      .filter((item) => item.group === settings.remittanceGroup)
       .reduce((sum, item) => {
         const prev = getPrevEntry(item.id);
         const amount = prev?.amount ?? item.defaultAmount ?? 0;
@@ -963,9 +1078,9 @@ export default function DueTrackerPage() {
         return sum + (currency === "INR" ? amount : toAed(amount, currency, settings.fxRates) * (settings.fxRates.INR ?? 25.2));
       }, 0);
     return total + prevIndia / (settings.fxRates.INR ?? 25.2);
-  }, [items, prevEntries, settings.fxRates]);
+  }, [items, prevEntries, settings.fxRates, settings.remittanceGroup]);
 
-  const V = getTheme(isDark);
+  const V = getTheme();
   const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
   const shadow = isDark
     ? "0 1px 3px rgba(0,0,0,0.45)"
@@ -985,6 +1100,7 @@ export default function DueTrackerPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 13, color: V.accent, fontWeight: 700, letterSpacing: "0.04em" }}>DUE TRACKER</div>
@@ -1042,9 +1158,9 @@ export default function DueTrackerPage() {
       </div>
 
       <div style={{ padding: "14px 24px 0", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <button style={btn} onClick={() => void changeMonth(prevMonth(month))}>‹</button>
+        <button style={btn} onClick={() => void changeMonth(prevMonth(month))} aria-label="Previous month">‹</button>
         <span style={{ fontSize: 18, fontWeight: 700, minWidth: 180, textAlign: "center" }}>{fmtMonth(month)}</span>
-        <button style={btn} onClick={() => void changeMonth(nextMonth(month))}>›</button>
+        <button style={btn} onClick={() => void changeMonth(nextMonth(month))} aria-label="Next month">›</button>
         <button style={{ ...btn, fontSize: 12, padding: "6px 12px" }} onClick={() => void changeMonth(nowMonth(timezone))}>Today</button>
         <div style={{ flex: 1 }} />
         <select value={filter} onChange={(e) => setFilter(e.target.value as FilterKey)} style={{ ...inp, minWidth: 120 }}>
@@ -1107,7 +1223,10 @@ export default function DueTrackerPage() {
 
       <div style={{ padding: "14px 24px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
         {Array.from(groups.entries()).map(([group, rows]) => {
-          const isIndia = group === "India";
+          const isIndia = group === settings.remittanceGroup;
+          // The remittance widget renders under whichever group ISN'T the remittance-tracked
+          // one — i.e. the "home" group sending money to the remittance-tracked group.
+          const nonRemittanceGroup = settings.groups.find((g) => g !== settings.remittanceGroup) ?? settings.groups[0];
           const isCollapsed = collapsedGroups.has(group);
           const allGroupItems = items.filter((item) => item.group === group);
           let groupTotal = 0;
@@ -1131,7 +1250,7 @@ export default function DueTrackerPage() {
             if ((entry?.status ?? "pending") === "waived") groupWaived += totalValue;
           }
 
-          if (!isIndia && group === "UAE") {
+          if (!isIndia && group === nonRemittanceGroup) {
             groupTotal += remittanceAed;
             if (settings.remittanceStatus === "waived") groupWaived += remittanceAed;
             else if (settings.remittanceStatus === "paid" || settings.remittanceStatus === "partial") groupPaid += remittanceAed;
@@ -1142,7 +1261,18 @@ export default function DueTrackerPage() {
 
           return (
             <div key={group} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden", boxShadow: shadow }}>
-              <div onClick={() => toggleGroup(group)} style={{ padding: "11px 16px", borderBottom: isCollapsed ? undefined : `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", cursor: "pointer", userSelect: "none" }}>
+              <div
+                onClick={() => toggleGroup(group)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleGroup(group);
+                  }
+                }}
+                style={{ padding: "11px 16px", borderBottom: isCollapsed ? undefined : `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", cursor: "pointer", userSelect: "none" }}
+              >
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                   <span style={{ fontSize: 12, color: V.faint, transition: "transform 0.2s", display: "inline-block", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>▾</span>
                   <span style={{ fontSize: 14, fontWeight: 800 }}>{group}</span>
@@ -1156,7 +1286,7 @@ export default function DueTrackerPage() {
                 </div>
               </div>
 
-              {!isCollapsed && !isIndia && group === "UAE" && (
+              {!isCollapsed && !isIndia && group === nonRemittanceGroup && (
                 <div style={{ padding: "12px 16px", borderBottom: `1px solid ${V.border}`, background: isDark ? "rgba(239,68,68,0.04)" : "rgba(239,68,68,0.02)" }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
                     <select disabled={settings.isLocked} value={settings.remittanceStatus} onChange={(e) => setSettings((p) => ({ ...p, remittanceStatus: e.target.value as Status }))} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12 }}>
@@ -1197,9 +1327,9 @@ export default function DueTrackerPage() {
                       </div>
                       {remittanceEditMode && (
                         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <input disabled={settings.isLocked} type="number" style={{ ...inp, width: 120, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceInr ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceInr: parseNum(e.target.value) }))} placeholder="INR amount" />
+                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 120, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceInr ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceInr: parseNum(e.target.value) }))} placeholder="INR amount" />
                           <span style={{ fontSize: 11, color: V.faint }}>÷</span>
-                          <input disabled={settings.isLocked} type="number" step="0.01" style={{ ...inp, width: 90, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceRate ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceRate: parseNum(e.target.value) }))} placeholder="Rate" />
+                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 90, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceRate ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceRate: parseNum(e.target.value) }))} placeholder="Rate" />
                           <span style={{ fontSize: 11, color: V.faint }}>AED {remittanceAed.toFixed(0)}</span>
                         </div>
                       )}
@@ -1222,24 +1352,32 @@ export default function DueTrackerPage() {
                 const isEditing = editItemId === item.id;
                 const prev = getPrevEntry(item.id);
                 const strike = isSettled(status);
+                const isOpeningPayment = openingPaymentFor === item.id;
 
                 return (
-                  <div 
-                    key={item.id} 
-                    style={{ 
-                      padding: "11px 16px", 
-                      borderBottom: `1px solid ${V.border}`, 
-                      opacity: item.isHidden ? 0.45 : 1,
+                  <div
+                    key={item.id}
+                    style={{
+                      padding: "11px 16px",
+                      borderBottom: `1px solid ${V.border}`,
+                      opacity: item.isHidden ? 0.45 : isOpeningPayment ? 0.65 : 1,
                       background: status === "pending" ? "rgba(239,68,68,0.05)" : "transparent",
-                      borderLeft: status === "pending" ? "3px solid #ef4444" : "3px solid transparent"
+                      borderLeft: status === "pending" ? "3px solid #ef4444" : "3px solid transparent",
+                      transition: "opacity 120ms ease",
                     }}
                   >
                     <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      <select disabled={settings.isLocked} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked ? 0.6 : 1 }}>
+                      <select disabled={settings.isLocked || isOpeningPayment} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked || isOpeningPayment ? 0.6 : 1, cursor: isOpeningPayment ? "wait" : undefined }}>
                         <option value="pending">Pending</option>
                         <option value="waived">Waived</option>
                         {(status === "partial" || status === "paid") && <option value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>}
                       </select>
+                      {isOpeningPayment && (
+                        <span
+                          aria-label="Opening payment form"
+                          style={{ width: 13, height: 13, marginTop: 8, border: `2px solid ${V.accent}`, borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }}
+                        />
+                      )}
 
                       <div style={{ flex: 1, minWidth: 180 }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -1262,11 +1400,33 @@ export default function DueTrackerPage() {
                         {isEditing ? (
                           <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                             <input defaultValue={entry?.note ?? ""} placeholder="Note for this month…" onBlur={(e) => void updateEntryField(item, "note", e.target.value)} style={{ ...inp, fontSize: 12, boxSizing: "border-box" }} />
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "8px 0 2px", borderTop: `1px dashed ${V.border}`, marginTop: 2 }}>
+                              <span style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.06em", width: "100%" }}>Item details</span>
+                              <input defaultValue={item.name} placeholder="Name" onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== item.name) void updateDueItemField(item, "name", v); }} style={{ ...inp, fontSize: 12, flex: "1 1 140px" }} />
+                              <select defaultValue={item.group} onChange={(e) => void updateDueItemField(item, "group_name", e.target.value)} style={{ ...inp, fontSize: 12, width: 100 }}>
+                                {settings.groups.map((g) => <option key={g} value={g}>{g}</option>)}
+                              </select>
+                              <select defaultValue={item.defaultCurrency} onChange={(e) => void updateDueItemField(item, "default_currency", e.target.value)} style={{ ...inp, fontSize: 12, width: 70 }}>
+                                <option>AED</option>
+                                <option>INR</option>
+                                <option>USD</option>
+                              </select>
+                              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600 }}>
+                                <input type="checkbox" defaultChecked={item.isFixed} onChange={(e) => void updateDueItemField(item, "is_fixed", e.target.checked)} />
+                                Fixed
+                              </label>
+                              <button
+                                onClick={() => void deleteDueItem(item)}
+                                style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#ef4444", marginLeft: "auto" }}
+                              >
+                                Delete item
+                              </button>
+                            </div>
                           </div>
                         ) : entry?.note ? (
                           <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 3 }}>{entry.note}</div>
                         ) : null}
-                        {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {getEntryRemaining(item, entry).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt)}` : ""}</div>}
+                        {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : status === "partial" ? PARTIAL_REMAINING_COLOR : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {getEntryRemaining(item, entry).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt, timezone)}` : ""}</div>}
                         {prev && diffAbs !== null && (
                           <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
                             vs last month: {diffAbs > 0 ? "+" : ""}{currency} {diffAbs.toFixed(0)}
@@ -1290,8 +1450,8 @@ export default function DueTrackerPage() {
                             <div style={{ fontSize: 14, fontWeight: 700, textDecoration: status === "waived" ? "line-through" : "none", color: status === "paid" ? "#16a34a" : status === "partial" ? V.accent : status === "waived" ? V.faint : V.text }}>
                               {currency} {amount.toLocaleString()}
                             </div>
-                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : V.accent }}>Paid {currency} {entry.amountPaid.toFixed(2)}</div>}
-                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: V.faint }}>{getEntryRemaining(item, entry) < 0 ? "Credit left" : "Left"} {currency} {getEntryRemaining(item, entry).toFixed(2)}</div>}
+                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? "#16a34a" : status === "partial" ? PARTIAL_REMAINING_COLOR : V.accent }}>Paid {currency} {entry.amountPaid.toFixed(2)}</div>}
+                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "partial" && getEntryRemaining(item, entry) > 0 ? PARTIAL_REMAINING_COLOR : V.faint, fontWeight: status === "partial" && getEntryRemaining(item, entry) > 0 ? 700 : 400 }}>{getEntryRemaining(item, entry) < 0 ? "Credit left" : "Left"} {currency} {getEntryRemaining(item, entry).toFixed(2)}</div>}
                             {entry?.carryForwardAmount ? <div style={{ fontSize: 11, color: "#f59e0b" }}>{entry.carryForwardAmount < 0 ? "Credit carried" : "Carry forward"} {currency} {entry.carryForwardAmount.toFixed(2)}</div> : null}
                             <div style={{ fontSize: 11, color: V.faint }}>This month {currency} {getMonthlyAmount(item, entry).toFixed(2)}</div>
                             {currency !== "AED" && amount > 0 && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {toAed(amount, currency, settings.fxRates).toFixed(0)}</div>}
@@ -1300,7 +1460,7 @@ export default function DueTrackerPage() {
                       </div>
 
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                        <button onClick={() => void openPaymentModal(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a" }}>Pay</button>
+                        <button onClick={() => void openPaymentModal(item)} disabled={isOpeningPayment} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: "#16a34a", opacity: isOpeningPayment ? 0.6 : 1, cursor: isOpeningPayment ? "wait" : "pointer" }}>{isOpeningPayment ? "Opening…" : "Pay"}</button>
                         <button onClick={() => router.push(`/dashboard/duetracker/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
                         <button onClick={() => setEditItemId(isEditing ? null : item.id)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: isEditing ? V.accent : V.muted }}>{isEditing ? "Done" : "Edit"}</button>
                         <button onClick={() => void toggleHide(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.faint }}>{item.isHidden ? "Show" : "Hide"}</button>
@@ -1319,7 +1479,7 @@ export default function DueTrackerPage() {
           <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto", margin: "auto" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>Add due item</div>
-              <button style={btn} onClick={() => setShowAddItem(false)}>✕</button>
+              <button style={btn} onClick={() => setShowAddItem(false)} aria-label="Close">✕</button>
             </div>
             <div style={{ padding: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em", gridColumn: "1/-1" }}>
@@ -1349,7 +1509,7 @@ export default function DueTrackerPage() {
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Default amount
-                <input style={inp} type="number" value={newItem.defaultAmount} onChange={(e) => setNewItem((p) => ({ ...p, defaultAmount: e.target.value }))} />
+                <input style={inp} type="text" inputMode="decimal" value={newItem.defaultAmount} onChange={(e) => setNewItem((p) => ({ ...p, defaultAmount: e.target.value }))} />
               </label>
               <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, fontWeight: 600, color: V.text, cursor: "pointer" }}>
                 <input type="checkbox" checked={newItem.isFixed} onChange={(e) => setNewItem((p) => ({ ...p, isFixed: e.target.checked }))} />
@@ -1372,7 +1532,7 @@ export default function DueTrackerPage() {
                 <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.1em" }}>{fmtMonth(month)}</div>
                 <div style={{ fontSize: 18, fontWeight: 800 }}>Month settings</div>
               </div>
-              <button style={btn} onClick={() => setShowSettings(false)}>✕</button>
+              <button style={btn} onClick={() => setShowSettings(false)} aria-label="Close">✕</button>
             </div>
             <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
               <div>
@@ -1381,7 +1541,7 @@ export default function DueTrackerPage() {
                   <div key={cur} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, width: 40 }}>{cur}:</span>
                     <span style={{ fontSize: 13, color: V.faint }}>1 AED =</span>
-                    <input type="number" style={{ ...inp, width: 90 }} value={settings.fxRates[cur] ?? ""} onChange={(e) => setSettings((p) => ({ ...p, fxRates: { ...p.fxRates, [cur]: Number(e.target.value) || 0 } }))} />
+                    <input type="text" inputMode="decimal" style={{ ...inp, width: 90 }} value={settings.fxRates[cur] ?? ""} onChange={(e) => setSettings((p) => ({ ...p, fxRates: { ...p.fxRates, [cur]: Number(e.target.value) || 0 } }))} />
                     <span style={{ fontSize: 13, color: V.faint }}>{cur}</span>
                   </div>
                 ))}
@@ -1402,6 +1562,13 @@ export default function DueTrackerPage() {
                   }}>Add</button>
                 </div>
               </div>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                Remittance-tracked group
+                <select style={inp} value={settings.remittanceGroup} onChange={(e) => setSettings((p) => ({ ...p, remittanceGroup: e.target.value }))}>
+                  {settings.groups.map((g) => <option key={g} value={g}>{g}</option>)}
+                </select>
+                <span style={{ fontSize: 11, color: V.faint, textTransform: "none", fontWeight: 400 }}>Which group represents money sent via remittance (its total is compared against the amount remitted).</span>
+              </label>
               <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Month note
                 <textarea style={{ ...inp, resize: "vertical", minHeight: 70 }} value={settings.note} onChange={(e) => setSettings((p) => ({ ...p, note: e.target.value }))} placeholder="Any notes for this month…" />
@@ -1426,7 +1593,7 @@ export default function DueTrackerPage() {
                 <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
                 <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{paymentModal.item.name} · {fmtMonth(month)}</div>
               </div>
-              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment}>✕</button>
+              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment} aria-label="Close">✕</button>
             </div>
             <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>

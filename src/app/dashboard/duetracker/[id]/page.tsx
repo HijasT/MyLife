@@ -98,6 +98,10 @@ function statusTone(status: Status) {
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
 
+// Distinct from the module's red accent — flags the remaining/outstanding amount
+// specifically on a "partial" entry, so it reads differently from a plain pending due.
+const PARTIAL_REMAINING_COLOR = "#f59e0b";
+
 function isSettled(status: Status) {
   return status === "paid" || status === "waived";
 }
@@ -140,7 +144,7 @@ function buildCarryForwardNote(previousMonth: string, currency: Currency, carryF
 
 export default function DueItemDetailPage() {
   const params = useParams();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [timezone, setTimezone] = useState(APP_TZ);
@@ -171,6 +175,10 @@ export default function DueItemDetailPage() {
   const [editStatDay, setEditStatDay] = useState("");
   const [editDueDay, setEditDueDay] = useState("");
   const [editingDates, setEditingDates] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editGroup, setEditGroup] = useState("");
+  const [editItemCurrency, setEditItemCurrency] = useState<Currency>("AED");
+  const [editIsFixed, setEditIsFixed] = useState(false);
   const [paymentModalEntry, setPaymentModalEntry] = useState<DueEntry | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
@@ -223,7 +231,7 @@ export default function DueItemDetailPage() {
           id: r.id,
           name: r.name,
           group: r.group_name ?? "General",
-          dueDay: r.due_date_day ?? r.due_day ?? null,
+          dueDay: r.due_date_day ?? null,
           statementDay: r.statement_date ?? null,
           defaultCurrency: (r.default_currency ?? "AED") as Currency,
           defaultAmount: r.default_amount ?? null,
@@ -232,6 +240,10 @@ export default function DueItemDetailPage() {
         setItem(nextItem);
         setEditStatDay(nextItem.statementDay?.toString() ?? "");
         setEditDueDay(nextItem.dueDay?.toString() ?? "");
+        setEditName(nextItem.name);
+        setEditGroup(nextItem.group);
+        setEditItemCurrency(nextItem.defaultCurrency);
+        setEditIsFixed(nextItem.isFixed);
       }
 
       if (entriesRes.data) {
@@ -405,14 +417,42 @@ export default function DueItemDetailPage() {
     if (!item || !userId) return;
     const statement = editStatDay ? Number(editStatDay) : null;
     const due = editDueDay ? Number(editDueDay) : null;
-    const { error } = await supabase.from("due_items").update({ statement_date: statement, due_date_day: due }).eq("id", item.id).eq("user_id", userId);
+    const name = editName.trim() || item.name;
+    const group = editGroup.trim() || item.group;
+    const { error } = await supabase
+      .from("due_items")
+      .update({
+        statement_date: statement,
+        due_date_day: due,
+        name,
+        group_name: group,
+        default_currency: editItemCurrency,
+        is_fixed: editIsFixed,
+      })
+      .eq("id", item.id)
+      .eq("user_id", userId);
     if (error) {
       showToast(error.message);
       return;
     }
-    setItem((p) => (p ? { ...p, statementDay: statement, dueDay: due } : p));
+    setItem((p) => (p ? { ...p, statementDay: statement, dueDay: due, name, group, defaultCurrency: editItemCurrency, isFixed: editIsFixed } : p));
+    setEditName(name);
+    setEditGroup(group);
     setEditingDates(false);
-    showToast("Dates saved");
+    showToast("Saved");
+  }
+
+  async function deleteItem() {
+    if (!item || !userId) return;
+    const ok = window.confirm(`Delete "${item.name}"? This also removes all of its monthly due entries and payment history. This cannot be undone.`);
+    if (!ok) return;
+    const { error } = await supabase.from("due_items").delete().eq("id", item.id).eq("user_id", userId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    showToast("Due item deleted");
+    router.push("/dashboard/duetracker");
   }
 
   function startEdit(entry: DueEntry) {
@@ -497,6 +537,14 @@ export default function DueItemDetailPage() {
       openPaymentModal(entry);
       return;
     }
+    // Switching an already partial/paid entry back to pending/waived resets its status
+    // with no undo in the UI — confirm first, since there's a recorded payment behind it.
+    if (entry.status === "partial" || entry.status === "paid") {
+      const ok = window.confirm(
+        `This month is currently "${entry.status}" with a payment recorded. Switching to "${status}" will clear that status (the payment history itself is not deleted, just the status/paid summary). Continue?`,
+      );
+      if (!ok) return;
+    }
     const { error } = await supabase.from("due_entries").update({ status, paid_at: null }).eq("id", entry.id).eq("user_id", userId);
     if (error) {
       showToast(error.message);
@@ -566,13 +614,13 @@ export default function DueItemDetailPage() {
   }, [entries]);
 
   const V = {
-    bg: isDark ? "#0d0f14" : "#f9f8f5",
-    card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)",
-    text: isDark ? "#f0ede8" : "#1a1a1a",
-    muted: isDark ? "#9ba3b2" : "#6b7280",
-    faint: isDark ? "#5c6375" : "#9ca3af",
-    input: isDark ? "#1e2130" : "#f9fafb",
+    bg: "var(--main-bg)",
+    card: "var(--card-bg)",
+    border: "var(--card-border)",
+    text: "var(--text-primary)",
+    muted: "var(--text-secondary)",
+    faint: "var(--text-muted)",
+    input: "var(--main-bg2)",
     accent: "#ef4444",
   };
   const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
@@ -596,8 +644,8 @@ export default function DueItemDetailPage() {
           Due Tracker
         </Link>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button style={{ ...btn, opacity: nav.prev ? 1 : 0.45, cursor: nav.prev ? "pointer" : "not-allowed" }} disabled={!nav.prev} onClick={() => nav.prev && router.push(`/dashboard/duetracker/${nav.prev.id}`)} title={nav.prev ? `Previous: ${nav.prev.name}` : "No previous due"}>‹</button>
-          <button style={{ ...btn, opacity: nav.next ? 1 : 0.45, cursor: nav.next ? "pointer" : "not-allowed" }} disabled={!nav.next} onClick={() => nav.next && router.push(`/dashboard/duetracker/${nav.next.id}`)} title={nav.next ? `Next: ${nav.next.name}` : "No next due"}>›</button>
+          <button style={{ ...btn, opacity: nav.prev ? 1 : 0.45, cursor: nav.prev ? "pointer" : "not-allowed" }} disabled={!nav.prev} onClick={() => nav.prev && router.push(`/dashboard/duetracker/${nav.prev.id}`)} title={nav.prev ? `Previous: ${nav.prev.name}` : "No previous due"} aria-label={nav.prev ? `Previous: ${nav.prev.name}` : "No previous due"}>‹</button>
+          <button style={{ ...btn, opacity: nav.next ? 1 : 0.45, cursor: nav.next ? "pointer" : "not-allowed" }} disabled={!nav.next} onClick={() => nav.next && router.push(`/dashboard/duetracker/${nav.next.id}`)} title={nav.next ? `Next: ${nav.next.name}` : "No next due"} aria-label={nav.next ? `Next: ${nav.next.name}` : "No next due"}>›</button>
           <button style={btnP} onClick={() => { setNewCurrency(item.defaultCurrency); setShowAddMonth(true); }}>+ Add month</button>
         </div>
       </div>
@@ -622,6 +670,24 @@ export default function DueItemDetailPage() {
                 ) : (
                   <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                     <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 600 }}>
+                      <span style={{ color: "#ef4444" }}>Name:</span>
+                      <input style={{ ...inp, width: 160, padding: "5px 8px" }} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                    </label>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 600 }}>
+                      <span style={{ color: "#ef4444" }}>Group:</span>
+                      <input style={{ ...inp, width: 110, padding: "5px 8px" }} value={editGroup} onChange={(e) => setEditGroup(e.target.value)} />
+                    </label>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 600 }}>
+                      <span style={{ color: "#ef4444" }}>Currency:</span>
+                      <select style={{ ...inp, width: 80, padding: "5px 8px" }} value={editItemCurrency} onChange={(e) => setEditItemCurrency(e.target.value as Currency)}>
+                        <option>AED</option><option>INR</option><option>USD</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 600 }}>
+                      <input type="checkbox" checked={editIsFixed} onChange={(e) => setEditIsFixed(e.target.checked)} />
+                      Fixed
+                    </label>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 600 }}>
                       <span style={{ color: "#ef4444" }}>Statement day:</span>
                       <input type="number" min="1" max="31" style={{ ...inp, width: 70, padding: "5px 8px" }} value={editStatDay} onChange={(e) => setEditStatDay(e.target.value)} />
                     </label>
@@ -639,7 +705,10 @@ export default function DueItemDetailPage() {
                     <button style={btn} onClick={() => setEditingDates(false)}>Cancel</button>
                   </>
                 ) : (
-                  <button style={btn} onClick={() => setEditingDates(true)}>Edit dates</button>
+                  <>
+                    <button style={btn} onClick={() => setEditingDates(true)}>Edit details</button>
+                    <button style={{ ...btn, color: "#ef4444" }} onClick={() => void deleteItem()}>Delete</button>
+                  </>
                 )}
               </div>
             </div>
@@ -762,7 +831,7 @@ export default function DueItemDetailPage() {
                           </div>
                         )}
                         {entry.amountPaid > 0 && (
-                          <div style={{ fontSize: 11, color: entry.status === "paid" ? "#16a34a" : V.accent, marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: entry.status === "paid" ? "#16a34a" : entry.status === "partial" ? PARTIAL_REMAINING_COLOR : V.accent, marginTop: 2 }}>
                             Paid so far: {entry.currency} {entry.amountPaid.toFixed(2)} · Remaining: {entry.currency} {getEntryRemaining(entry).toFixed(2)}
                             {entry.lastPaidAt ? ` · Last: ${fmtDateTime(entry.lastPaidAt, timezone)}` : ""}
                           </div>
@@ -818,6 +887,7 @@ export default function DueItemDetailPage() {
                               onMouseEnter={(e) => !monthLocks[entry.month] && (e.currentTarget.style.color = "#ef4444", e.currentTarget.style.opacity = "1")}
                               onMouseLeave={(e) => (e.currentTarget.style.color = V.faint, e.currentTarget.style.opacity = monthLocks[entry.month] ? "0.3" : "0.7")}
                               title="Delete payment"
+                              aria-label="Delete payment"
                             >✕</button>
                           </span>
                         </div>
@@ -839,7 +909,7 @@ export default function DueItemDetailPage() {
                 <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
                 <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{item?.name ?? "Due item"} · {fmtMonth(paymentModalEntry.month)}</div>
               </div>
-              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment}>✕</button>
+              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment} aria-label="Close">✕</button>
             </div>
             <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
@@ -905,7 +975,7 @@ export default function DueItemDetailPage() {
           <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(500px,100%)" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 800 }}>Add month record</div>
-              <button style={btn} onClick={() => setShowAddMonth(false)}>✕</button>
+              <button style={btn} onClick={() => setShowAddMonth(false)} aria-label="Close">✕</button>
             </div>
             <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>

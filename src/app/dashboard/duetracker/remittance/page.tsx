@@ -37,7 +37,7 @@ function statusFromSettingsRow(row: { remittance_paid?: boolean | null; cash_in?
 }
 
 export default function RemittancePage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [records, setRecords] = useState<MonthRecord[]>([]);
@@ -218,17 +218,21 @@ export default function RemittancePage() {
   }
 
   const totalSent = useMemo(() => records.reduce((sum, record) => sum + record.remittanceAed, 0), [records]);
-  const totalPaid = useMemo(() => records.filter((r) => r.status === "paid" || r.status === "partial").reduce((sum, record) => sum + record.remittanceAed, 0), [records]);
+  // Only count fully "paid" records — remittance records have no partial-amount field
+  // (status is just an enum), so a "partial" record has no tracked paid amount and
+  // counting it in full here would overstate how much has actually been sent.
+  const totalPaid = useMemo(() => records.filter((r) => r.status === "paid").reduce((sum, record) => sum + record.remittanceAed, 0), [records]);
+  const partialCount = useMemo(() => records.filter((r) => r.status === "partial").length, [records]);
   const totalVariance = useMemo(() => records.reduce((sum, record) => sum + (record.remittanceInr - record.indiaTotalInr), 0), [records]);
 
   const V = {
-    bg: isDark ? "#0d0f14" : "#f9f8f5",
-    card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)",
-    text: isDark ? "#f0ede8" : "#1a1a1a",
-    muted: isDark ? "#9ba3b2" : "#6b7280",
-    faint: isDark ? "#5c6375" : "#9ca3af",
-    input: isDark ? "#1e2130" : "#f9fafb",
+    bg: "var(--main-bg)",
+    card: "var(--card-bg)",
+    border: "var(--card-border)",
+    text: "var(--text-primary)",
+    muted: "var(--text-secondary)",
+    faint: "var(--text-muted)",
+    input: "var(--main-bg2)",
     accent: "#ef4444",
   };
   const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
@@ -261,13 +265,14 @@ export default function RemittancePage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 20 }}>
           {[
             { label: "Total remitted", value: `AED ${totalSent.toFixed(0)}`, color: V.text },
-            { label: "Total paid", value: `AED ${totalPaid.toFixed(0)}`, color: "#16a34a" },
+            { label: "Total paid", value: `AED ${totalPaid.toFixed(0)}`, color: "#16a34a", note: partialCount > 0 ? `+ ${partialCount} partially paid (amount not tracked)` : undefined },
             { label: "Months tracked", value: records.length, color: V.muted },
             { label: "Variance", value: `${totalVariance > 0 ? "+" : ""}${totalVariance.toFixed(0)} INR`, color: totalVariance === 0 ? V.faint : totalVariance > 0 ? "#ef4444" : "#16a34a" },
           ].map((card) => (
             <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{card.label}</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: card.color }}>{card.value}</div>
+              {card.note && <div style={{ fontSize: 10, color: V.faint, marginTop: 3 }}>{card.note}</div>}
             </div>
           ))}
         </div>
@@ -305,11 +310,11 @@ export default function RemittancePage() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 140px", gap: 10 }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: V.faint, textTransform: "uppercase" }}>
                         INR Amount
-                        <input type="number" style={inp} value={editInr} onChange={(e) => setEditInr(e.target.value)} placeholder={record.remittanceInr.toFixed(0)} />
+                        <input type="text" inputMode="decimal" style={inp} value={editInr} onChange={(e) => setEditInr(e.target.value)} placeholder={record.remittanceInr.toFixed(0)} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: V.faint, textTransform: "uppercase" }}>
                         Rate (1 AED = ? INR)
-                        <input type="number" step="0.01" style={inp} value={editRate} onChange={(e) => setEditRate(e.target.value)} placeholder={record.fxRate.toString()} />
+                        <input type="text" inputMode="decimal" style={inp} value={editRate} onChange={(e) => setEditRate(e.target.value)} placeholder={record.fxRate.toString()} />
                       </label>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: V.faint, textTransform: "uppercase" }}>
                         Status
