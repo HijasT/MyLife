@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MODULES } from "@/lib/modules";
 
@@ -60,6 +60,7 @@ export default function SettingsPage() {
   const [changePasswordSaving, setChangePasswordSaving] = useState(false);
 
   const [banner, setBanner] = useState<BannerState>(null);
+  const bannerTimerRef = useRef<number | undefined>(undefined);
 
   const [setPassword, setSetPassword] = useState("");
   const [setPasswordRepeat, setSetPasswordRepeat] = useState("");
@@ -171,8 +172,8 @@ export default function SettingsPage() {
 
   function showBanner(type: "success" | "error", message: string) {
     setBanner({ type, message });
-    window.clearTimeout((showBanner as unknown as { timer?: number }).timer);
-    (showBanner as unknown as { timer?: number }).timer = window.setTimeout(() => {
+    window.clearTimeout(bannerTimerRef.current);
+    bannerTimerRef.current = window.setTimeout(() => {
       setBanner(null);
     }, 3500);
   }

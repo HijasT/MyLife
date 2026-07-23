@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { todayDubai } from "@/lib/timezone";
+import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 
 type Category = "Food" | "Clothing" | "Household" | "Electronics" | "Other";
 type SpecialCategory = "Aromatica";
@@ -51,9 +51,9 @@ const CAT_META: Record<Category, { icon: string; color: string; subcategories: s
 // Aromatica is a special linked module within Inventory
 const AROMATICA_META = { icon:"🌸", color:"#D85A30", label:"Aromatica", description:"Fragrance collection · Bottles · Wear logs", href:"/dashboard/aromatica" };
 
-function daysUntilExpiry(d: string | null): number | null {
+function daysUntilExpiry(d: string | null, tz: string = APP_TZ): number | null {
   if (!d) return null;
-  return Math.ceil((new Date(d).getTime() - new Date(todayDubai()).getTime()) / 86400000);
+  return Math.ceil((new Date(d).getTime() - new Date(todayDubai(tz)).getTime()) / 86400000);
 }
 
 function expiryColor(days: number | null): string {
@@ -83,6 +83,7 @@ export default function InventoryPage() {
   const supabase = createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<Category | "All">("All");
@@ -111,6 +112,7 @@ export default function InventoryPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
       setUserId(user.id);
+      setTimezone(await getUserTimezone(supabase, user.id));
       const { data } = await supabase.from("inventory_items").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
       setItems((data ?? []).map(dbToItem));
       setLoading(false);
@@ -179,13 +181,13 @@ export default function InventoryPage() {
 
   // Stats
   const stats = useMemo(() => {
-    const today = todayDubai();
+    const today = todayDubai(timezone);
     const soon = new Date(today); soon.setDate(soon.getDate() + 7);
     const expiring = items.filter(x => !x.isFinished && x.expiryDate && x.expiryDate <= soon.toISOString().slice(0, 10));
     const expired  = items.filter(x => !x.isFinished && x.expiryDate && x.expiryDate < today);
     const low      = items.filter(x => !x.isFinished && x.lowThreshold !== null && x.quantity <= x.lowThreshold);
     return { total: items.filter(x => !x.isFinished).length, expiring: expiring.length, expired: expired.length, low: low.length };
-  }, [items]);
+  }, [items, timezone]);
 
   const filtered = useMemo(() => {
     let list = items.filter(x => showFinished ? true : !x.isFinished);
@@ -328,11 +330,11 @@ export default function InventoryPage() {
                 <span>📍 {loc}</span>
                 <span style={{ opacity:0.5 }}>{locItems.length} item{locItems.length > 1 ? "s" : ""}</span>
               </div>
-              <ItemGrid items={locItems} V={V} btn={btn} router={router} onToggle={toggleFinished} onQty={updateQty} />
+              <ItemGrid items={locItems} V={V} btn={btn} router={router} onToggle={toggleFinished} onQty={updateQty} timezone={timezone} />
             </div>
           ))
         ) : (
-          <ItemGrid items={filtered} V={V} btn={btn} router={router} onToggle={toggleFinished} onQty={updateQty} />
+          <ItemGrid items={filtered} V={V} btn={btn} router={router} onToggle={toggleFinished} onQty={updateQty} timezone={timezone} />
         )}
       </div>
 
@@ -434,17 +436,18 @@ export default function InventoryPage() {
 }
 
 // ── Item grid component ────────────────────────────────────────────────────
-function ItemGrid({ items, V, btn, router, onToggle, onQty }: {
+function ItemGrid({ items, V, btn, router, onToggle, onQty, timezone }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   items: Item[]; V: any; btn: any; router: any;
   onToggle: (i: Item) => void;
   onQty: (i: Item, d: number) => void;
+  timezone: string;
 }) {
   return (
     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))", gap:12 }}>
       {items.map(item => {
         const m = CAT_META[item.category];
-        const days = daysUntilExpiry(item.expiryDate);
+        const days = daysUntilExpiry(item.expiryDate, timezone);
         const expColor = expiryColor(days);
         const isLow = item.lowThreshold !== null && item.quantity <= item.lowThreshold;
         return (

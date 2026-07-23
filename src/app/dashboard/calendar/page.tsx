@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 
 type EventType = "work" | "event" | "due_paid" | "note";
 type ShiftKey =
@@ -220,20 +221,6 @@ function getMonthInTz(timezone: string) {
   return `${year}-${month}`;
 }
 
-function getTodayInTz(timezone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-
-  const year = parts.find((p) => p.type === "year")?.value ?? "1970";
-  const month = parts.find((p) => p.type === "month")?.value ?? "01";
-  const day = parts.find((p) => p.type === "day")?.value ?? "01";
-  return `${year}-${month}-${day}`;
-}
-
 function daysInMonth(y: number, m: number) {
   return new Date(y, m, 0).getDate();
 }
@@ -365,7 +352,7 @@ export default function CalendarPage() {
   const supabase = createClient();
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [timezone, setTimezone] = useState("UTC");
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [month, setMonth] = useState(getMonthInTz("UTC"));
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -379,13 +366,15 @@ export default function CalendarPage() {
   const [editingEvent, setEditingEvent] = useState<CalEvent | null>(null);
   const [editScope, setEditScope] = useState<EditScope>("single");
 
+  const [deleteTarget, setDeleteTarget] = useState<CalEvent | null>(null);
+
   const [addType, setAddType] = useState<EventType>("work");
   const [addShift, setAddShift] = useState<ShiftKey>("Morning");
   const [addTitle, setAddTitle] = useState("");
   const [addStart, setAddStart] = useState("07:00");
   const [addEnd, setAddEnd] = useState("15:00");
-  const [addDateFrom, setAddDateFrom] = useState(getTodayInTz("UTC"));
-  const [addDateTo, setAddDateTo] = useState(getTodayInTz("UTC"));
+  const [addDateFrom, setAddDateFrom] = useState(todayDubai());
+  const [addDateTo, setAddDateTo] = useState(todayDubai());
   const [addNotes, setAddNotes] = useState("");
   const [addRecurType, setAddRecurType] = useState<RecurType>("none");
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
@@ -409,7 +398,7 @@ export default function CalendarPage() {
     return () => obs.disconnect();
   }, []);
 
-  const todayStr = getTodayInTz(timezone);
+  const todayStr = todayDubai(timezone);
 
   useEffect(() => {
     async function load() {
@@ -430,17 +419,11 @@ export default function CalendarPage() {
 
         setUserId(user.id);
 
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("timezone")
-          .eq("id", user.id)
-          .single();
-
-        const tz = profile?.timezone || "UTC";
+        const tz = await getUserTimezone(supabase, user.id);
         setTimezone(tz);
         setMonth(getMonthInTz(tz));
-        setAddDateFrom(getTodayInTz(tz));
-        setAddDateTo(getTodayInTz(tz));
+        setAddDateFrom(todayDubai(tz));
+        setAddDateTo(todayDubai(tz));
 
         await loadEvents(user.id, getMonthInTz(tz));
       } catch {
@@ -507,11 +490,19 @@ export default function CalendarPage() {
         .gte("date", start)
         .lte("date", end)
         .order("date"),
+      // Legacy recurring events (no seriesId) are a single row that gets
+      // re-projected onto whichever month is being viewed, so they can't be
+      // bound by the current month's date range like d1 — but a recurrence
+      // can never apply before its own start date, and a hard limit keeps
+      // this from growing unbounded as more recurring series accumulate.
       supabase
         .from("calendar_events")
         .select("*")
         .eq("user_id", uid)
-        .eq("is_recurring", true),
+        .eq("is_recurring", true)
+        .lte("date", end)
+        .order("date", { ascending: false })
+        .limit(500),
       supabase
         .from("portfolio_purchases")
         .select("id,purchased_at,transaction_type,currency,total_paid,portfolio_items(symbol,name)")
@@ -805,17 +796,17 @@ export default function CalendarPage() {
     }
   }
 
-  async function deleteEvent(id: string) {
+  async function deleteEvent(id: string, scope: EditScope = "single") {
     const ev = events.find((e) => e.id === id);
     if (!ev) return;
 
     try {
       const meta = getEventMeta(ev);
-      if (ev.isRecurring && meta.seriesId) {
+      if (scope === "future" && ev.isRecurring && meta.seriesId) {
         const futureIds = events
           .filter((e) => {
             const eMeta = getEventMeta(e);
-            return eMeta.seriesId === meta.seriesId && e.date >= todayStr;
+            return eMeta.seriesId === meta.seriesId && e.date >= ev.date;
           })
           .map((e) => e.id);
 
@@ -902,6 +893,7 @@ export default function CalendarPage() {
       const { d } = parseYmd(ev.date);
       date = formatYmd(year, mo, d);
       if (!isValidYmd(date)) continue;
+      if (date < ev.date) continue; // don't project before the event's own start
     }
 
     if (
@@ -912,6 +904,7 @@ export default function CalendarPage() {
       const { m, d } = parseYmd(ev.date);
       date = formatYmd(year, m, d);
       if (!isValidYmd(date)) continue;
+      if (date < ev.date) continue; // don't project before the event's own start
     }
 
     if (!date.startsWith(month)) continue;
@@ -933,6 +926,8 @@ export default function CalendarPage() {
 
     let hours = 0;
     const workedDays = new Set<string>();
+    const regularWorkedDays = new Set<string>();
+    const extraWorkedDays = new Set<string>();
     const shiftCounts: Record<string, number> = {};
     let regularCount = 0;
     let extraCount = 0;
@@ -947,10 +942,12 @@ export default function CalendarPage() {
       if (category === "Regular") {
         regularCount += 1;
         workedDays.add(e.date);
+        regularWorkedDays.add(e.date);
       }
       if (category === "Extra") {
         extraCount += 1;
         workedDays.add(e.date);
+        extraWorkedDays.add(e.date);
       }
     }
 
@@ -961,14 +958,14 @@ export default function CalendarPage() {
     const totalWorkedDays = workedDays.size;
 
     // Off days calculation:
-    // Rule 1: Every 5 days worked → 2 days off
-    const baseOffDays = Math.floor(totalWorkedDays / 5) * 2;
-    // Rule 2: Extra days worked beyond standard 5/week → earn same number as extra off days
-    // Standard work days in month = weeks in month × 5 (approximate using calendar days / 7 * 5)
-    const [y, m] = month.split("-").map(Number);
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const standardWorkDays = Math.round((daysInMonth / 7) * 5);
-    const extraDaysWorked = Math.max(0, totalWorkedDays - standardWorkDays);
+    // Rule 1: Every 5 REGULAR days worked → 2 days off
+    const baseOffDays = Math.floor(regularWorkedDays.size / 5) * 2;
+    // Rule 2: Each day worked under an Extra-category shift (Holiday Duty/Overtime)
+    // earns its own day off, 1:1. Kept separate from Rule 1 so a day worked as
+    // "Extra" isn't credited toward off-days twice (once via the 5-day rule via
+    // totalWorkedDays, once via this rule) — see prior bug where both rules used
+    // the combined regular+extra day count.
+    const extraDaysWorked = extraWorkedDays.size;
     const offDays = baseOffDays + extraDaysWorked;
 
     return {
@@ -1890,7 +1887,7 @@ export default function CalendarPage() {
                       Edit
                     </button>
                     <button
-                      onClick={() => deleteEvent(ev.id)}
+                      onClick={() => setDeleteTarget(ev)}
                       style={{
                         background: "none",
                         border: "none",
@@ -2382,6 +2379,73 @@ export default function CalendarPage() {
                   : addType !== "work" && addRecurType !== "none"
                   ? `Create ${addRecurType} series`
                   : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(8,10,14,0.62)",
+            backdropFilter: "blur(4px)",
+            WebkitBackdropFilter: "blur(4px)",
+            zIndex: 60,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            style={{
+              background: V.card,
+              border: `1px solid ${V.border}`,
+              borderRadius: 16,
+              width: "min(380px,100%)",
+              padding: 20,
+              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>
+              Delete "{deleteTarget.title}"?
+            </div>
+            <div style={{ fontSize: 13, color: V.muted, marginBottom: 18 }}>
+              {deleteTarget.isRecurring
+                ? "This is part of a recurring series. Choose what to delete."
+                : "This can't be undone."}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                style={btnP}
+                onClick={() => {
+                  deleteEvent(deleteTarget.id, "single");
+                  setDeleteTarget(null);
+                }}
+              >
+                {deleteTarget.isRecurring ? "Delete only this occurrence" : "Delete"}
+              </button>
+
+              {deleteTarget.isRecurring && (
+                <button
+                  style={{ ...btn, color: "#ef4444" }}
+                  onClick={() => {
+                    deleteEvent(deleteTarget.id, "future");
+                    setDeleteTarget(null);
+                  }}
+                >
+                  Delete this and all future occurrences
+                </button>
+              )}
+
+              <button style={btn} onClick={() => setDeleteTarget(null)}>
+                Cancel
               </button>
             </div>
           </div>

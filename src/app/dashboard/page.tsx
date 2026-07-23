@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { MODULES } from "@/lib/modules";
 import Link from "next/link";
 import { mylifeBorderRadius, mylifeSpacing } from "@/lib/mylife-design-tokens";
+import { isValidTimezone, APP_TZ } from "@/lib/timezone";
 
 function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
   const isComingSoon = module.status === "coming-soon";
@@ -96,7 +97,7 @@ export default async function DashboardPage() {
 
   let displayName = "";
   let hiddenModules: string[] = [];
-  let timezone = "UTC";
+  let timezone = APP_TZ;
 
   if (user) {
     const { data: profile } = await supabase
@@ -107,18 +108,7 @@ export default async function DashboardPage() {
 
     displayName = profile?.display_name ?? "";
     hiddenModules = profile?.hidden_modules ?? [];
-	
-	const rawTz = profile?.timezone;
-	const isValidTz = (tz: unknown): tz is string => {
-      if (typeof tz !== "string" || tz.trim() === "") return false;
-      try {
-        new Intl.DateTimeFormat("en-US", { timeZone: tz });
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    timezone = isValidTz(rawTz) ? rawTz : "UTC";
+    timezone = isValidTimezone(profile?.timezone) ? profile.timezone : APP_TZ;
   }
 
   const now = new Date();

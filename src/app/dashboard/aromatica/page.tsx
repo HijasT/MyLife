@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { saveToCache, loadFromCache, markSynced } from "@/hooks/useSyncStatus";
+import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 
 type TabKey = "wardrobe" | "wishlist" | "archive" | "purchases";
 type PerfumeStatus = "wardrobe" | "wishlist" | "archive";
@@ -33,7 +34,7 @@ type AddForm = {
 
 function uid() { return `id-${Math.random().toString(16).slice(2)}-${Date.now()}`; }
 function safeNum(x: unknown, fb = 0) { const n = typeof x === "number" ? x : Number(x); return Number.isFinite(n) ? n : fb; }
-function nowIso() { return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" }); }
+function nowIso(tz: string = APP_TZ) { return todayDubai(tz); }
 function monthKey(d: string) { return d.slice(0, 7); }
 function fmtMoney(a: number) { return `AED ${a.toFixed(2)}`; }
 function normalizeName(v: string) { return v.trim().toLowerCase().replace(/\s+/g, " "); }
@@ -130,6 +131,7 @@ export default function PerfumesPage() {
   const supabase = createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Perfume[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -160,6 +162,7 @@ export default function PerfumesPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
       setUserId(user.id);
+      setTimezone(await getUserTimezone(supabase, user.id));
 
       const [pr, pur, wear] = await Promise.all([
         supabase.from("perfumes").select("*, perfume_bottles(*)").eq("user_id", user.id).order("brand"),
@@ -219,9 +222,9 @@ export default function PerfumesPage() {
 
   // ── Stats based on bottle state ───────────────────────────────────────────
   const tabStats = useMemo(() => {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const cutoff = thirtyDaysAgo.toISOString().slice(0, 10);
+    const [ty, tm, td] = todayDubai(timezone).split("-").map(Number);
+    const thirtyDaysAgo = new Date(ty, tm - 1, td - 30);
+    const cutoff = `${thirtyDaysAgo.getFullYear()}-${String(thirtyDaysAgo.getMonth() + 1).padStart(2, "0")}-${String(thirtyDaysAgo.getDate()).padStart(2, "0")}`;
 
     const calcFor = (filterFn: (p: Perfume) => boolean) => {
       const list = items.filter(filterFn);
@@ -248,7 +251,7 @@ export default function PerfumesPage() {
       newIds,
       wardrobeValue,
     };
-  }, [items, purchases]);
+  }, [items, purchases, timezone]);
 
   // ── Tab items — bottle-based filtering ────────────────────────────────────
   const tabItems = useMemo(() => {
@@ -284,15 +287,15 @@ export default function PerfumesPage() {
   const purchaseHistory = useMemo(() => [...purchases].sort((a, b) => b.date.localeCompare(a.date)), [purchases]);
 
   const last12Months = useMemo(() => {
-    const today = new Date();
+    const [ty, tm] = todayDubai(timezone).split("-").map(Number);
     const map = new Map<string, number>();
     for (const p of purchases) { if (safeNum(p.price) <= 0) continue; map.set(monthKey(p.date), (map.get(monthKey(p.date)) ?? 0) + 1); }
     return Array.from({ length: 12 }).map((_, i) => {
-      const dt = new Date(today.getFullYear(), today.getMonth() - 11 + i, 1);
+      const dt = new Date(ty, tm - 1 - 11 + i, 1);
       const mk = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
       return { month: monthShort(mk), count: map.get(mk) ?? 0 };
     });
-  }, [purchases]);
+  }, [purchases, timezone]);
 
   function toast(message: string, kind: ToastKind = "success") {
     const id = uid();
@@ -326,7 +329,7 @@ export default function PerfumesPage() {
       if (bErr || !bd) { toast(bErr?.message || "Bottle save failed", "error"); return; }
       const { error: pErr } = await supabase.from("perfume_purchases").insert({
         perfume_id: pd.id, bottle_id: bd.id, user_id: userId,
-        date: af.date || nowIso(), ml: size, price, currency: "AED",
+        date: af.date || nowIso(timezone), ml: size, price, currency: "AED",
         shop_name: af.shop || "Unknown", shop_link: af.shopLink || null,
       });
       if (pErr) { toast(pErr.message, "error"); return; }
@@ -357,7 +360,7 @@ export default function PerfumesPage() {
       <div style={{ padding:"22px 24px 0", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
         <div style={{ fontSize:22, fontWeight:800 }}>Aroma<span style={{ color:V.accent, fontStyle:"italic" }}>tica</span> <span style={{ fontSize:13, fontWeight:500, color:V.faint, fontStyle:"normal" }}>— Fragrance Collection</span></div>
         <div style={{ display:"flex", gap:8 }}>
-          <button style={btnPrimary} onClick={() => { setAf({ status:"wardrobe", brand:"", model:"", imageDataUrl:"", rating:4, bottleType:"Full bottle", sizeMl:"100", price:"", shop:"Unknown", shopLink:"", date:nowIso(), priority:"Medium" }); setShowAdd(true); }}>+ Add</button>
+          <button style={btnPrimary} onClick={() => { setAf({ status:"wardrobe", brand:"", model:"", imageDataUrl:"", rating:4, bottleType:"Full bottle", sizeMl:"100", price:"", shop:"Unknown", shopLink:"", date:nowIso(timezone), priority:"Medium" }); setShowAdd(true); }}>+ Add</button>
         </div>
       </div>
 

@@ -121,6 +121,7 @@ export default function BiomarkerDetailPage({ params }: { params: Promise<{ id: 
   const { id } = use(params);
   const client = createClient();
   const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
   const [test, setTest] = useState<BiomarkerTest | null>(null);
   const [results, setResults] = useState<BiomarkerResult[]>([]);
   const [allTests, setAllTests] = useState<BiomarkerTest[]>([]);
@@ -159,8 +160,9 @@ export default function BiomarkerDetailPage({ params }: { params: Promise<{ id: 
         setLoading(false);
         return;
       }
+      setUserId(user.id);
       const [tRes, rRes, allTRes, allRRes] = await Promise.all([
-        client.from("biomarker_tests").select("*").eq("id", id).single(),
+        client.from("biomarker_tests").select("*").eq("id", id).eq("user_id", user.id).single(),
         client.from("biomarker_results").select("*").eq("test_id", id).eq("user_id", user.id).order("test_date", { ascending: true }),
         client.from("biomarker_tests").select("*").eq("user_id", user.id).order("name"),
         client.from("biomarker_results").select("*").eq("user_id", user.id).order("test_date", { ascending: true }),
@@ -207,7 +209,7 @@ export default function BiomarkerDetailPage({ params }: { params: Promise<{ id: 
   const nextTest = currentIndex >= 0 && currentIndex < orderedTests.length - 1 ? orderedTests[currentIndex + 1] : null;
 
   async function saveEdit() {
-    if (!test) return;
+    if (!test || !userId) return;
     const payload = {
       method: editFields.method || null,
       ref_min: editFields.refMin === "" ? null : Number(editFields.refMin),
@@ -216,7 +218,7 @@ export default function BiomarkerDetailPage({ params }: { params: Promise<{ id: 
       unit: editFields.unit || null,
       group_name: (editFields.groupName === "__new__" ? editFields.newGroupName : editFields.groupName) || test.groupName,
     };
-    const { data, error } = await client.from("biomarker_tests").update(payload).eq("id", test.id).select("*").single();
+    const { data, error } = await client.from("biomarker_tests").update(payload).eq("id", test.id).eq("user_id", userId).select("*").single();
     if (error) {
       showToast(error.message);
       return;

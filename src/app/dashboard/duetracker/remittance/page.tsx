@@ -1,6 +1,6 @@
  "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -26,7 +26,7 @@ function fmtMonth(m: string) {
 function statusTone(status: Status) {
   if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
   if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "#ef4444" };
-  if (status === "waived") return { bg: "rgba(239,68,68,0.14)", fg: "#ef4444" };
+  if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
   return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
 }
 
@@ -48,6 +48,7 @@ export default function RemittancePage() {
   const [editNote, setEditNote] = useState("");
   const [editStatus, setEditStatus] = useState<Status>("pending");
   const [toast, setToast] = useState("");
+  const toastTimerRef = useRef<number | undefined>(undefined);
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -132,8 +133,8 @@ export default function RemittancePage() {
 
   function showToast(msg: string) {
     setToast(msg);
-    window.clearTimeout((showToast as unknown as { timer?: number }).timer);
-    (showToast as unknown as { timer?: number }).timer = window.setTimeout(() => setToast(""), 2500);
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(""), 2500);
   }
 
   async function saveEdit(record: MonthRecord) {
@@ -175,16 +176,11 @@ export default function RemittancePage() {
   }
 
   async function updateStatus(record: MonthRecord, status: Status) {
-    if (!userId) {
-      console.error('❌ No userId');
-      return;
-    }
+    if (!userId) return;
     if (record.isLocked) {
       showToast("That month is locked");
       return;
     }
-
-    console.log('🔄 Updating status:', { month: record.month, oldStatus: record.status, newStatus: status });
 
     // Optimistic update (immediate UI feedback)
     const previousRecords = records;
@@ -202,25 +198,20 @@ export default function RemittancePage() {
         is_locked: record.isLocked,
       };
 
-      console.log('📤 Sending to database:', updateData);
-
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("due_month_settings")
         .upsert(updateData, { onConflict: "user_id,month" });
 
       if (error) {
-        console.error('❌ Database error:', error);
         showToast(`Failed: ${error.message}`);
         // Revert optimistic update
         setRecords(previousRecords);
         return;
       }
 
-      console.log('✅ Status saved successfully:', { month: record.month, status });
       showToast(`Status updated to ${status}`);
-    } catch (err) {
-      console.error('❌ Unexpected error:', err);
-      showToast('Failed to save. Check console (F12)');
+    } catch {
+      showToast('Failed to save status update');
       // Revert optimistic update
       setRecords(previousRecords);
     }
@@ -324,8 +315,8 @@ export default function RemittancePage() {
                         Status
                         <select style={inp} value={editStatus} onChange={(e) => setEditStatus(e.target.value as Status)}>
                           <option value="pending">Pending</option>
+                          <option value="partial">Partial</option>
                           <option value="paid">Paid</option>
-                          
                           <option value="waived">Waived</option>
                         </select>
                       </label>
@@ -360,8 +351,8 @@ export default function RemittancePage() {
                     </div>
                     <select disabled={record.isLocked} value={record.status} onChange={(e) => void updateStatus(record, e.target.value as Status)} style={{ ...inp, padding: "6px 8px", fontSize: 12, borderColor: tone.fg, color: tone.fg }}>
                       <option value="pending">Pending</option>
+                      <option value="partial">Partial</option>
                       <option value="paid">Paid</option>
-                      
                       <option value="waived">Waived</option>
                     </select>
                     <button

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
-import { nowDubai, todayDubai } from "@/lib/timezone";
+import { nowDubai, todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 
 type Currency = "AED" | "INR" | "USD";
 type Status = "pending" | "partial" | "paid" | "waived";
@@ -72,8 +72,8 @@ type ThemeVars = {
 const DEFAULT_GROUPS = ["UAE", "India"];
 const DEFAULT_RATES: Record<string, number> = { INR: 25.2, USD: 3.67 };
 
-function nowMonth() {
-  return nowDubai().slice(0, 7);
+function nowMonth(tz: string = APP_TZ) {
+  return nowDubai(tz).slice(0, 7);
 }
 
 function prevMonth(m: string) {
@@ -323,6 +323,7 @@ export default function DueTrackerPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [month, setMonth] = useState(nowMonth());
   const [items, setItems] = useState<DueItem[]>([]);
   const [entries, setEntries] = useState<DueEntry[]>([]);
@@ -347,6 +348,7 @@ export default function DueTrackerPage() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sortBy, setSortBy] = useState<SortKey>("manual");
   const [toast, setToast] = useState("");
+  const toastTimerRef = useRef<number | undefined>(undefined);
   const [isDark, setIsDark] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [remittanceEditMode, setRemittanceEditMode] = useState(false);
@@ -390,9 +392,18 @@ export default function DueTrackerPage() {
         return;
       }
       setUserId(user.id);
-      await loadAll(user.id, month);
-      const created = await autoCreateMonthEntries(user.id, month);
-      if (created) await loadAll(user.id, month);
+
+      const tz = await getUserTimezone(supabase, user.id);
+      setTimezone(tz);
+      const realMonth = nowMonth(tz);
+      if (realMonth !== month) {
+        setMonth(realMonth);
+        setSettings((s) => ({ ...s, month: realMonth }));
+      }
+
+      await loadAll(user.id, realMonth);
+      const created = await autoCreateMonthEntries(user.id, realMonth);
+      if (created) await loadAll(user.id, realMonth);
       setLoading(false);
     }
     void load();
@@ -727,18 +738,6 @@ export default function DueTrackerPage() {
     showToast(item.isHidden ? "Item shown" : "Item hidden");
   }
 
-  async function rollForwardFixedItems() {
-    if (settings.isLocked) {
-      showToast("Month is locked");
-      return;
-    }
-    if (!userId) return;
-    const created = await autoCreateMonthEntries(userId, month);
-    await loadAll(userId, month);
-    showToast(created ? `Created new month entries for ${fmtMonth(month)}` : "Nothing to create");
-  }
-
-
   async function autoCreateMonthEntries(uid: string, m: string) {
     const previous = prevMonth(m);
     const [itemsRes, entriesRes, prevEntriesRes] = await Promise.all([
@@ -746,7 +745,10 @@ export default function DueTrackerPage() {
       supabase.from("due_entries").select("*").eq("user_id", uid).eq("month", m),
       supabase.from("due_entries").select("*").eq("user_id", uid).eq("month", previous),
     ]);
-    if (itemsRes.error || entriesRes.error || prevEntriesRes.error) return false;
+    if (itemsRes.error || entriesRes.error || prevEntriesRes.error) {
+      showToast("Failed to set up this month's due entries — try refreshing");
+      return false;
+    }
 
     const allItems = (itemsRes.data ?? []).map(dbToItem);
     const currentEntries = (entriesRes.data ?? []).map(dbToEntry);
@@ -793,8 +795,8 @@ export default function DueTrackerPage() {
 
   function showToast(msg: string) {
     setToast(msg);
-    window.clearTimeout((showToast as unknown as { timer?: number }).timer);
-    (showToast as unknown as { timer?: number }).timer = window.setTimeout(() => setToast(""), 2600);
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(""), 2600);
   }
 
   async function persistMonthSettings(next: Partial<MonthSettings>) {
@@ -832,19 +834,21 @@ export default function DueTrackerPage() {
 
   const remittanceSettled = isSettled(settings.remittanceStatus);
 
-  const allVisibleSettled = useMemo(() => {
-    const dueSettled = visibleItems.every((item) => isSettled(getEntry(item.id)?.status ?? "pending"));
+  // Auto-lock must check every item, not just the currently-visible ones —
+  // otherwise hiding an unpaid due lets the month lock while it's still owed.
+  const allSettled = useMemo(() => {
+    const dueSettled = items.every((item) => isSettled(getEntry(item.id)?.status ?? "pending"));
     const needsRemittance = (settings.remittanceInr ?? 0) > 0;
     return dueSettled && (!needsRemittance || remittanceSettled);
-  }, [visibleItems, entries, settings.remittanceInr, settings.remittanceStatus]);
+  }, [items, entries, settings.remittanceInr, settings.remittanceStatus]);
 
   useEffect(() => {
     if (!userId || loading) return;
-    if (settings.isLocked || !allVisibleSettled) return;
+    if (settings.isLocked || !allSettled) return;
     void toggleMonthLock(true);
-  }, [allVisibleSettled, userId, loading]);
+  }, [allSettled, userId, loading]);
 
-  const today = todayDubai();
+  const today = todayDubai(timezone);
   const currentDay = Number(today.slice(8, 10));
 
   const enrichedItems = useMemo(() => {
@@ -1041,7 +1045,7 @@ export default function DueTrackerPage() {
         <button style={btn} onClick={() => void changeMonth(prevMonth(month))}>‹</button>
         <span style={{ fontSize: 18, fontWeight: 700, minWidth: 180, textAlign: "center" }}>{fmtMonth(month)}</span>
         <button style={btn} onClick={() => void changeMonth(nextMonth(month))}>›</button>
-        <button style={{ ...btn, fontSize: 12, padding: "6px 12px" }} onClick={() => void changeMonth(nowMonth())}>Today</button>
+        <button style={{ ...btn, fontSize: 12, padding: "6px 12px" }} onClick={() => void changeMonth(nowMonth(timezone))}>Today</button>
         <div style={{ flex: 1 }} />
         <select value={filter} onChange={(e) => setFilter(e.target.value as FilterKey)} style={{ ...inp, minWidth: 120 }}>
           <option value="all">All</option>

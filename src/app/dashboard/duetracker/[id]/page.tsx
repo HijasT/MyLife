@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { nowDubai } from "@/lib/timezone";
+import { nowDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 
 type Currency = "AED" | "INR" | "USD";
 type Status = "pending" | "partial" | "paid" | "waived";
@@ -57,10 +57,10 @@ function fmtMonthShort(m: string) {
   return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-AE", { month: "short" });
 }
 
-function fmtDateTime(iso: string | null) {
+function fmtDateTime(iso: string | null, tz: string = APP_TZ) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-AE", {
-    timeZone: "Asia/Dubai",
+    timeZone: tz,
     day: "2-digit",
     month: "short",
     year: "2-digit",
@@ -75,8 +75,8 @@ function toAed(amount: number, currency: Currency, rates: Record<string, number>
   return rates[currency] ? amount / rates[currency] : amount;
 }
 
-function nowMonth() {
-  return nowDubai().slice(0, 7);
+function nowMonth(tz: string = APP_TZ) {
+  return nowDubai(tz).slice(0, 7);
 }
 
 function addMonths(m: string, n: number) {
@@ -143,6 +143,7 @@ export default function DueItemDetailPage() {
   const supabase = createClient();
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [item, setItem] = useState<DueItem | null>(null);
   const [itemNav, setItemNav] = useState<DueItemNav[]>([]);
   const [entries, setEntries] = useState<DueEntry[]>([]);
@@ -151,6 +152,7 @@ export default function DueItemDetailPage() {
   const [monthLocks, setMonthLocks] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState("");
+  const toastTimerRef = useRef<number | undefined>(undefined);
   const [isDark, setIsDark] = useState(false);
 
   const [editingMonth, setEditingMonth] = useState<string | null>(null);
@@ -193,15 +195,16 @@ export default function DueItemDetailPage() {
         }
         setUserId(user.id);
 
+        const tz = await getUserTimezone(supabase, user.id);
+        setTimezone(tz);
+        setNewMonth(nowMonth(tz));
+
         // Get ID from params - useParams returns string | string[]
         const itemId = Array.isArray(params.id) ? params.id[0] : params.id;
         if (!itemId) {
-          console.error("No item ID provided in params:", params);
           setLoading(false);
           return;
         }
-
-        console.log("Loading due item:", itemId);
 
         const [itemRes, entriesRes, settingsRes, navRes] = await Promise.all([
           supabase.from("due_items").select("*").eq("id", itemId).eq("user_id", user.id).single(),
@@ -211,7 +214,7 @@ export default function DueItemDetailPage() {
         ]);
 
         if (itemRes.error) {
-          console.error("Error fetching item:", itemRes.error);
+          showToast("Failed to load this due item");
         }
 
         if (itemRes.data) {
@@ -286,8 +289,8 @@ export default function DueItemDetailPage() {
         setItemNav(navRes.data.map((r: { id: string; name: string }) => ({ id: r.id, name: r.name })));
       }
       setLoading(false);
-    } catch (error) {
-      console.error("Error loading due item:", error);
+    } catch {
+      showToast("Failed to load this due item");
       setLoading(false);
     }
     }
@@ -296,8 +299,8 @@ export default function DueItemDetailPage() {
 
   function showToast(msg: string) {
     setToast(msg);
-    window.clearTimeout((showToast as unknown as { timer?: number }).timer);
-    (showToast as unknown as { timer?: number }).timer = window.setTimeout(() => setToast(""), 2500);
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(""), 2500);
   }
 
   async function refreshEntry(entryId: string) {
@@ -343,7 +346,7 @@ export default function DueItemDetailPage() {
       showToast("That month is locked");
       return;
     }
-    const remaining = Math.max((entry.amount ?? 0) - (entry.amountPaid ?? 0), 0);
+    const remaining = Math.max(getEntryRemaining(entry), 0);
     if (remaining <= 0) {
       showToast("Nothing left to pay");
       return;
@@ -363,7 +366,7 @@ export default function DueItemDetailPage() {
   async function submitPaymentModal() {
     if (!paymentModalEntry || !userId) return;
     const amount = Number(paymentAmount);
-    const remaining = Math.max((paymentModalEntry.amount ?? 0) - (paymentModalEntry.amountPaid ?? 0), 0);
+    const remaining = Math.max(getEntryRemaining(paymentModalEntry), 0);
     if (!Number.isFinite(amount) || amount <= 0) {
       showToast("Enter a valid payment amount");
       return;
@@ -761,7 +764,7 @@ export default function DueItemDetailPage() {
                         {entry.amountPaid > 0 && (
                           <div style={{ fontSize: 11, color: entry.status === "paid" ? "#16a34a" : V.accent, marginTop: 2 }}>
                             Paid so far: {entry.currency} {entry.amountPaid.toFixed(2)} · Remaining: {entry.currency} {getEntryRemaining(entry).toFixed(2)}
-                            {entry.lastPaidAt ? ` · Last: ${fmtDateTime(entry.lastPaidAt)}` : ""}
+                            {entry.lastPaidAt ? ` · Last: ${fmtDateTime(entry.lastPaidAt, timezone)}` : ""}
                           </div>
                         )}
                         {/* Progress bar for partial/in-progress entries */}
@@ -807,7 +810,7 @@ export default function DueItemDetailPage() {
                         <div key={payment.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, fontSize: 12, color: V.muted, flexWrap: "wrap" }}>
                           <span><strong style={{ color: V.text }}>{entry.currency} {payment.paidAmount.toFixed(2)}</strong>{payment.note ? ` · ${payment.note}` : ""}</span>
                           <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span>{fmtDateTime(payment.paidAt)}</span>
+                            <span>{fmtDateTime(payment.paidAt, timezone)}</span>
                             <button
                               onClick={() => void deletePayment(payment.id, entry.id)}
                               disabled={monthLocks[entry.month]}

@@ -4,6 +4,8 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
+import { getUserTimezone, APP_TZ } from "@/lib/timezone";
+import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue } from "@/lib/portfolio";
 
 type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
 type Currency = "AED" | "INR" | "USD" | "GBP" | "EUR";
@@ -54,16 +56,6 @@ type LivePriceRow = {
   updated: string;
 };
 
-const FX: Record<string, number> = {
-  AED: 1,
-  USD: 3.67,
-  INR: 0.044,
-  GBP: 4.62,
-  EUR: 4.0,
-};
-
-const toAed = (a: number, c: Currency) => a * (FX[c] ?? 1);
-
 const fmtN = (n: number, d = 2) =>
   n.toLocaleString("en-AE", {
     minimumFractionDigits: d,
@@ -81,27 +73,6 @@ const ASSET_ICONS: Record<AssetType, string> = {
   other: "💼",
 };
 
-// Purity factor for gold — 24K is pure (1.0), 22K is 91.6%, etc.
-const PURITY_FACTOR: Record<number, number> = {
-  24: 1.0,
-  22: 0.9167,
-  21: 0.875,
-  18: 0.75,
-};
-
-// Calculate the current value of an item in AED.
-// For gold with purity+weight set, uses weight × spot × purity factor (ignores unit count).
-// For everything else: currentPrice × totalUnits.
-function calcCurrentValue(item: PortfolioItem, totalUnits: number): number | null {
-  if (item.currentPrice == null) return null;
-  if (item.assetType === "gold" && item.weightGrams && item.weightGrams > 0 && item.goldPurityKarat) {
-    const factor = PURITY_FACTOR[item.goldPurityKarat] ?? 1;
-    // currentPrice for gold is expected to be AED per gram of 24K pure
-    return item.weightGrams * item.currentPrice * factor;
-  }
-  return item.currentPrice * totalUnits;
-}
-
 const LIVE_PRICE_OPTIONS = [
   { value: "", label: "None — manual price update" },
   { value: "XAU_OZ", label: "24K Gold — 1 oz (AED)" },
@@ -117,7 +88,7 @@ async function fetchLivePrice(symbol: string): Promise<number | null> {
     `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
 
   try {
-    let usdToAed = FX.USD;
+    let usdToAed = FX_TO_AED.USD;
 
     try {
       const fxRes = await fetch(
@@ -160,7 +131,7 @@ async function fetchPriceForLiveLink(link: string): Promise<number | null> {
   const proxy = (url: string) =>
     `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
 
-  let usdToAed = FX.USD;
+  let usdToAed = FX_TO_AED.USD;
   try {
     const fxRes = await fetch(
       "https://api.frankfurter.app/latest?from=USD&to=AED"
@@ -279,6 +250,7 @@ export default function PortfolioPage() {
   const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [allStats, setAllStats] = useState<Record<string, ItemStats>>({});
@@ -424,6 +396,7 @@ export default function PortfolioPage() {
       }
 
       setUserId(user.id);
+      setTimezone(await getUserTimezone(supabase, user.id));
 
       const [ir, pr, profileRes] = await Promise.all([
         supabase
@@ -517,12 +490,12 @@ export default function PortfolioPage() {
 
     const results: Record<string, LivePriceRow> = {};
     const now = new Date().toLocaleTimeString("en-AE", {
-      timeZone: "Asia/Dubai",
+      timeZone: timezone,
     });
     const proxy = (url: string) =>
       `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
 
-    let usdToAed = FX.USD;
+    let usdToAed = FX_TO_AED.USD;
 
     try {
       const fxRes = await fetch(
@@ -777,7 +750,7 @@ export default function PortfolioPage() {
       return;
     }
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("portfolio_items")
       .insert({
         user_id: userId,
@@ -793,6 +766,11 @@ export default function PortfolioPage() {
       })
       .select("*")
       .single();
+
+    if (error) {
+      showToast("Failed to add asset");
+      return;
+    }
 
     if (data) {
       const added = dbToItem(data);
@@ -825,8 +803,17 @@ export default function PortfolioPage() {
   }
 
   async function deleteItem(id: string) {
-    await supabase.from("portfolio_purchases").delete().eq("item_id", id);
-    await supabase.from("portfolio_items").delete().eq("id", id);
+    if (!userId) return;
+    const { error: purErr } = await supabase.from("portfolio_purchases").delete().eq("item_id", id).eq("user_id", userId);
+    if (purErr) {
+      showToast("Failed to delete asset");
+      return;
+    }
+    const { error: itemErr } = await supabase.from("portfolio_items").delete().eq("id", id).eq("user_id", userId);
+    if (itemErr) {
+      showToast("Failed to delete asset");
+      return;
+    }
 
     setItems((p) => p.filter((x) => x.id !== id));
     setAllStats((p) => {
@@ -858,10 +845,15 @@ export default function PortfolioPage() {
       updatePayload.weight_grams = editGoldWeight ? Number(editGoldWeight) : null;
     }
 
-    await supabase
+    const { error } = await supabase
       .from("portfolio_items")
       .update(updatePayload)
       .eq("id", item.id);
+
+    if (error) {
+      showToast("Failed to update price");
+      return;
+    }
 
     setItems((p) =>
       p.map((x) =>

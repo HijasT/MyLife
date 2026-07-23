@@ -4,7 +4,7 @@ import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
-import { todayDubai } from "@/lib/timezone";
+import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 
 type Category = "Food" | "Clothing" | "Household" | "Electronics" | "Other";
 type Item = {
@@ -30,9 +30,9 @@ const dbToItem = (r: any): Item => ({
   purchaseDate:r.purchase_date??null, purchasePrice:r.purchase_price??null, currency:r.currency??"AED",
 });
 
-function daysLeft(d: string | null) {
+function daysLeft(d: string | null, tz: string = APP_TZ) {
   if (!d) return null;
-  return Math.ceil((new Date(d).getTime() - new Date(todayDubai()).getTime()) / 86400000);
+  return Math.ceil((new Date(d).getTime() - new Date(todayDubai(tz)).getTime()) / 86400000);
 }
 
 export default function InventoryDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -40,6 +40,7 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
   const supabase = createClient();
   const router = useRouter();
   const [item, setItem] = useState<Item | null>(null);
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [loading, setLoading] = useState(true);
   const [isEdit, setIsEdit] = useState(false);
   const [name, setName] = useState("");
@@ -50,6 +51,7 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
   const [imageUrl, setImageUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [lowThreshold, setLowThreshold] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
   const [toast, setToast] = useState("");
   const [showDelete, setShowDelete] = useState(false);
@@ -71,7 +73,8 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push("/login"); return; }
-      const { data } = await supabase.from("inventory_items").select("*").eq("id", id).single();
+      setTimezone(await getUserTimezone(supabase, user.id));
+      const { data } = await supabase.from("inventory_items").select("*").eq("id", id).eq("user_id", user.id).single();
       if (data) {
         const it = dbToItem(data);
         setItem(it);
@@ -79,6 +82,7 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
         setExpiryDate(it.expiryDate ?? ""); setBrand(it.brand);
         setImageUrl(it.imageUrl); setNotes(it.notes);
         setLowThreshold(it.lowThreshold?.toString() ?? "");
+        setPurchaseDate(it.purchaseDate ?? "");
         setPurchasePrice(it.purchasePrice?.toString() ?? "");
       }
       setLoading(false);
@@ -94,6 +98,7 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
       name, location: location||null, quantity: parseFloat(quantity)||0,
       expiry_date: expiryDate||null, brand: brand||null, image_url: imageUrl||null,
       notes: notes||null, low_threshold: lowThreshold?parseFloat(lowThreshold):null,
+      purchase_date: purchaseDate||null,
       purchase_price: purchasePrice?parseFloat(purchasePrice):null,
       updated_at: new Date().toISOString(),
     };
@@ -124,6 +129,7 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
     setItem(p => p ? { ...p, name, location, quantity:parseFloat(quantity)||0,
       expiryDate:expiryDate||null, brand, imageUrl, notes,
       lowThreshold:lowThreshold?parseFloat(lowThreshold):null,
+      purchaseDate:purchaseDate||null,
       purchasePrice:purchasePrice?parseFloat(purchasePrice):null } : p);
     setIsEdit(false); showMsg("Saved");
   }
@@ -178,7 +184,7 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
   if (loading) return <div style={{minHeight:"60vh",display:"flex",alignItems:"center",justifyContent:"center",background:V.bg}}><div style={{width:28,height:28,border:`2.5px solid ${V.accent}`,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.7s linear infinite"}}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
   if (!item) return <div style={{padding:40,background:V.bg,minHeight:"100vh",color:V.muted}}>Not found. <Link href="/dashboard/inventory" style={{color:V.accent}}>Back</Link></div>;
 
-  const days = daysLeft(item.expiryDate);
+  const days = daysLeft(item.expiryDate, timezone);
   const catColor = CAT_COLORS[item.category];
   const isLow = item.lowThreshold !== null && item.quantity <= item.lowThreshold;
 
@@ -254,7 +260,7 @@ export default function InventoryDetailPage({ params }: { params: Promise<{ id: 
             {[
               {label:"Brand",value:item.brand,edit:<input style={inp} value={brand} onChange={e=>setBrand(e.target.value)}/>},
               {label:"Location",value:item.location,edit:<input style={inp} value={location} onChange={e=>setLocation(e.target.value)}/>},
-              {label:"Purchase date",value:item.purchaseDate,edit:<input type="date" style={inp} value={item.purchaseDate??""} onChange={()=>{}}/>},
+              {label:"Purchase date",value:item.purchaseDate,edit:<input type="date" style={inp} value={purchaseDate} onChange={e=>setPurchaseDate(e.target.value)}/>},
               {label:"Purchase price",value:item.purchasePrice?`${item.currency} ${item.purchasePrice}`:null,edit:<input type="number" style={inp} value={purchasePrice} onChange={e=>setPurchasePrice(e.target.value)}/>},
             ].map(row=>(
               <div key={row.label}>

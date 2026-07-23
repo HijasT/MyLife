@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { nowDubai } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
-import { searchBiomarkerRefs, findBiomarkerRef, type BiomarkerRef } from "@/lib/biomarkers_db";
 
 const supabase = createClient;
 

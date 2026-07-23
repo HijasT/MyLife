@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { nowDubai, todayDubai } from "@/lib/timezone";
+import { nowDubai, todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 
@@ -177,6 +177,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
 
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState("");
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [item, setItem] = useState<Perfume | null>(null);
   const [catalog, setCatalog] = useState<Perfume[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -222,12 +223,13 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
         return;
       }
       setUserId(user.id);
+      setTimezone(await getUserTimezone(supabase, user.id));
       const [itemRes, purRes, allRes, catalogRes, wearRes] = await Promise.all([
-        supabase.from("perfumes").select("*, perfume_bottles(*)").eq("id", id).single(),
-        supabase.from("perfume_purchases").select("*").eq("perfume_id", id).order("date", { ascending: false }),
+        supabase.from("perfumes").select("*, perfume_bottles(*)").eq("id", id).eq("user_id", user.id).single(),
+        supabase.from("perfume_purchases").select("*").eq("perfume_id", id).eq("user_id", user.id).order("date", { ascending: false }),
         supabase.from("perfumes").select("notes_tags").eq("user_id", user.id),
         supabase.from("perfumes").select("*").eq("user_id", user.id).order("brand"),
-        supabase.from("perfume_wear_logs").select("*").eq("perfume_id", id).order("worn_on", { ascending: false }),
+        supabase.from("perfume_wear_logs").select("*").eq("perfume_id", id).eq("user_id", user.id).order("worn_on", { ascending: false }),
       ]);
       if (itemRes.error) showToast(itemRes.error.message);
       if (purRes.error) showToast(purRes.error.message);
@@ -345,7 +347,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
         status: "Archive",
         archive_reason: archiveReason,
         archive_comment: archiveComment.trim() || null,
-        archived_at: nowDubai(),
+        archived_at: nowDubai(timezone),
       })
       .eq("id", archiveTarget.bottleId);
     if (error) {
@@ -481,7 +483,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
         : prev,
     );
     setShowAddBottle(false);
-    setNewBottle({ bottleType: "Bottle", sizeMl: "100", price: "", date: nowDubai().slice(0, 10), shopCombined: "" });
+    setNewBottle({ bottleType: "Bottle", sizeMl: "100", price: "", date: nowDubai(timezone).slice(0, 10), shopCombined: "" });
     showToast("Bottle and purchase added");
   }
 
@@ -610,7 +612,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
         bottleType: bottle.bottleType,
         sizeMl: String(bottle.bottleSizeMl ?? 0),
         price: String(purchase?.price ?? ""),
-        date: purchase?.date ?? nowDubai().slice(0, 10),
+        date: purchase?.date ?? nowDubai(timezone).slice(0, 10),
         shopCombined: joinShop(purchase?.shopName),
       },
     }));

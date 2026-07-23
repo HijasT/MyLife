@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { nowDubai } from "@/lib/timezone";
+import { nowDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
+import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue } from "@/lib/portfolio";
 
 type Currency = "AED" | "INR" | "USD" | "GBP" | "EUR";
 type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
@@ -35,24 +36,6 @@ type PortfolioItem = {
   weightGrams?: number | null;
 };
 
-// Purity factor for gold
-const PURITY_FACTOR: Record<number, number> = {
-  24: 1.0,
-  22: 0.9167,
-  21: 0.875,
-  18: 0.75,
-};
-
-// Gold-aware current value calculation
-function calcCurrentValue(item: PortfolioItem, totalUnits: number): number | null {
-  if (item.currentPrice == null) return null;
-  if (item.assetType === "gold" && item.weightGrams && item.weightGrams > 0 && item.goldPurityKarat) {
-    const factor = PURITY_FACTOR[item.goldPurityKarat] ?? 1;
-    return item.weightGrams * item.currentPrice * factor;
-  }
-  return item.currentPrice * totalUnits;
-}
-
 type Purchase = {
   id: string;
   purchasedAt: string;
@@ -73,18 +56,6 @@ type PortfolioAlert = {
   triggeredAt: string | null;
   createdAt: string;
 };
-
-const FX_TO_AED: Record<string, number> = {
-  AED: 1,
-  USD: 3.67,
-  INR: 0.044,
-  GBP: 4.62,
-  EUR: 4.0,
-};
-
-function toAed(amt: number, cur: Currency) {
-  return amt * (FX_TO_AED[cur] ?? 1);
-}
 
 function fmtNum(n: number, dec = 2) {
   return n.toLocaleString("en-AE", {
@@ -246,6 +217,7 @@ export default function PortfolioItemPage() {
   const [newPrice, setNewPrice] = useState("");
   const [toast, setToast] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState(APP_TZ);
   const [livePriceSymbolInput, setLivePriceSymbolInput] = useState("");
   const [savingLiveLink, setSavingLiveLink] = useState(false);
   const [fetchingLinkedPrice, setFetchingLinkedPrice] = useState(false);
@@ -293,11 +265,11 @@ export default function PortfolioItemPage() {
         }
 
         setUserId(user.id);
+        setTimezone(await getUserTimezone(supabase, user.id));
 
         // Get ID from params - useParams returns string | string[]
         const itemId = Array.isArray(params.id) ? params.id[0] : params.id;
         if (!itemId) {
-          console.error("No item ID provided in params:", params);
           setLoading(false);
           return;
         }
@@ -496,7 +468,8 @@ export default function PortfolioItemPage() {
 
     const unitPrice = parseFloat(af.unitPrice);
     const units = parseFloat(af.units);
-    const totalPaid = parseFloat(af.totalPaid) || unitPrice * units;
+    const totalPaidInput = parseFloat(af.totalPaid);
+    const totalPaid = !isNaN(totalPaidInput) ? totalPaidInput : unitPrice * units;
 
     if (isNaN(unitPrice) || isNaN(units) || unitPrice <= 0 || units <= 0) {
       showToast("Enter valid price and units");
@@ -511,7 +484,7 @@ export default function PortfolioItemPage() {
     const signedUnits = af.transactionType === "sell" ? -units : units;
     const signedTotalPaid = af.transactionType === "sell" ? -totalPaid : totalPaid;
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("portfolio_purchases")
       .insert({
         user_id: userId,
@@ -528,6 +501,11 @@ export default function PortfolioItemPage() {
       .select("*")
       .single();
 
+    if (error) {
+      showToast("Failed to add transaction");
+      return;
+    }
+
     if (data) {
       setPurchases((p) => [dbToPurchase(data), ...p]);
       setShowAdd(false);
@@ -539,9 +517,12 @@ export default function PortfolioItemPage() {
   async function saveEditPurchase() {
     if (!editPurchase || !userId || !item) return;
 
-    const unitPrice = parseFloat(af.unitPrice) || editPurchase.unitPrice;
-    const units = parseFloat(af.units) || editPurchase.units;
-    const totalPaid = parseFloat(af.totalPaid) || editPurchase.totalPaid;
+    const unitPriceInput = parseFloat(af.unitPrice);
+    const unitsInput = parseFloat(af.units);
+    const totalPaidInput = parseFloat(af.totalPaid);
+    const unitPrice = !isNaN(unitPriceInput) ? unitPriceInput : editPurchase.unitPrice;
+    const units = !isNaN(unitsInput) ? unitsInput : editPurchase.units;
+    const totalPaid = !isNaN(totalPaidInput) ? totalPaidInput : editPurchase.totalPaid;
 
     if (unitPrice <= 0 || units <= 0 || totalPaid <= 0) {
       showToast("Enter valid transaction values");
@@ -555,7 +536,7 @@ export default function PortfolioItemPage() {
       return;
     }
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("portfolio_purchases")
       .update({
         purchased_at: new Date(af.purchasedAt).toISOString(),
@@ -570,6 +551,11 @@ export default function PortfolioItemPage() {
       .eq("id", editPurchase.id)
       .select("*")
       .single();
+
+    if (error) {
+      showToast("Failed to update transaction");
+      return;
+    }
 
     if (data) {
       setPurchases((p) =>
@@ -591,7 +577,7 @@ export default function PortfolioItemPage() {
       return;
     }
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("portfolio_alerts")
       .insert({
         user_id: userId,
@@ -602,6 +588,11 @@ export default function PortfolioItemPage() {
       .select("*")
       .single();
 
+    if (error) {
+      showToast("Failed to add alert");
+      return;
+    }
+
     if (data) {
       setAlerts((prev) => [dbToAlert(data), ...prev]);
       setAlertForm({ alertType: "above", targetPrice: "" });
@@ -611,7 +602,12 @@ export default function PortfolioItemPage() {
   }
 
   async function deleteAlert(id: string) {
-    await supabase.from("portfolio_alerts").delete().eq("id", id);
+    if (!userId) return;
+    const { error } = await supabase.from("portfolio_alerts").delete().eq("id", id).eq("user_id", userId);
+    if (error) {
+      showToast("Failed to remove alert");
+      return;
+    }
     setAlerts((prev) => prev.filter((a) => a.id !== id));
     showToast("Alert removed");
   }
@@ -625,13 +621,18 @@ export default function PortfolioItemPage() {
       return;
     }
 
-    await supabase
+    const { error } = await supabase
       .from("portfolio_items")
-      .update({ current_price: price, current_price_updated_at: nowDubai() })
+      .update({ current_price: price, current_price_updated_at: nowDubai(timezone) })
       .eq("id", item.id);
 
+    if (error) {
+      showToast("Failed to update price");
+      return;
+    }
+
     setItem((p) =>
-      p ? { ...p, currentPrice: price, currentPriceUpdatedAt: nowDubai() } : p
+      p ? { ...p, currentPrice: price, currentPriceUpdatedAt: nowDubai(timezone) } : p
     );
     setShowUpdatePrice(false);
     setNewPrice("");
@@ -695,7 +696,7 @@ export default function PortfolioItemPage() {
       const priceMap = (profileRow?.metal_prices ?? {}) as Record<string, { bid?: number; ask?: number; updated?: string }>;
       const livePoint = priceMap[link];
       const sellValue = Number(livePoint?.bid ?? 0);
-      const updatedAt = String(livePoint?.updated || nowDubai());
+      const updatedAt = String(livePoint?.updated || nowDubai(timezone));
 
       if (!sellValue || sellValue <= 0) {
         showToast("No cached sell value found for this link. Refresh live prices on the main portfolio page first.");
@@ -738,14 +739,22 @@ export default function PortfolioItemPage() {
 
   async function deleteItem() {
     if (!item || !userId) return;
-    await supabase.from("portfolio_alerts").delete().eq("item_id", item.id);
-    await supabase.from("portfolio_purchases").delete().eq("item_id", item.id);
-    await supabase.from("portfolio_items").delete().eq("id", item.id);
+    const { error: alertErr } = await supabase.from("portfolio_alerts").delete().eq("item_id", item.id).eq("user_id", userId);
+    if (alertErr) { showToast("Failed to delete asset"); return; }
+    const { error: purErr } = await supabase.from("portfolio_purchases").delete().eq("item_id", item.id).eq("user_id", userId);
+    if (purErr) { showToast("Failed to delete asset"); return; }
+    const { error: itemErr } = await supabase.from("portfolio_items").delete().eq("id", item.id).eq("user_id", userId);
+    if (itemErr) { showToast("Failed to delete asset"); return; }
     router.push("/dashboard/portfolio");
   }
 
   async function deletePurchase(id: string) {
-    await supabase.from("portfolio_purchases").delete().eq("id", id);
+    if (!userId) return;
+    const { error } = await supabase.from("portfolio_purchases").delete().eq("id", id).eq("user_id", userId);
+    if (error) {
+      showToast("Failed to delete transaction");
+      return;
+    }
     setPurchases((p) => p.filter((x) => x.id !== id));
     setShowDeleteConfirm(null);
     showToast("Transaction deleted");
@@ -754,7 +763,7 @@ export default function PortfolioItemPage() {
   function resetTxForm() {
     setAf({
       transactionType: "buy",
-      purchasedAt: nowDubai().slice(0, 16),
+      purchasedAt: nowDubai(timezone).slice(0, 16),
       unitPrice: "",
       units: "",
       totalPaid: "",
