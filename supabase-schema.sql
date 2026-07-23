@@ -1,7 +1,7 @@
 -- ============================================================
 -- MyLife App — Complete Supabase Schema (Current / Accurate)
 -- Run in: Supabase → SQL Editor → New query
--- Last updated: 2026-04
+-- Last updated: 2026-07
 -- ============================================================
 
 -- Enable extensions
@@ -317,3 +317,52 @@ CREATE TABLE IF NOT EXISTS public.body_metrics (
 ALTER TABLE public.body_metrics ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own body metrics"
   ON public.body_metrics FOR ALL USING (auth.uid() = user_id);
+
+-- ============================================================
+-- ENTERTAINMENT (Trakt · Letterboxd)
+-- Credentials live on profiles — no dedicated table; data itself
+-- is fetched live from Trakt via src/app/api/trakt/route.ts.
+-- ============================================================
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trakt_username     text;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trakt_client_id     text;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trakt_client_secret text;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS trakt_access_token  text;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS letterboxd_username text;
+
+-- ============================================================
+-- INVENTORY (Home · Food · Wardrobe)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.inventory_items (
+  id              uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id         uuid REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  name            text NOT NULL,
+  category        text NOT NULL DEFAULT 'Other'
+                    CHECK (category IN ('Food','Clothing','Household','Electronics','Other')),
+  subcategory     text,
+  location        text,
+  quantity        numeric NOT NULL DEFAULT 1,
+  unit            text NOT NULL DEFAULT 'pcs',
+  expiry_date     date,
+  brand           text,
+  image_url       text,
+  notes           text,
+  is_finished     boolean DEFAULT false,
+  low_threshold   numeric,
+  purchase_date   date,
+  purchase_price  numeric,
+  currency        text DEFAULT 'AED',
+  created_at      timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.inventory_items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own inventory items"
+  ON public.inventory_items FOR ALL USING (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS inventory_items_user ON public.inventory_items(user_id);
+CREATE INDEX IF NOT EXISTS inventory_items_expiry ON public.inventory_items(user_id, expiry_date);
+
+-- ============================================================
+-- EXPENSES
+-- Status: coming-soon in src/lib/modules.ts — no client code reads/writes
+-- Supabase yet, so no table is defined here. Add one when the module
+-- actually ships instead of guessing its shape ahead of time.
+-- ============================================================
