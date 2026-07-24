@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/refresh-portfolio-prices",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
