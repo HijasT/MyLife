@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { nowDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
-import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue } from "@/lib/portfolio";
+import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue, alertsToTrigger } from "@/lib/portfolio";
 
 type Currency = "AED" | "INR" | "USD" | "GBP" | "EUR";
 type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
@@ -202,7 +202,7 @@ function dbToAlert(r: any): PortfolioAlert {
 
 export default function PortfolioItemPage() {
   const params = useParams();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [item, setItem] = useState<PortfolioItem | null>(null);
@@ -316,18 +316,20 @@ export default function PortfolioItemPage() {
     async function syncAlerts() {
       if (!item?.currentPrice || alerts.length === 0) return;
 
-      const toTrigger = alerts.filter(
-        (a) =>
-          a.isActive &&
-          !a.triggeredAt &&
-          ((a.alertType === "above" && item.currentPrice! >= a.targetPrice) ||
-            (a.alertType === "below" && item.currentPrice! <= a.targetPrice))
+      const ids = alertsToTrigger(
+        alerts.map((a) => ({
+          id: a.id,
+          alert_type: a.alertType,
+          target_price: a.targetPrice,
+          is_active: a.isActive,
+          triggered_at: a.triggeredAt,
+        })),
+        item.currentPrice
       );
 
-      if (toTrigger.length === 0) return;
+      if (ids.length === 0) return;
 
       const nowIso = new Date().toISOString();
-      const ids = toTrigger.map((a) => a.id);
 
       await supabase
         .from("portfolio_alerts")
@@ -341,7 +343,7 @@ export default function PortfolioItemPage() {
       );
 
       showToast(
-        `${toTrigger.length} alert${toTrigger.length > 1 ? "s" : ""} triggered`
+        `${ids.length} alert${ids.length > 1 ? "s" : ""} triggered`
       );
     }
 
@@ -419,7 +421,7 @@ export default function PortfolioItemPage() {
       if (p.transactionType === "buy") {
         const currentValAed =
           item?.currentPrice !== null && item?.currentPrice !== undefined
-            ? item.currentPrice * p.units
+            ? toAed(item.currentPrice * p.units, item.mainCurrency)
             : null;
 
         infoMap.set(p.id, {
@@ -778,14 +780,42 @@ export default function PortfolioItemPage() {
     setTimeout(() => setToast(""), 2500);
   }
 
+  function exportTransactionsCsv() {
+    if (!item) return;
+
+    const escape = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+    const header = ["Date", "Type", "Units", "Unit price", "Currency", "Total paid", "Source", "Notes"];
+    const rows = purchases.map((p) => [
+      new Date(p.purchasedAt).toISOString(),
+      p.transactionType,
+      p.units.toFixed(4),
+      p.unitPrice.toFixed(2),
+      p.currency,
+      p.totalPaid.toFixed(2),
+      p.source ?? "",
+      p.notes ?? "",
+    ]);
+
+    const csv = [header, ...rows].map((row) => row.map((c) => escape(String(c))).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${item.symbol}-transactions-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   const V = {
-    bg: isDark ? "#0d0f14" : "#faf8f4",
-    card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
-    text: isDark ? "#f0ede8" : "#1a1a1a",
-    muted: isDark ? "#9ba3b2" : "#6b7280",
-    faint: isDark ? "#5c6375" : "#9ca3af",
-    input: isDark ? "#1e2130" : "#f9fafb",
+    bg: "var(--main-bg)",
+    card: "var(--card-bg)",
+    border: "var(--card-border)",
+    text: "var(--text-primary)",
+    muted: "var(--text-secondary)",
+    faint: "var(--text-muted)",
+    input: "var(--main-bg2)",
     accent: "#eb6607",
     accentSoft: isDark ? "rgba(235,102,7,0.16)" : "rgba(235,102,7,0.10)",
     shadow: isDark
@@ -896,6 +926,11 @@ export default function PortfolioItemPage() {
           <button style={{ ...btn, padding: "6px 12px", fontSize: 12 }} onClick={() => setShowAddAlert(true)}>
             + Alert
           </button>
+          {purchases.length > 0 && (
+            <button style={{ ...btn, padding: "6px 12px", fontSize: 12 }} onClick={exportTransactionsCsv}>
+              ⬇ Export CSV
+            </button>
+          )}
           <button
             style={btnPrimary}
             onClick={() => {
@@ -1141,13 +1176,28 @@ export default function PortfolioItemPage() {
 
               <label style={lbl}>
                 Unit price ({item.mainCurrency} per {item.unitLabel})
-                <input type="number" style={inp} value={af.unitPrice} onChange={(e) => setAf((p) => ({ ...p, unitPrice: e.target.value }))} />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  style={inp}
+                  value={af.unitPrice}
+                  onChange={(e) => {
+                    setAf((p) => ({
+                      ...p,
+                      unitPrice: e.target.value,
+                      totalPaid: p.units
+                        ? String(((parseFloat(e.target.value) || 0) * (parseFloat(p.units) || 0)).toFixed(2))
+                        : p.totalPaid,
+                    }));
+                  }}
+                />
               </label>
 
               <label style={lbl}>
                 Units {af.transactionType === "sell" ? "sold" : "purchased"}
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   style={inp}
                   value={af.units}
                   onChange={(e) => {
@@ -1164,7 +1214,7 @@ export default function PortfolioItemPage() {
 
               <label style={lbl}>
                 Total {af.transactionType === "sell" ? "received" : "paid"}
-                <input type="number" style={inp} value={af.totalPaid} onChange={(e) => setAf((p) => ({ ...p, totalPaid: e.target.value }))} />
+                <input type="text" inputMode="decimal" style={inp} value={af.totalPaid} onChange={(e) => setAf((p) => ({ ...p, totalPaid: e.target.value }))} />
               </label>
 
               <label style={lbl}>
@@ -1219,7 +1269,7 @@ export default function PortfolioItemPage() {
 
               <label style={lbl}>
                 Target price ({item.mainCurrency})
-                <input type="number" style={inp} value={alertForm.targetPrice} onChange={(e) => setAlertForm((p) => ({ ...p, targetPrice: e.target.value }))} />
+                <input type="text" inputMode="decimal" style={inp} value={alertForm.targetPrice} onChange={(e) => setAlertForm((p) => ({ ...p, targetPrice: e.target.value }))} />
               </label>
             </div>
 
@@ -1241,7 +1291,7 @@ export default function PortfolioItemPage() {
             <div style={{ padding: 20 }}>
               <label style={lbl}>
                 {item.mainCurrency} per {item.unitLabel}
-                <input type="number" style={inp} value={newPrice} onChange={(e) => setNewPrice(e.target.value)} autoFocus />
+                <input type="text" inputMode="decimal" style={inp} value={newPrice} onChange={(e) => setNewPrice(e.target.value)} autoFocus />
               </label>
             </div>
 

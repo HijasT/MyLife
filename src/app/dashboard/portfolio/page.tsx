@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 import { getUserTimezone, APP_TZ } from "@/lib/timezone";
-import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue } from "@/lib/portfolio";
+import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue, alertsToTrigger } from "@/lib/portfolio";
 
 type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
 type Currency = "AED" | "INR" | "USD" | "GBP" | "EUR";
@@ -56,6 +56,17 @@ type LivePriceRow = {
   updated: string;
 };
 
+type AlertItem = {
+  id: string;
+  itemId: string;
+  itemName: string;
+  itemSymbol: string;
+  alertType: "above" | "below";
+  targetPrice: number;
+  isActive: boolean;
+  triggeredAt: string | null;
+};
+
 const fmtN = (n: number, d = 2) =>
   n.toLocaleString("en-AE", {
     minimumFractionDigits: d,
@@ -72,6 +83,8 @@ const ASSET_ICONS: Record<AssetType, string> = {
   crypto: "₿",
   other: "💼",
 };
+
+const RECENT_PAGE_SIZE = 10;
 
 const LIVE_PRICE_OPTIONS = [
   { value: "", label: "None — manual price update" },
@@ -246,7 +259,7 @@ const dbToPurchase = (r: any): Purchase => ({
 });
 
 export default function PortfolioPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [userId, setUserId] = useState<string | null>(null);
@@ -283,6 +296,21 @@ export default function PortfolioPage() {
   // Edit gold fields from update price modal
   const [editGoldPurity, setEditGoldPurity] = useState<string>("");
   const [editGoldWeight, setEditGoldWeight] = useState<string>("");
+
+  // Search + sort on the assets list
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"value" | "pl" | "name">("value");
+
+  // Portfolio-wide alerts (active + recently-triggered), for the alerts strip
+  // and per-card badges — previously alerts were only visible on the item's
+  // own detail page.
+  const [allAlerts, setAllAlerts] = useState<AlertItem[]>([]);
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
+
+  // "Load more" pagination for the recent-transactions feed
+  const [recentOffset, setRecentOffset] = useState(0);
+  const [recentHasMore, setRecentHasMore] = useState(true);
+  const [loadingMoreRecent, setLoadingMoreRecent] = useState(false);
 
   const [newItem, setNewItem] = useState({
     symbol: "",
@@ -384,6 +412,85 @@ export default function PortfolioPage() {
     [supabase]
   );
 
+  const loadAllAlerts = useCallback(
+    async (uid: string) => {
+      const { data } = await supabase
+        .from("portfolio_alerts")
+        .select("*,portfolio_items(name,symbol)")
+        .eq("user_id", uid)
+        .or("is_active.eq.true,triggered_at.not.is.null")
+        .order("created_at", { ascending: false });
+
+      setAllAlerts(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (data ?? []).map((r: any) => ({
+          id: r.id,
+          itemId: r.item_id,
+          itemName: r.portfolio_items?.name ?? "Unknown",
+          itemSymbol: r.portfolio_items?.symbol ?? "",
+          alertType: r.alert_type,
+          targetPrice: Number(r.target_price) || 0,
+          isActive: !!r.is_active,
+          triggeredAt: r.triggered_at ?? null,
+        }))
+      );
+    },
+    [supabase]
+  );
+
+  // Checks portfolio_alerts for any items whose price just changed and
+  // batch-triggers the ones that crossed their target — this is what makes
+  // alerts fire from a list-page price refresh instead of only firing when
+  // the user happens to open that specific item's detail page afterward.
+  const checkAndTriggerAlerts = useCallback(
+    async (updated: Array<{ id: string; currentPrice: number | null }>) => {
+      if (!userId) return;
+
+      const priceByItem = new Map(
+        updated.filter((u) => u.currentPrice != null).map((u) => [u.id, u.currentPrice as number])
+      );
+      if (priceByItem.size === 0) return;
+
+      const { data: alertRows } = await supabase
+        .from("portfolio_alerts")
+        .select("id,item_id,alert_type,target_price,is_active,triggered_at")
+        .eq("user_id", userId)
+        .eq("is_active", true)
+        .is("triggered_at", null)
+        .in("item_id", Array.from(priceByItem.keys()));
+
+      if (!alertRows || alertRows.length === 0) return;
+
+      const byItem = new Map<string, typeof alertRows>();
+      for (const row of alertRows) {
+        const list = byItem.get(row.item_id) ?? [];
+        list.push(row);
+        byItem.set(row.item_id, list);
+      }
+
+      const idsToTrigger: string[] = [];
+      for (const [itemId, rows] of byItem) {
+        const price = priceByItem.get(itemId);
+        if (price == null) continue;
+        idsToTrigger.push(...alertsToTrigger(rows, price));
+      }
+
+      if (idsToTrigger.length === 0) return;
+
+      const nowIso = new Date().toISOString();
+      await supabase
+        .from("portfolio_alerts")
+        .update({ triggered_at: nowIso, is_active: false })
+        .in("id", idsToTrigger);
+
+      showToast(
+        `${idsToTrigger.length} price alert${idsToTrigger.length > 1 ? "s" : ""} triggered`
+      );
+      await loadAllAlerts(userId);
+    },
+    [userId, supabase, loadAllAlerts]
+  );
+
   useEffect(() => {
     async function load() {
       const {
@@ -421,9 +528,13 @@ export default function PortfolioPage() {
       setItems(loadedItems);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setRecent((pr.data ?? []).map((r: any) => dbToPurchase(r)));
+      const recentRows = (pr.data ?? []).map((r: any) => dbToPurchase(r));
+      setRecent(recentRows);
+      setRecentOffset(recentRows.length);
+      setRecentHasMore(recentRows.length === RECENT_PAGE_SIZE);
 
       await loadStats(loadedItems);
+      await loadAllAlerts(user.id);
       markSynced();
 
       const envGoldKey = process.env.NEXT_PUBLIC_GOLDAPI_KEY ?? "";
@@ -433,15 +544,29 @@ export default function PortfolioPage() {
       setGoldApiInput(dbGoldKey || envGoldKey);
 
       if (profileRes.data?.metal_prices) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setLivePrices(profileRes.data.metal_prices as any);
+        const rawMetalPrices = profileRes.data.metal_prices as Record<string, unknown>;
+
+        // __custom_symbols is a reserved key smuggled into this JSONB column
+        // (same pattern as Due Tracker's __remittance_group/__remittance_status
+        // in cash_in) to persist the custom symbol list without a schema
+        // migration — it must be kept out of the price-row map below.
+        const storedCustomSymbols = Array.isArray(rawMetalPrices.__custom_symbols)
+          ? (rawMetalPrices.__custom_symbols as string[])
+          : ["PARKIN.DFM"];
+        setCustomSymbols(storedCustomSymbols);
+
+        const priceRows: Record<string, LivePriceRow> = {};
+        for (const [k, v] of Object.entries(rawMetalPrices)) {
+          if (k !== "__custom_symbols") priceRows[k] = v as LivePriceRow;
+        }
+        setLivePrices(priceRows);
       }
 
       setLoading(false);
     }
 
     load();
-  }, [loadStats, supabase]);
+  }, [loadStats, loadAllAlerts, supabase]);
 
   async function fetchAllLivePrices() {
     setLiveLoading(true);
@@ -483,6 +608,12 @@ export default function PortfolioPage() {
     setItems([...updates]);
     setLiveLoading(false);
     showToast("Live prices updated");
+    await checkAndTriggerAlerts(
+      updatable.map((i) => {
+        const u = updates.find((x) => x.id === i.id);
+        return { id: i.id, currentPrice: u?.currentPrice ?? null };
+      })
+    );
   }
 
   async function fetchSpotPrices() {
@@ -693,9 +824,13 @@ export default function PortfolioPage() {
     setLivePrices(results);
 
     if (userId && Object.keys(results).length > 0) {
+      // Merge with __custom_symbols rather than overwriting metal_prices
+      // wholesale — otherwise this refresh would silently wipe out the
+      // persisted custom symbol list.
+      const merged: Record<string, unknown> = { ...results, __custom_symbols: customSymbols };
       await supabase
         .from("profiles")
-        .update({ metal_prices: results })
+        .update({ metal_prices: merged })
         .eq("id", userId);
     }
 
@@ -728,7 +863,12 @@ export default function PortfolioPage() {
         .eq("user_id", userId)
         .order("created_at");
 
-      if (updated) setItems(updated.map(dbToItem));
+      if (updated) {
+        setItems(updated.map(dbToItem));
+        await checkAndTriggerAlerts(
+          updated.map((u) => ({ id: u.id, currentPrice: u.current_price ?? null }))
+        );
+      }
     }
 
     setPriceLoading(false);
@@ -880,6 +1020,110 @@ export default function PortfolioPage() {
     setTimeout(() => setToast(""), 2500);
   }
 
+  // Persist the custom-symbol list into profiles.metal_prices.__custom_symbols
+  // (reserved key, merged alongside the real price rows keyed by symbol) so it
+  // survives a reload — previously customSymbols only ever lived in useState.
+  async function persistCustomSymbols(next: string[]) {
+    setCustomSymbols(next);
+    if (!userId) return;
+    const merged: Record<string, unknown> = { ...livePrices, __custom_symbols: next };
+    await supabase.from("profiles").update({ metal_prices: merged }).eq("id", userId);
+  }
+
+  function addCustomSymbol(sym: string) {
+    const trimmed = sym.trim().toUpperCase();
+    if (!trimmed || customSymbols.includes(trimmed)) return;
+    void persistCustomSymbols([...customSymbols, trimmed]);
+  }
+
+  function removeCustomSymbol(sym: string) {
+    void persistCustomSymbols(customSymbols.filter((x) => x !== sym));
+  }
+
+  async function loadMoreRecent() {
+    if (!userId || loadingMoreRecent || !recentHasMore) return;
+    setLoadingMoreRecent(true);
+
+    const { data } = await supabase
+      .from("portfolio_purchases")
+      .select("*,portfolio_items(name,symbol)")
+      .eq("user_id", userId)
+      .order("purchased_at", { ascending: false })
+      .range(recentOffset, recentOffset + RECENT_PAGE_SIZE - 1);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = (data ?? []).map((r: any) => dbToPurchase(r));
+    setRecent((p) => [...p, ...rows]);
+    setRecentOffset((o) => o + rows.length);
+    setRecentHasMore(rows.length === RECENT_PAGE_SIZE);
+    setLoadingMoreRecent(false);
+  }
+
+  function downloadCsv(filename: string, rows: string[][]) {
+    const csv = rows
+      .map((row) =>
+        row
+          .map((cell) => {
+            const s = String(cell ?? "");
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+          })
+          .join(",")
+      )
+      .join("\r\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportAssetsCsv() {
+    const header = [
+      "Symbol",
+      "Name",
+      "Type",
+      "Total units",
+      "Avg cost (AED)",
+      "Current value (AED)",
+      "Invested (AED)",
+      "P&L (AED)",
+      "P&L %",
+    ];
+
+    const rows = items.map((item) => {
+      const s = allStats[item.id] ?? {
+        totalUnits: 0,
+        costBasisAed: 0,
+        totalBuysAed: 0,
+        totalSellsAed: 0,
+        realizedPlAed: 0,
+        avgUnitPrice: 0,
+      };
+      const cv = calcCurrentValue(item, s.totalUnits);
+      const pl = cv !== null ? cv - s.costBasisAed : null;
+      const plPct = pl !== null && s.costBasisAed > 0 ? (pl / s.costBasisAed) * 100 : null;
+
+      return [
+        item.symbol,
+        item.name,
+        item.assetType,
+        s.totalUnits.toFixed(4),
+        s.avgUnitPrice.toFixed(2),
+        cv !== null ? cv.toFixed(2) : "",
+        s.costBasisAed.toFixed(2),
+        pl !== null ? pl.toFixed(2) : "",
+        plPct !== null ? plPct.toFixed(2) : "",
+      ];
+    });
+
+    downloadCsv(`portfolio-assets-${new Date().toISOString().slice(0, 10)}.csv`, [header, ...rows]);
+  }
+
   const totals = useMemo(() => {
     let invested = 0;
     let current = 0;
@@ -901,14 +1145,50 @@ export default function PortfolioPage() {
     };
   }, [items, allStats]);
 
+  // Search + sort compose with the existing type-filter tabs: filter by
+  // type AND search text, then sort.
+  const visibleItems = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+
+    const filtered = items.filter((item) => {
+      if (typeFilter !== "all" && item.assetType !== typeFilter) return false;
+      if (!q) return true;
+      return (
+        item.name.toLowerCase().includes(q) || item.symbol.toLowerCase().includes(q)
+      );
+    });
+
+    const withDerived = filtered.map((item) => {
+      const s = allStats[item.id] ?? {
+        totalUnits: 0,
+        costBasisAed: 0,
+        totalBuysAed: 0,
+        totalSellsAed: 0,
+        realizedPlAed: 0,
+        avgUnitPrice: 0,
+      };
+      const curVal = calcCurrentValue(item, s.totalUnits);
+      const pl = curVal !== null ? curVal - s.costBasisAed : null;
+      return { item, s, curVal, pl };
+    });
+
+    withDerived.sort((a, b) => {
+      if (sortBy === "name") return a.item.name.localeCompare(b.item.name);
+      if (sortBy === "pl") return (b.pl ?? -Infinity) - (a.pl ?? -Infinity);
+      return (b.curVal ?? -Infinity) - (a.curVal ?? -Infinity);
+    });
+
+    return withDerived;
+  }, [items, allStats, typeFilter, searchQuery, sortBy]);
+
   const V = {
-    bg: isDark ? "#0d0f14" : "#faf8f4",
-    card: isDark ? "#16191f" : "#ffffff",
-    border: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
-    text: isDark ? "#f0ede8" : "#1a1a1a",
-    muted: isDark ? "#9ba3b2" : "#6b7280",
-    faint: isDark ? "#5c6375" : "#9ca3af",
-    input: isDark ? "#1e2130" : "#f9fafb",
+    bg: "var(--main-bg)",
+    card: "var(--card-bg)",
+    border: "var(--card-border)",
+    text: "var(--text-primary)",
+    muted: "var(--text-secondary)",
+    faint: "var(--text-muted)",
+    input: "var(--main-bg2)",
     accent: "#eb6607",
     accentSoft: isDark ? "rgba(235,102,7,0.16)" : "rgba(235,102,7,0.10)",
     shadow: isDark
@@ -1058,6 +1338,12 @@ export default function PortfolioPage() {
           {activeTab === "assets" && (
             <button style={btn} onClick={fetchAllLivePrices} disabled={liveLoading}>
               {liveLoading ? "Fetching…" : "🔄 Update prices"}
+            </button>
+          )}
+
+          {activeTab === "assets" && items.length > 0 && (
+            <button style={btn} onClick={exportAssetsCsv}>
+              ⬇ Export CSV
             </button>
           )}
 
@@ -1295,7 +1581,7 @@ export default function PortfolioPage() {
                 >
                   {s}
                   <button
-                    onClick={() => setCustomSymbols((p) => p.filter((x) => x !== s))}
+                    onClick={() => removeCustomSymbol(s)}
                     style={{
                       background: "none",
                       border: "none",
@@ -1320,9 +1606,8 @@ export default function PortfolioPage() {
                 onChange={(e) => setNewSymbol(e.target.value)}
                 placeholder="e.g. AAPL, PARKIN.DFM, BTC-USD"
                 onKeyDown={(e) => {
-                  const trimmed = newSymbol.trim().toUpperCase();
-                  if (e.key === "Enter" && trimmed && !customSymbols.includes(trimmed)) {
-                    setCustomSymbols((p) => [...p, trimmed]);
+                  if (e.key === "Enter" && newSymbol.trim()) {
+                    addCustomSymbol(newSymbol);
                     setNewSymbol("");
                   }
                 }}
@@ -1330,9 +1615,8 @@ export default function PortfolioPage() {
               <button
                 style={btnP}
                 onClick={() => {
-                  const trimmed = newSymbol.trim().toUpperCase();
-                  if (trimmed && !customSymbols.includes(trimmed)) {
-                    setCustomSymbols((p) => [...p, trimmed]);
+                  if (newSymbol.trim()) {
+                    addCustomSymbol(newSymbol);
                     setNewSymbol("");
                   }
                 }}
@@ -1409,6 +1693,93 @@ export default function PortfolioPage() {
               </div>
             ))}
           </div>
+
+          {/* Portfolio-wide alerts strip — active + recently-triggered alerts
+              across all items, so the user doesn't have to open each asset's
+              detail page to know an alert is live or fired. */}
+          {allAlerts.filter((a) => !dismissedAlertIds.includes(a.id)).length > 0 && (
+            <div style={{ padding: "12px 24px 0" }}>
+              <div
+                style={{
+                  background: V.card,
+                  border: `1px solid ${V.border}`,
+                  borderRadius: 12,
+                  padding: "10px 14px",
+                  boxShadow: V.shadow,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: V.faint,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 8,
+                  }}
+                >
+                  🔔 Alerts
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {allAlerts
+                    .filter((a) => !dismissedAlertIds.includes(a.id))
+                    .map((a) => (
+                      <div
+                        key={a.id}
+                        onClick={() => router.push(`/dashboard/portfolio/${a.itemId}`)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          background: a.triggeredAt
+                            ? "rgba(239,68,68,0.08)"
+                            : isDark
+                            ? "rgba(255,255,255,0.03)"
+                            : "rgba(0,0,0,0.02)",
+                          fontSize: 12,
+                        }}
+                      >
+                        <div>
+                          <strong style={{ color: V.text }}>
+                            {a.itemName} ({a.itemSymbol})
+                          </strong>{" "}
+                          <span style={{ color: V.muted }}>
+                            {a.alertType === "above" ? "Above" : "Below"} AED {fmtN(a.targetPrice)}
+                          </span>
+                          {a.triggeredAt && (
+                            <span style={{ color: "#ef4444", fontWeight: 700, marginLeft: 6 }}>
+                              ● Triggered
+                            </span>
+                          )}
+                        </div>
+                        {a.triggeredAt && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDismissedAlertIds((p) => [...p, a.id]);
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              color: V.faint,
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                          >
+                            Dismiss
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Allocation breakdown bar + Asset type filter tabs */}
           {items.length > 0 && (() => {
@@ -1500,6 +1871,25 @@ export default function PortfolioPage() {
                     });
                   })()}
                 </div>
+
+                {/* Search + sort */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
+                  <input
+                    style={{ ...inp, flex: "1 1 220px", minWidth: 160, width: "auto" }}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="🔎 Search by name or symbol…"
+                  />
+                  <select
+                    style={{ ...inp, width: "auto", minWidth: 170 }}
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as "value" | "pl" | "name")}
+                  >
+                    <option value="value">Sort: Current value ↓</option>
+                    <option value="pl">Sort: P&amp;L ↓</option>
+                    <option value="name">Sort: Name A–Z</option>
+                  </select>
+                </div>
               </div>
             );
           })()}
@@ -1515,25 +1905,23 @@ export default function PortfolioPage() {
                   Click + Add asset to start
                 </div>
               </div>
+            ) : visibleItems.length === 0 ? (
+              <div style={{ padding: "40px 0", textAlign: "center" }}>
+                <div style={{ fontSize: 13, color: V.faint }}>
+                  No assets match your search/filter
+                </div>
+              </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {items.filter(item => typeFilter === "all" || item.assetType === typeFilter).map((item) => {
-                  const s = allStats[item.id] ?? {
-                    totalUnits: 0,
-                    costBasisAed: 0,
-                    totalBuysAed: 0,
-                    totalSellsAed: 0,
-                    realizedPlAed: 0,
-                    avgUnitPrice: 0,
-                  };
-
-                  const curVal = calcCurrentValue(item, s.totalUnits);
-                  const pl = curVal !== null ? curVal - s.costBasisAed : null;
+                {visibleItems.map(({ item, s, curVal, pl }) => {
                   const plPct =
                     pl !== null && s.costBasisAed > 0
                       ? (pl / s.costBasisAed) * 100
                       : null;
                   const up = pl !== null && pl >= 0;
+                  const activeAlertCount = allAlerts.filter(
+                    (a) => a.itemId === item.id && a.isActive && !a.triggeredAt
+                  ).length;
 
                   return (
                     <div
@@ -1608,6 +1996,24 @@ export default function PortfolioPage() {
                               >
                                 {item.symbol}
                               </span>
+                              {activeAlertCount > 0 && (
+                                <span
+                                  title={`${activeAlertCount} active alert${activeAlertCount > 1 ? "s" : ""}`}
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: 800,
+                                    padding: "2px 8px",
+                                    borderRadius: 999,
+                                    background: "rgba(59,130,246,0.14)",
+                                    color: "#3b82f6",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 3,
+                                  }}
+                                >
+                                  🔔 {activeAlertCount}
+                                </span>
+                              )}
                               {item.livePriceSymbol && (
                                 <span
                                   style={{
@@ -1843,7 +2249,7 @@ export default function PortfolioPage() {
                     : "rgba(0,0,0,0.02)",
                 }}
               >
-                Last 10 transactions
+                Recent transactions
               </div>
 
               <div
@@ -1910,6 +2316,14 @@ export default function PortfolioPage() {
                   </div>
                 </div>
               ))}
+
+              {recentHasMore && (
+                <div style={{ padding: "12px 16px", textAlign: "center" }}>
+                  <button style={btn} onClick={loadMoreRecent} disabled={loadingMoreRecent}>
+                    {loadingMoreRecent ? "Loading…" : "Load more"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -2098,8 +2512,8 @@ export default function PortfolioPage() {
                   <label style={lbl}>
                     Weight (grams)
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       style={inp}
                       value={newItem.weightGrams}
                       onChange={(e) =>
@@ -2187,7 +2601,8 @@ export default function PortfolioPage() {
                   </span>
                 )}
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   style={inp}
                   value={newPrice}
                   onChange={(e) => setNewPrice(e.target.value)}
@@ -2210,12 +2625,13 @@ export default function PortfolioPage() {
                   </label>
                   <label style={{ ...lbl, marginTop: 14 }}>
                     Weight (grams)
-                    <input type="number" step="0.01" style={inp} value={editGoldWeight}
+                    <input type="text" inputMode="decimal" style={inp} value={editGoldWeight}
                       onChange={(e) => setEditGoldWeight(e.target.value)} placeholder="e.g. 10.5" />
                   </label>
                   {newPrice && editGoldWeight && editGoldPurity && (() => {
                     const factor = PURITY_FACTOR[Number(editGoldPurity)] ?? 1;
-                    const computed = Number(newPrice) * Number(editGoldWeight) * factor;
+                    const computedRaw = Number(newPrice) * Number(editGoldWeight) * factor;
+                    const computed = toAed(computedRaw, showUpdatePrice.mainCurrency);
                     return (
                       <div style={{ marginTop: 14, padding: "10px 12px", background: "rgba(255,215,0,0.08)", borderRadius: 10, border: "1px solid rgba(255,215,0,0.3)", fontSize: 12 }}>
                         <div style={{ color: V.muted, marginBottom: 4 }}>Calculated current value:</div>

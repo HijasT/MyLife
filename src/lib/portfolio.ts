@@ -41,6 +41,7 @@ type ValuableItem = {
   assetType: AssetType;
   weightGrams?: number | null;
   goldPurityKarat?: number | null;
+  mainCurrency: string;
 };
 
 /**
@@ -48,12 +49,45 @@ type ValuableItem = {
  * Gold tracked by weight+purity: weightGrams × spot price × purity factor
  * (ignores unit/purchase count — currentPrice is AED per gram of 24K pure).
  * Everything else: currentPrice × totalUnits.
+ *
+ * currentPrice is stored in the item's own mainCurrency (e.g. "USD per share"),
+ * so it's converted to AED via toAed() before being combined with AED-denominated
+ * totals — previously this was skipped, silently misvaluing anything priced in a
+ * non-AED currency.
  */
 export function calcCurrentValue(item: ValuableItem, totalUnits: number): number | null {
   if (item.currentPrice == null) return null;
   if (item.assetType === "gold" && item.weightGrams && item.weightGrams > 0 && item.goldPurityKarat) {
     const factor = PURITY_FACTOR[item.goldPurityKarat] ?? 1;
-    return item.weightGrams * item.currentPrice * factor;
+    return toAed(item.weightGrams * item.currentPrice * factor, item.mainCurrency);
   }
-  return item.currentPrice * totalUnits;
+  return toAed(item.currentPrice * totalUnits, item.mainCurrency);
+}
+
+/**
+ * Shared price-alert trigger check, used by both the list page (after a bulk
+ * price refresh) and the detail page (its own syncAlerts effect) so the two
+ * don't drift — previously only the detail page checked alerts, meaning they
+ * never fired unless the user happened to open that specific item's page
+ * right after a price update.
+ */
+export type AlertRow = {
+  id: string;
+  alert_type: "above" | "below";
+  target_price: number;
+  is_active: boolean;
+  triggered_at: string | null;
+};
+
+export function alertsToTrigger(alerts: AlertRow[], currentPrice: number | null): string[] {
+  if (currentPrice == null) return [];
+  return alerts
+    .filter(
+      (a) =>
+        a.is_active &&
+        !a.triggered_at &&
+        ((a.alert_type === "above" && currentPrice >= a.target_price) ||
+          (a.alert_type === "below" && currentPrice <= a.target_price))
+    )
+    .map((a) => a.id);
 }
