@@ -50,6 +50,18 @@ type ItemStats = {
   avgUnitPrice: number;
 };
 
+// Per broker/platform (the free-text "source" field on each transaction),
+// pooled across every asset that has at least one transaction recorded
+// under that name.
+type BrokerStat = {
+  totalBoughtAed: number;
+  totalSoldAed: number;
+  investedAed: number; // remaining cost basis, i.e. "current investment"
+  currentValueAed: number;
+  realizedPlAed: number;
+  hasUnknownPrice: boolean; // true if currentValueAed excludes ≥1 item lacking a price
+};
+
 type LivePriceRow = {
   bid: number;
   ask: number;
@@ -267,6 +279,7 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [allStats, setAllStats] = useState<Record<string, ItemStats>>({});
+  const [brokerStats, setBrokerStats] = useState<Record<string, BrokerStat>>({});
   const [recent, setRecent] = useState<Purchase[]>([]);
   const [liveLoading, setLiveLoading] = useState(false);
 
@@ -341,12 +354,13 @@ export default function PortfolioPage() {
   const loadStats = useCallback(
     async (itemList: PortfolioItem[]) => {
       const results: Record<string, ItemStats> = {};
+      const brokerAcc: Record<string, BrokerStat> = {};
 
       await Promise.all(
         itemList.map(async (item) => {
           const { data } = await supabase
             .from("portfolio_purchases")
-            .select("units,total_paid,currency,purchased_at")
+            .select("units,total_paid,currency,purchased_at,source")
             .eq("item_id", item.id)
             .order("purchased_at", { ascending: true });
 
@@ -368,21 +382,39 @@ export default function PortfolioPage() {
           let totalSellsAed = 0;
           let realizedPlAed = 0;
 
+          // Broker/platform breakdown — the same pooled avg-cost algorithm
+          // as above, run independently per "source" (the free-text
+          // Broker/platform field on each transaction) so a sell only
+          // reduces the cost basis of the broker it was recorded under.
+          const bySource: Record<
+            string,
+            { totalUnits: number; costBasisAed: number; totalBoughtAed: number; totalSoldAed: number; realizedPlAed: number }
+          > = {};
+
           for (const row of data as Array<{
             units: number;
             total_paid: number;
             currency: string;
             purchased_at: string;
+            source: string | null;
           }>) {
             const units = Number(row.units) || 0;
             const amountAed = Math.abs(
               toAed(Number(row.total_paid) || 0, row.currency as Currency)
             );
+            const src = (row.source ?? "").trim() || "Unspecified";
+            const b =
+              bySource[src] ??
+              (bySource[src] = { totalUnits: 0, costBasisAed: 0, totalBoughtAed: 0, totalSoldAed: 0, realizedPlAed: 0 });
 
             if (units >= 0) {
               totalUnits += units;
               costBasisAed += amountAed;
               totalBuysAed += amountAed;
+
+              b.totalUnits += units;
+              b.costBasisAed += amountAed;
+              b.totalBoughtAed += amountAed;
             } else {
               const sellUnits = Math.min(Math.abs(units), totalUnits);
               const avgCostBeforeSell =
@@ -393,6 +425,15 @@ export default function PortfolioPage() {
               costBasisAed = Math.max(0, costBasisAed - costRemoved);
               totalSellsAed += amountAed;
               realizedPlAed += amountAed - costRemoved;
+
+              const bSellUnits = Math.min(Math.abs(units), b.totalUnits);
+              const bAvgCostBeforeSell = b.totalUnits > 0 ? b.costBasisAed / b.totalUnits : 0;
+              const bCostRemoved = bAvgCostBeforeSell * bSellUnits;
+
+              b.totalUnits = Math.max(0, b.totalUnits - bSellUnits);
+              b.costBasisAed = Math.max(0, b.costBasisAed - bCostRemoved);
+              b.totalSoldAed += amountAed;
+              b.realizedPlAed += amountAed - bCostRemoved;
             }
           }
 
@@ -404,10 +445,57 @@ export default function PortfolioPage() {
             realizedPlAed,
             avgUnitPrice: totalUnits > 0 ? costBasisAed / totalUnits : 0,
           };
+
+          // Attribute this item's current value to each broker bucket.
+          // Units-based assets convert exactly (calcCurrentValue on the
+          // broker's own remaining units). Weight-based gold has no
+          // per-unit valuation to split, so its current value is
+          // approximated by each broker's share of the item's remaining
+          // cost basis.
+          const isWeightGold =
+            item.assetType === "gold" && !!item.weightGrams && item.weightGrams > 0 && !!item.goldPurityKarat;
+          const fullCurrentValue = calcCurrentValue(item, totalUnits);
+          const sourceCount = Object.keys(bySource).length;
+
+          for (const [src, b] of Object.entries(bySource)) {
+            let valueAed: number | null;
+
+            if (isWeightGold) {
+              valueAed =
+                fullCurrentValue === null
+                  ? null
+                  : costBasisAed > 0
+                  ? fullCurrentValue * (b.costBasisAed / costBasisAed)
+                  : sourceCount === 1
+                  ? fullCurrentValue
+                  : 0;
+            } else {
+              valueAed = calcCurrentValue(item, b.totalUnits);
+            }
+
+            const acc =
+              brokerAcc[src] ??
+              (brokerAcc[src] = {
+                totalBoughtAed: 0,
+                totalSoldAed: 0,
+                investedAed: 0,
+                currentValueAed: 0,
+                realizedPlAed: 0,
+                hasUnknownPrice: false,
+              });
+
+            acc.totalBoughtAed += b.totalBoughtAed;
+            acc.totalSoldAed += b.totalSoldAed;
+            acc.investedAed += b.costBasisAed;
+            acc.realizedPlAed += b.realizedPlAed;
+            if (valueAed !== null) acc.currentValueAed += valueAed;
+            else acc.hasUnknownPrice = true;
+          }
         })
       );
 
       setAllStats(results);
+      setBrokerStats(brokerAcc);
     },
     [supabase]
   );
@@ -1889,6 +1977,106 @@ export default function PortfolioPage() {
                     <option value="pl">Sort: P&amp;L ↓</option>
                     <option value="name">Sort: Name A–Z</option>
                   </select>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* By broker/platform — pooled across every asset that has ≥1
+              transaction recorded under that name in the free-text
+              Broker/platform field. */}
+          {Object.keys(brokerStats).length > 0 && (() => {
+            const rows = Object.entries(brokerStats)
+              .map(([name, b]) => ({
+                name,
+                ...b,
+                pl: b.currentValueAed - b.investedAed,
+              }))
+              .sort((a, b) => b.investedAed - a.investedAed);
+
+            const anyUnknownPrice = rows.some((r) => r.hasUnknownPrice);
+
+            return (
+              <div style={{ padding: "16px 24px 0" }}>
+                <div
+                  style={{
+                    background: V.card,
+                    border: `1px solid ${V.border}`,
+                    borderRadius: 14,
+                    overflow: "hidden",
+                    boxShadow: V.shadow,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: "11px 16px",
+                      borderBottom: `1px solid ${V.border}`,
+                      fontSize: 11,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.1em",
+                      color: V.faint,
+                      background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
+                    }}
+                  >
+                    By broker / platform
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.3fr 1fr 1fr 1fr 1fr",
+                      gap: 8,
+                      padding: "8px 16px",
+                      fontSize: 10,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: V.faint,
+                      borderBottom: `1px solid ${V.border}`,
+                    }}
+                  >
+                    <div>Broker</div>
+                    <div>Total invested</div>
+                    <div>Total sold</div>
+                    <div>Current investment</div>
+                    <div>P&amp;L</div>
+                  </div>
+
+                  {rows.map((row) => {
+                    const up = row.pl >= 0;
+                    return (
+                      <div
+                        key={row.name}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1.3fr 1fr 1fr 1fr 1fr",
+                          gap: 8,
+                          padding: "10px 16px",
+                          borderBottom: `1px solid ${V.border}`,
+                          fontSize: 13,
+                          alignItems: "center",
+                        }}
+                      >
+                        <div style={{ fontWeight: 700 }}>{row.name}</div>
+                        <div style={{ color: V.muted }}>AED {fmtN(row.totalBoughtAed)}</div>
+                        <div style={{ color: V.muted }}>AED {fmtN(row.totalSoldAed)}</div>
+                        <div>AED {fmtN(row.investedAed)}</div>
+                        <div style={{ fontWeight: 700, color: up ? "#16a34a" : "#ef4444" }}>
+                          {fmtSignedAed(row.pl)}
+                          {row.hasUnknownPrice && (
+                            <span style={{ color: V.faint, fontWeight: 400 }}> *</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {anyUnknownPrice && (
+                    <div style={{ padding: "6px 16px 10px", fontSize: 10, color: V.faint }}>
+                      * current investment/P&amp;L excludes assets without a current price set
+                    </div>
+                  )}
                 </div>
               </div>
             );
