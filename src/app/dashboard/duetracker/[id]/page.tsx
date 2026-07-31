@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { nowDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type Currency = "AED" | "INR" | "USD";
 type Status = "pending" | "partial" | "paid" | "waived";
@@ -92,15 +93,15 @@ function ordinal(n: number) {
 }
 
 function statusTone(status: Status) {
-  if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
-  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "#ef4444" };
+  if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "var(--positive)" };
+  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "var(--negative)" };
   if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
-  return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
+  return { bg: "rgba(239,68,68,0.08)", fg: "var(--negative)" };
 }
 
 // Distinct from the module's red accent — flags the remaining/outstanding amount
 // specifically on a "partial" entry, so it reads differently from a plain pending due.
-const PARTIAL_REMAINING_COLOR = "#f59e0b";
+const PARTIAL_REMAINING_COLOR = "var(--warning)";
 
 function isSettled(status: Status) {
   return status === "paid" || status === "waived";
@@ -158,6 +159,7 @@ export default function DueItemDetailPage() {
   const [toast, setToast] = useState("");
   const toastTimerRef = useRef<number | undefined>(undefined);
   const [isDark, setIsDark] = useState(false);
+  const isMobile = useIsMobile();
 
   const [editingMonth, setEditingMonth] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -622,14 +624,22 @@ export default function DueItemDetailPage() {
     faint: "var(--text-muted)",
     input: "var(--main-bg2)",
     accent: "#ef4444",
+    pos: "var(--positive)",
+    posSoft: "var(--positive-soft)",
+    neg: "var(--negative)",
+    negSoft: "var(--negative-soft)",
+    warn: "var(--warning)",
+    warnSoft: "var(--warning-soft)",
+    gold: "var(--gold)",
+    goldSoft: "var(--gold-soft)",
   };
   const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
   const shadow = isDark
     ? "0 1px 3px rgba(0,0,0,0.45)"
     : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)";
-  const btn = { padding: "7px 13px", borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
+  const btn = { padding: isMobile ? "10px 16px" : "7px 13px", minHeight: isMobile ? 40 : undefined, borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
   const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700, boxShadow: "0 4px 14px rgba(239,68,68,0.30)" } as const;
-  const inp = { padding: "8px 12px", borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
+  const inp = { padding: isMobile ? "10px 12px" : "8px 12px", minHeight: isMobile ? 40 : undefined, borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
   const section = { background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden" as const, marginBottom: 16 };
   const sHead = { padding: "11px 16px", borderBottom: `1px solid ${V.border}`, fontSize: 11, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: V.faint, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)" };
 
@@ -707,7 +717,7 @@ export default function DueItemDetailPage() {
                 ) : (
                   <>
                     <button style={btn} onClick={() => setEditingDates(true)}>Edit details</button>
-                    <button style={{ ...btn, color: "#ef4444" }} onClick={() => void deleteItem()}>Delete</button>
+                    <button style={{ ...btn, color: V.neg }} onClick={() => void deleteItem()}>Delete</button>
                   </>
                 )}
               </div>
@@ -719,7 +729,7 @@ export default function DueItemDetailPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10, marginBottom: 20 }}>
             {[
               { label: `Total paid (${nativeCurrency})`, value: `${nativeCurrency} ${stats.totalNative.toFixed(0)}`, color: V.accent },
-              { label: "Months paid", value: stats.paidCount, color: "#16a34a" },
+              { label: "Months paid", value: stats.paidCount, color: V.pos },
               { label: "Settled", value: stats.settledCount, color: V.muted },
               { label: "Waived", value: stats.waived, color: V.faint },
             ].map((card) => (
@@ -795,7 +805,7 @@ export default function DueItemDetailPage() {
                 {isEditing ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(entry.month)}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 84px 110px", gap: 8 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 84px 110px", gap: 8 }}>
                       <input type="text" inputMode="decimal" style={inp} value={editAmount} onChange={(e) => setEditAmount(e.target.value)} placeholder="This month amount" />
                       <select style={inp} value={editCurrency} onChange={(e) => setEditCurrency(e.target.value as Currency)}>
                         <option>AED</option><option>INR</option><option>USD</option>
@@ -826,12 +836,12 @@ export default function DueItemDetailPage() {
                         <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(entry.month)}</div>
                         {entry.note && <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 2, whiteSpace: "pre-line" }}>{entry.note}</div>}
                         {entry.carryForwardAmount !== 0 && (
-                          <div style={{ fontSize: 11, color: "#f59e0b", marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: V.warn, marginTop: 2 }}>
                             {entry.carryForwardAmount < 0 ? "Credit carried" : "Carry forward"}: {entry.currency} {entry.carryForwardAmount.toFixed(2)} · This month amount: {entry.currency} {(entry.amount ?? 0).toFixed(2)}
                           </div>
                         )}
                         {entry.amountPaid > 0 && (
-                          <div style={{ fontSize: 11, color: entry.status === "paid" ? "#16a34a" : entry.status === "partial" ? PARTIAL_REMAINING_COLOR : V.accent, marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: entry.status === "paid" ? V.pos : entry.status === "partial" ? PARTIAL_REMAINING_COLOR : V.accent, marginTop: 2 }}>
                             Paid so far: {entry.currency} {entry.amountPaid.toFixed(2)} · Remaining: {entry.currency} {getEntryRemaining(entry).toFixed(2)}
                             {entry.lastPaidAt ? ` · Last: ${fmtDateTime(entry.lastPaidAt, timezone)}` : ""}
                           </div>
@@ -843,30 +853,30 @@ export default function DueItemDetailPage() {
                           return (
                             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
                               <div style={{ flex: 1, height: 6, background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", borderRadius: 999, overflow: "hidden" }}>
-                                <div style={{ height: "100%", width: `${pct}%`, background: isComplete ? "#16a34a" : "linear-gradient(90deg,#ef4444 0%,#f59e0b 100%)", borderRadius: 999, transition: "width 0.3s" }} />
+                                <div style={{ height: "100%", width: `${pct}%`, background: isComplete ? V.pos : "linear-gradient(90deg,var(--negative) 0%,var(--warning) 100%)", borderRadius: 999, transition: "width 0.3s" }} />
                               </div>
-                              <span style={{ fontSize: 10, fontWeight: 800, color: isComplete ? "#16a34a" : V.accent, minWidth: 34, textAlign: "right" }}>{pct}%</span>
+                              <span style={{ fontSize: 10, fontWeight: 800, color: isComplete ? V.pos : V.accent, minWidth: 34, textAlign: "right" }}>{pct}%</span>
                             </div>
                           );
                         })()}
                         {diffAbs !== null && (
-                          <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? "#ef4444" : "#16a34a", marginTop: 4 }}>
+                          <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? V.neg : V.pos, marginTop: 4 }}>
                             vs previous: {diffAbs > 0 ? "+" : ""}{entry.currency} {diffAbs.toFixed(0)} {diffPct !== null ? `(${diffPct > 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : "(new)"}
                           </div>
                         )}
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <div style={{ textAlign: "right" }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: isMobile ? "wrap" : "nowrap", width: isMobile ? "100%" : undefined, justifyContent: isMobile ? "space-between" : undefined }}>
+                      <div style={{ textAlign: isMobile ? "left" : "right", width: isMobile ? "100%" : undefined }}>
                         <div style={{ fontSize: 14, fontWeight: 700, textDecoration: entry.status === "waived" ? "line-through" : "none", color: strike ? V.faint : V.text }}>
                           {entry.currency} {getTotalDue(entry).toLocaleString()}
                         </div>
-                        {entry.carryForwardAmount !== 0 && <div style={{ fontSize: 11, color: entry.carryForwardAmount < 0 ? "#16a34a" : "#f59e0b" }}>{entry.carryForwardAmount < 0 ? "Credit" : "Carry fwd"} {entry.currency} {entry.carryForwardAmount.toFixed(2)}</div>}
+                        {entry.carryForwardAmount !== 0 && <div style={{ fontSize: 11, color: entry.carryForwardAmount < 0 ? V.pos : V.warn }}>{entry.carryForwardAmount < 0 ? "Credit" : "Carry fwd"} {entry.currency} {entry.carryForwardAmount.toFixed(2)}</div>}
                         {(entry.amountPaid > 0 || entry.carryForwardAmount !== 0) && <div style={{ fontSize: 11, color: V.faint }}>This month amount {entry.currency} {(entry.amount ?? 0).toFixed(2)}</div>}
                         {entry.currency !== "AED" && entry.amount !== null && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {aed.toFixed(0)}</div>}
                         <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, display: "inline-block", marginTop: 3, background: tone.bg, color: tone.fg }}>{entry.status}</span>
                       </div>
-                      <button style={{ ...btn, color: "#16a34a" }} onClick={() => openPaymentModal(entry)} disabled={monthLocks[entry.month]}>Add payment</button>
+                      <button style={{ ...btn, color: V.pos }} onClick={() => openPaymentModal(entry)} disabled={monthLocks[entry.month]}>Add payment</button>
                       <button style={btn} onClick={() => startEdit(entry)}>Edit</button>
                     </div>
                   </div>
@@ -884,7 +894,7 @@ export default function DueItemDetailPage() {
                               onClick={() => void deletePayment(payment.id, entry.id)}
                               disabled={monthLocks[entry.month]}
                               style={{ background: "none", border: "none", color: V.faint, cursor: monthLocks[entry.month] ? "not-allowed" : "pointer", padding: "2px 6px", fontSize: 13, opacity: monthLocks[entry.month] ? 0.3 : 0.7, borderRadius: 6 }}
-                              onMouseEnter={(e) => !monthLocks[entry.month] && (e.currentTarget.style.color = "#ef4444", e.currentTarget.style.opacity = "1")}
+                              onMouseEnter={(e) => !monthLocks[entry.month] && (e.currentTarget.style.color = "var(--negative)", e.currentTarget.style.opacity = "1")}
                               onMouseLeave={(e) => (e.currentTarget.style.color = V.faint, e.currentTarget.style.opacity = monthLocks[entry.month] ? "0.3" : "0.7")}
                               title="Delete payment"
                               aria-label="Delete payment"
@@ -919,7 +929,7 @@ export default function DueItemDetailPage() {
                 </div>
                 <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Paid so far</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: paymentModalEntry.amountPaid > 0 ? "#16a34a" : V.text }}>{paymentModalEntry.currency} {(paymentModalEntry.amountPaid ?? 0).toFixed(2)}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: paymentModalEntry.amountPaid > 0 ? V.pos : V.text }}>{paymentModalEntry.currency} {(paymentModalEntry.amountPaid ?? 0).toFixed(2)}</div>
                 </div>
                 <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
                   <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Remaining</div>
@@ -1025,7 +1035,7 @@ export default function DueItemDetailPage() {
         </div>
       )}
 
-      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: "#16a34a", border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>{toast}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: V.pos, border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>{toast}</div>}
     </div>
   );
 }

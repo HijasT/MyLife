@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type EventType = "work" | "event" | "due_paid" | "note";
 type ShiftKey =
@@ -397,6 +398,7 @@ export default function CalendarPage() {
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     return () => obs.disconnect();
   }, []);
+  const isMobile = useIsMobile();
 
   const todayStr = todayDubai(timezone);
 
@@ -1051,10 +1053,17 @@ export default function CalendarPage() {
       ? "0 1px 3px rgba(0,0,0,0.45)"
       : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)",
     shadowAccent: "0 4px 14px rgba(59,130,246,0.30)",
+    pos: "var(--positive)",
+    posSoft: "var(--positive-soft)",
+    neg: "var(--negative)",
+    negSoft: "var(--negative-soft)",
+    warn: "var(--warning)",
+    warnSoft: "var(--warning-soft)",
   };
 
   const btn = {
-    padding: "8px 14px",
+    padding: isMobile ? "10px 16px" : "8px 14px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 10,
     border: `1px solid ${V.border}`,
     background: V.card,
@@ -1076,7 +1085,8 @@ export default function CalendarPage() {
   } as const;
 
   const inp = {
-    padding: "8px 12px",
+    padding: isMobile ? "10px 12px" : "8px 12px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 8,
     border: `1px solid ${V.border}`,
     background: V.input,
@@ -1196,7 +1206,7 @@ export default function CalendarPage() {
               style={{
                 marginBottom: toast ? 8 : 0,
                 background: isDark ? "#3a1a1a" : "#fef2f2",
-                color: "#ef4444",
+                color: V.neg,
                 border: "1px solid rgba(239,68,68,0.3)",
                 padding: "10px 14px",
                 borderRadius: 12,
@@ -1430,7 +1440,7 @@ export default function CalendarPage() {
             ).length,
             color: "#7c5cff",
           },
-          { label: "Off days", value: monthStats.offDays, color: "#f59e0b" },
+          { label: "Off days", value: monthStats.offDays, color: V.warn },
         ].map((s) => (
           <div
             key={s.label}
@@ -1462,7 +1472,7 @@ export default function CalendarPage() {
 
       {monthStats.days > 0 && (
         <div style={{ padding: "8px 24px 0", fontSize: 11, color: V.faint }}>
-          Off days earned: <strong style={{ color: "#f59e0b" }}>{monthStats.offDays}</strong>
+          Off days earned: <strong style={{ color: V.warn }}>{monthStats.offDays}</strong>
           {" "}· every 5 days worked → 2 off
           {monthStats.extraDaysWorked > 0 && (
             <> · +{monthStats.extraDaysWorked} from extra days</>
@@ -1517,19 +1527,20 @@ export default function CalendarPage() {
                 const wH = dayEvs
                   .filter((e) => e.eventType === "work")
                   .reduce((s, e) => s + workHours(e.workStart, e.workEnd), 0);
+                const maxChips = isMobile ? 1 : 2;
 
                 return (
                   <div
                     key={day}
                     onClick={() => setSelectedDate(isSel ? null : dateStr)}
                     style={{
-                      minHeight: 92,
+                      minHeight: isMobile ? 66 : 92,
                       borderRadius: 12,
                       border: `1px solid ${isSel ? V.accent : isToday ? V.accentSoft : V.border}`,
                       background: isToday || isSel ? V.accentSoft : V.card,
                       boxShadow: isSel ? `0 0 0 1px ${V.accent}` : V.shadow,
                       cursor: "pointer",
-                      padding: "7px 7px",
+                      padding: isMobile ? "4px 3px" : "7px 7px",
                       transition: "all 0.12s",
                     }}
                   >
@@ -1543,11 +1554,11 @@ export default function CalendarPage() {
                     >
                       <span
                         style={{
-                          fontSize: 12,
+                          fontSize: isMobile ? 11 : 12,
                           fontWeight: isToday ? 800 : 600,
                           color: isToday ? "#fff" : V.text,
-                          width: 22,
-                          height: 22,
+                          width: isMobile ? 18 : 22,
+                          height: isMobile ? 18 : 22,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -1575,13 +1586,13 @@ export default function CalendarPage() {
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                      {dayEvs.slice(0, 2).map((ev) => (
+                      {dayEvs.slice(0, maxChips).map((ev) => (
                         <div
                           key={ev.id}
                           style={{
-                            fontSize: 10,
+                            fontSize: isMobile ? 9 : 10,
                             fontWeight: 600,
-                            padding: "2px 6px",
+                            padding: isMobile ? "1px 4px" : "2px 6px",
                             borderRadius: 5,
                             background: `${ev.color}22`,
                             color: ev.color,
@@ -1593,8 +1604,8 @@ export default function CalendarPage() {
                           {displayTitle(ev)}
                         </div>
                       ))}
-                      {dayEvs.length > 2 && (
-                        <div style={{ fontSize: 10, color: V.faint, paddingLeft: 2 }}>+{dayEvs.length - 2} more</div>
+                      {dayEvs.length > maxChips && (
+                        <div style={{ fontSize: isMobile ? 9 : 10, color: V.faint, paddingLeft: 2 }}>+{dayEvs.length - maxChips} more</div>
                       )}
                     </div>
                   </div>
@@ -1641,7 +1652,7 @@ export default function CalendarPage() {
               { label: "Days worked", value: weekStats.days, color: V.accent },
               { label: "Hours", value: `${weekStats.hours}h`, color: V.accent },
               { label: "Regular", value: weekStats.regular, color: V.accent },
-              { label: "Extra", value: weekStats.extra, color: "#ef4444" },
+              { label: "Extra", value: weekStats.extra, color: V.neg },
             ].map((s) => (
               <div
                 key={s.label}
@@ -1692,9 +1703,9 @@ export default function CalendarPage() {
                     }`,
                     boxShadow: isSel ? `0 0 0 1px ${V.accent}` : V.shadow,
                     borderRadius: 12,
-                    padding: "10px 10px",
+                    padding: isMobile ? "6px 4px" : "10px 10px",
                     cursor: "pointer",
-                    minHeight: 120,
+                    minHeight: isMobile ? 92 : 120,
                   }}
                 >
                   <div style={{ marginBottom: 6 }}>
@@ -1706,11 +1717,11 @@ export default function CalendarPage() {
                     </div>
                     <div
                       style={{
-                        fontSize: 18,
+                        fontSize: isMobile ? 15 : 18,
                         fontWeight: 800,
                         color: isToday ? "#fff" : V.text,
-                        width: isToday ? 28 : "auto",
-                        height: isToday ? 28 : "auto",
+                        width: isToday ? (isMobile ? 22 : 28) : "auto",
+                        height: isToday ? (isMobile ? 22 : 28) : "auto",
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -1742,10 +1753,14 @@ export default function CalendarPage() {
                           background: `${ev.color}20`,
                           color: ev.color,
                           lineHeight: 1.4,
+                          whiteSpace: isMobile ? "nowrap" : "normal",
+                          overflow: isMobile ? "hidden" : "visible",
+                          textOverflow: isMobile ? "ellipsis" : "clip",
                         }}
                       >
                         {displayTitle(ev)}
-                        {ev.eventType === "work" &&
+                        {!isMobile &&
+                          ev.eventType === "work" &&
                           ev.workStart &&
                           !SHIFTS[getShiftNameFromEvent(ev) as ShiftKey]?.noTime && (
                             <span style={{ color: V.faint, marginLeft: 4 }}>
@@ -1892,7 +1907,7 @@ export default function CalendarPage() {
                         background: "none",
                         border: "none",
                         cursor: "pointer",
-                        color: "#ef4444",
+                        color: V.neg,
                         fontSize: 18,
                         lineHeight: 1,
                       }}
@@ -1996,7 +2011,7 @@ export default function CalendarPage() {
                         marginBottom: 8,
                         fontSize: 13,
                         fontWeight: 800,
-                        color: "#ef4444",
+                        color: V.neg,
                       }}
                     >
                       {extraTotal}x Extra
@@ -2109,7 +2124,7 @@ export default function CalendarPage() {
                 <div
                   style={{
                     background: isDark ? "#3a1a1a" : "#fef2f2",
-                    color: "#ef4444",
+                    color: V.neg,
                     border: "1px solid rgba(239,68,68,0.3)",
                     padding: "10px 14px",
                     borderRadius: 12,
@@ -2178,7 +2193,7 @@ export default function CalendarPage() {
                   </div>
 
                   {!SHIFTS[addShift].noTime && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10, marginTop: 6 }}>
                       <label style={lbl}>
                         Start
                         <input
@@ -2279,7 +2294,7 @@ export default function CalendarPage() {
                 </div>
               )}
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
                 <label style={lbl}>
                   From
                   <input
@@ -2434,7 +2449,7 @@ export default function CalendarPage() {
 
               {deleteTarget.isRecurring && (
                 <button
-                  style={{ ...btn, color: "#ef4444" }}
+                  style={{ ...btn, color: V.neg }}
                   onClick={() => {
                     deleteEvent(deleteTarget.id, "future");
                     setDeleteTarget(null);
@@ -2459,7 +2474,7 @@ export default function CalendarPage() {
             bottom: 20,
             right: 16,
             background: isDark ? "#1a3a2a" : "#f0fdf4",
-            color: "#16a34a",
+            color: V.pos,
             border: "1px solid rgba(22,163,74,0.3)",
             padding: "12px 18px",
             borderRadius: 12,

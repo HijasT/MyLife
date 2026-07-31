@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 const supabase = createClient;
 
@@ -137,16 +138,16 @@ function getStatus(val: number | null, min: number | null, max: number | null, t
 }
 
 function statusTone(s: MarkerStatus) {
-  if (s === "high" || s === "low") return { label: s.toUpperCase(), bg: "#fee", fg: "#c00" };
-  if (s === "normal") return { label: "OK", bg: "#efe", fg: "#070" };
+  if (s === "high" || s === "low") return { label: s.toUpperCase(), bg: "var(--negative-soft)", fg: "var(--negative)" };
+  if (s === "normal") return { label: "OK", bg: "var(--positive-soft)", fg: "var(--positive)" };
   if (s === "text") return { label: "TEXT", bg: "#eef", fg: "#007" };
   return { label: "—", bg: "#f5f5f5", fg: "#999" };
 }
 
 function compareTone(delta: number | null) {
   if (delta == null) return "#999";
-  if (delta > 0) return "#c00";
-  if (delta < 0) return "#070";
+  if (delta > 0) return "var(--negative)";
+  if (delta < 0) return "var(--positive)";
   return "#999";
 }
 
@@ -159,7 +160,8 @@ export default function BioMarkersPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [userId, setUserId] = useState("");
   const [isDark, setIsDark] = useState(false);
-  
+  const isMobile = useIsMobile();
+
   // Compare tab states
   const [compareDate1, setCompareDate1] = useState<string>("");
   const [compareDate2, setCompareDate2] = useState<string>("");
@@ -352,8 +354,16 @@ export default function BioMarkersPage() {
 
   // ============= STYLES =============
   const V = isDark
-    ? { bg: "#0d0f14", text: "#f8fafc", muted: "#94a3b8", faint: "#64748b", border: "#1e293b", accent: "#10b981", surface: "#1a1f2e" }
-    : { bg: "#f9f8f5", text: "#111827", muted: "#6b7280", faint: "#9ca3af", border: "#e5e7eb", accent: "#0d9488", surface: "#ffffff" };
+    ? {
+        bg: "#0d0f14", text: "#f8fafc", muted: "#94a3b8", faint: "#64748b", border: "#1e293b", accent: "#10b981", surface: "#1a1f2e",
+        pos: "var(--positive)", posSoft: "var(--positive-soft)", neg: "var(--negative)", negSoft: "var(--negative-soft)",
+        warn: "var(--warning)", warnSoft: "var(--warning-soft)", gold: "var(--gold)", goldSoft: "var(--gold-soft)",
+      }
+    : {
+        bg: "#f9f8f5", text: "#111827", muted: "#6b7280", faint: "#9ca3af", border: "#e5e7eb", accent: "#0d9488", surface: "#ffffff",
+        pos: "var(--positive)", posSoft: "var(--positive-soft)", neg: "var(--negative)", negSoft: "var(--negative-soft)",
+        warn: "var(--warning)", warnSoft: "var(--warning-soft)", gold: "var(--gold)", goldSoft: "var(--gold-soft)",
+      };
 
   const tab = (isActive: boolean) => ({
     padding: "10px 18px",
@@ -374,7 +384,8 @@ export default function BioMarkersPage() {
   };
 
   const btn = {
-    padding: "8px 16px",
+    padding: isMobile ? "10px 16px" : "8px 16px",
+    minHeight: isMobile ? 40 : undefined,
     fontSize: 13,
     fontWeight: 700,
     border: `1px solid ${V.border}`,
@@ -406,7 +417,7 @@ export default function BioMarkersPage() {
       {/* Tab Content */}
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: 20 }}>
         {activeTab === "overview" && (
-          <OverviewTab 
+          <OverviewTab
             summary={summary}
             abnormalRows={abnormalRows}
             uniqueDates={uniqueDates}
@@ -414,9 +425,10 @@ export default function BioMarkersPage() {
             section={section}
             statusTone={statusTone}
             compareTone={compareTone}
+            isMobile={isMobile}
           />
         )}
-        
+
         {activeTab === "groups" && (
           <ByGroupsTab
             groupCards={groupCards}
@@ -427,9 +439,10 @@ export default function BioMarkersPage() {
             section={section}
             statusTone={statusTone}
             compareTone={compareTone}
+            isMobile={isMobile}
           />
         )}
-        
+
         {activeTab === "dates" && (
           <ByDateTab
             uniqueDates={uniqueDates}
@@ -444,9 +457,10 @@ export default function BioMarkersPage() {
             section={section}
             statusTone={statusTone}
             btn={btn}
+            isMobile={isMobile}
           />
         )}
-        
+
         {activeTab === "compare" && (
           <CompareTab
             uniqueDates={uniqueDates}
@@ -461,18 +475,20 @@ export default function BioMarkersPage() {
             statusTone={statusTone}
             compareTone={compareTone}
             isDark={isDark}
+            isMobile={isMobile}
           />
         )}
-        
+
         {activeTab === "metrics" && (
           <BodyMetricsTab
             metrics={metrics}
             V={V}
             section={section}
             isDark={isDark}
+            isMobile={isMobile}
           />
         )}
-        
+
         {activeTab === "manage" && (
           <ManageTab
             groupCards={groupCards}
@@ -484,6 +500,7 @@ export default function BioMarkersPage() {
             V={V}
             section={section}
             btn={btn}
+            isMobile={isMobile}
           />
         )}
       </div>
@@ -493,7 +510,7 @@ export default function BioMarkersPage() {
 
 // ============= TAB COMPONENTS =============
 
-function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTone, compareTone }: any) {
+function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTone, compareTone, isMobile }: any) {
   const router = useRouter();
   
   const btnStyle = {
@@ -521,9 +538,9 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
         {[
           { label: "Tracked markers", value: summary.tracked, color: V.text },
-          { label: "Currently abnormal", value: summary.abnormal, color: "#dc2626" },
-          { label: "Newly abnormal", value: summary.newlyAbnormal, color: "#d97706" },
-          { label: "Back to normal", value: summary.backToNormal, color: "#059669" },
+          { label: "Currently abnormal", value: summary.abnormal, color: V.neg },
+          { label: "Newly abnormal", value: summary.newlyAbnormal, color: V.warn },
+          { label: "Back to normal", value: summary.backToNormal, color: V.pos },
         ].map((card: { label: string; value: number; color: string }) => (
           <div key={card.label} style={{ ...section, padding: 16 }}>
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800 }}>{card.label}</div>
@@ -541,6 +558,27 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
           <div style={{ display: "grid", gap: 10 }}>
             {abnormalRows.map(({ test, latest, delta, pct, status }: any) => {
               const tone = statusTone(status);
+              const deltaNode = (
+                <span style={{ fontSize: 12, color: compareTone(delta), fontWeight: 800 }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</span>
+              );
+              if (isMobile) {
+                return (
+                  <Link key={test.id} href={`/dashboard/biomarkers/${test.id}`} style={{ textDecoration: "none", color: V.text }}>
+                    <div style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 15, fontWeight: 800 }}>{test.name}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 11, color: V.muted }}>{test.unit}</span></div>
+                      </div>
+                      <div style={{ fontSize: 11, color: V.faint, textTransform: "uppercase", fontWeight: 800 }}>{test.groupName}</div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 10, color: V.muted }}>{new Date(latest.testDate).toLocaleDateString()}</div>
+                        <span style={{ padding: "4px 10px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 11, fontWeight: 800 }}>{tone.label}</span>
+                        {deltaNode}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              }
               return (
                 <Link key={test.id} href={`/dashboard/biomarkers/${test.id}`} style={{ textDecoration: "none", color: V.text }}>
                   <div style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 12, display: "grid", gridTemplateColumns: "1.4fr 0.7fr 0.7fr", gap: 10, alignItems: "center" }}>
@@ -552,7 +590,7 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
                     <div style={{ fontSize: 14, fontWeight: 800 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 11, color: V.muted }}>{test.unit}</span></div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                       <span style={{ padding: "4px 10px", borderRadius: 999, background: tone.bg, color: tone.fg, fontSize: 11, fontWeight: 800 }}>{tone.label}</span>
-                      <span style={{ fontSize: 12, color: compareTone(delta), fontWeight: 800 }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</span>
+                      {deltaNode}
                     </div>
                   </div>
                 </Link>
@@ -579,7 +617,7 @@ function OverviewTab({ summary, abnormalRows, uniqueDates, V, section, statusTon
   );
 }
 
-function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, section, statusTone, compareTone }: any) {
+function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, section, statusTone, compareTone, isMobile }: any) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(groupCards.map((g: any) => g.groupName)));
   
   const toggleGroup = (groupName: string) => {
@@ -614,6 +652,28 @@ function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, s
                   const delta = latest?.valueNum != null && prev?.valueNum != null ? latest.valueNum - prev.valueNum : null;
                   const pct = delta != null && prev?.valueNum != null ? Math.round((delta / prev.valueNum) * 100) : null;
                   
+                  const deltaText = delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`;
+
+                  if (isMobile) {
+                    return (
+                      <Link key={t.id} href={`/dashboard/biomarkers/${t.id}`} style={{ textDecoration: "none", color: V.text }}>
+                        <div style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, cursor: "pointer", display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
+                            <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
+                          </div>
+                          <div style={{ fontSize: 10, color: V.muted }}>
+                            Range: {t.refMin ?? "—"} - {t.refMax ?? "—"} {t.unit} · {latest ? new Date(latest.testDate).toLocaleDateString() : ""}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                            <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800 }}>{status.label}</span>
+                            <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700 }}>{deltaText}</div>
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  }
+
                   return (
                     <Link key={t.id} href={`/dashboard/biomarkers/${t.id}`} style={{ textDecoration: "none", color: V.text }}>
                       <div style={{ border: `1px solid ${V.border}`, borderRadius: 10, padding: 10, cursor: "pointer", transition: "all 0.2s" }}>
@@ -627,7 +687,7 @@ function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, s
                           </div>
                           <div style={{ fontSize: 13, fontWeight: 700 }}>{latest?.valueNum ?? latest?.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{t.unit}</span></div>
                           <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800, textAlign: "center" }}>{status.label}</span>
-                          <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{delta == null ? "—" : `${delta > 0 ? "+" : ""}${formatDelta(delta)}${pct != null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}`}</div>
+                          <div style={{ fontSize: 11, color: compareTone(delta), fontWeight: 700, textAlign: "right" }}>{deltaText}</div>
                         </div>
                       </div>
                     </Link>
@@ -642,7 +702,7 @@ function ByGroupsTab({ groupCards, latestResults, previousResults, testMap, V, s
   );
 }
 
-function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, testMap, sessions, results, setResults, V, section, statusTone, btn }: any) {
+function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, testMap, sessions, results, setResults, V, section, statusTone, btn, isMobile }: any) {
   const [editingResult, setEditingResult] = useState<any>(null);
   const sessionForDate = sessions.find((s: any) => s.sessionDate === selectedDate);
   const resultsForDate = resultsByDate.get(selectedDate) || [];
@@ -693,20 +753,22 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
   
   const inputStyle = {
     width: "100%",
-    padding: "8px 12px",
+    padding: isMobile ? "10px 12px" : "8px 12px",
+    minHeight: isMobile ? 40 : undefined,
     fontSize: 13,
     border: `1px solid ${V.border}`,
     borderRadius: 6,
     background: V.surface,
     color: V.text,
+    boxSizing: "border-box" as const,
   };
-  
+
   return (
     <div style={{ display: "grid", gap: 18 }}>
       {/* Date Selector */}
       <div style={{ ...section, padding: 16 }}>
         <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Select Session Date</div>
-        <select value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: "100%", padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+        <select value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ width: "100%", padding: isMobile ? "10px 14px" : "10px 14px", minHeight: isMobile ? 40 : undefined, fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
           {uniqueDates.map((date: string) => (
             <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</option>
           ))}
@@ -777,6 +839,21 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
                         <button onClick={cancelEdit} style={{ ...btn, flex: 1 }}>Cancel</button>
                       </div>
                     </div>
+                  ) : isMobile ? (
+                    // VIEW MODE — mobile stacked card
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{test.name}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>{result.valueNum ?? result.valueText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test.unit}</span></div>
+                      </div>
+                      <div style={{ fontSize: 10, color: V.muted }}>
+                        Range: {test.refMin ?? "—"} - {test.refMax ?? "—"} {test.unit}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <span style={{ padding: "4px 10px", borderRadius: 999, background: status.bg, color: status.fg, fontSize: 11, fontWeight: 800 }}>{status.label}</span>
+                        <button onClick={() => startEdit(result)} style={{ ...btn, padding: "8px 14px", minHeight: 36, fontSize: 11 }}>Edit</button>
+                      </div>
+                    </div>
                   ) : (
                     // VIEW MODE
                     <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, alignItems: "center" }}>
@@ -805,20 +882,20 @@ function ByDateTab({ uniqueDates, selectedDate, setSelectedDate, resultsByDate, 
   );
 }
 
-function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, setCompareDate2, compareData, testMap, V, section, statusTone, compareTone, isDark }: any) {
+function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, setCompareDate2, compareData, testMap, V, section, statusTone, compareTone, isDark, isMobile }: any) {
   return (
     <div style={{ display: "grid", gap: 18 }}>
       {/* Date Selectors */}
       <div style={{ ...section, padding: 16 }}>
         <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Compare Dates</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 12, alignItems: "center" }}>
-          <select value={compareDate1} onChange={(e) => setCompareDate1(e.target.value)} style={{ padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr auto 1fr", gap: 12, alignItems: "center" }}>
+          <select value={compareDate1} onChange={(e) => setCompareDate1(e.target.value)} style={{ width: isMobile ? "100%" : undefined, padding: "10px 14px", minHeight: isMobile ? 40 : undefined, fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text, boxSizing: "border-box" }}>
             {uniqueDates.map((date: string) => (
               <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</option>
             ))}
           </select>
-          <div style={{ fontSize: 18, fontWeight: 800, color: V.accent }}>vs</div>
-          <select value={compareDate2} onChange={(e) => setCompareDate2(e.target.value)} style={{ padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: V.accent, textAlign: isMobile ? "center" : undefined }}>vs</div>
+          <select value={compareDate2} onChange={(e) => setCompareDate2(e.target.value)} style={{ width: isMobile ? "100%" : undefined, padding: "10px 14px", minHeight: isMobile ? 40 : undefined, fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text, boxSizing: "border-box" }}>
             {uniqueDates.map((date: string) => (
               <option key={date} value={date}>{new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</option>
             ))}
@@ -828,48 +905,83 @@ function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, 
 
       {/* Comparison Table */}
       <div style={{ ...section, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: isDark ? "#1a1f2e" : "#f3f4f6", borderBottom: `2px solid ${V.border}` }}>
-              <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>Test Name</th>
-              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>{new Date(compareDate1).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</th>
-              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>{new Date(compareDate2).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</th>
-              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>Δ</th>
-              <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>%</th>
-            </tr>
-          </thead>
-          <tbody>
+        {isMobile ? (
+          <div style={{ display: "flex", flexDirection: "column" }}>
             {compareData.map((row: CompareRow) => {
               const test = testMap.get(row.testId);
               const currTone = statusTone(row.currStatus);
               const prevTone = statusTone(row.prevStatus);
-              
+
               return (
-                <tr key={row.testId} style={{ borderBottom: `1px solid ${V.border}` }}>
-                  <td style={{ padding: "12px 16px" }}>
+                <div key={row.testId} style={{ padding: "12px 16px", borderBottom: `1px solid ${V.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div>
                     <div style={{ fontSize: 10, color: V.faint, textTransform: "uppercase" }}>{row.groupName}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{row.name}</div>
-                  </td>
-                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{row.currVal ?? row.currText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
-                    <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: currTone.bg, color: currTone.fg, fontSize: 10, fontWeight: 800 }}>{currTone.label}</span>
-                  </td>
-                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{row.prevVal ?? row.prevText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
-                    <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: prevTone.bg, color: prevTone.fg, fontSize: 10, fontWeight: 800 }}>{prevTone.label}</span>
-                  </td>
-                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
-                    {row.delta == null ? "—" : `${row.delta > 0 ? "↑ +" : "↓ "}${formatDelta(row.delta)}`}
-                  </td>
-                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
-                    {row.pct == null ? "—" : `${row.pct > 0 ? "+" : ""}${row.pct}%`}
-                  </td>
-                </tr>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{row.name}</div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: V.faint, textTransform: "uppercase" }}>{new Date(compareDate1).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{row.currVal ?? row.currText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
+                      <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: currTone.bg, color: currTone.fg, fontSize: 10, fontWeight: 800 }}>{currTone.label}</span>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: V.faint, textTransform: "uppercase" }}>{new Date(compareDate2).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{row.prevVal ?? row.prevText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
+                      <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: prevTone.bg, color: prevTone.fg, fontSize: 10, fontWeight: 800 }}>{prevTone.label}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
+                    <span>{row.delta == null ? "—" : `${row.delta > 0 ? "↑ +" : "↓ "}${formatDelta(row.delta)}`}</span>
+                    <span>{row.pct == null ? "—" : `${row.pct > 0 ? "+" : ""}${row.pct}%`}</span>
+                  </div>
+                </div>
               );
             })}
-          </tbody>
-        </table>
-        
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: isDark ? "#1a1f2e" : "#f3f4f6", borderBottom: `2px solid ${V.border}` }}>
+                <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>Test Name</th>
+                <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>{new Date(compareDate1).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</th>
+                <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>{new Date(compareDate2).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</th>
+                <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>Δ</th>
+                <th style={{ padding: "12px 16px", textAlign: "center", fontWeight: 800, fontSize: 11, textTransform: "uppercase", color: V.faint }}>%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compareData.map((row: CompareRow) => {
+                const test = testMap.get(row.testId);
+                const currTone = statusTone(row.currStatus);
+                const prevTone = statusTone(row.prevStatus);
+
+                return (
+                  <tr key={row.testId} style={{ borderBottom: `1px solid ${V.border}` }}>
+                    <td style={{ padding: "12px 16px" }}>
+                      <div style={{ fontSize: 10, color: V.faint, textTransform: "uppercase" }}>{row.groupName}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{row.name}</div>
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{row.currVal ?? row.currText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
+                      <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: currTone.bg, color: currTone.fg, fontSize: 10, fontWeight: 800 }}>{currTone.label}</span>
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{row.prevVal ?? row.prevText ?? "—"} <span style={{ fontSize: 10, color: V.muted }}>{test?.unit}</span></div>
+                      <span style={{ display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 999, background: prevTone.bg, color: prevTone.fg, fontSize: 10, fontWeight: 800 }}>{prevTone.label}</span>
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
+                      {row.delta == null ? "—" : `${row.delta > 0 ? "↑ +" : "↓ "}${formatDelta(row.delta)}`}
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 13, fontWeight: 800, color: compareTone(row.delta) }}>
+                      {row.pct == null ? "—" : `${row.pct > 0 ? "+" : ""}${row.pct}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
         {compareData.length === 0 && (
           <div style={{ padding: "40px 16px", textAlign: "center", color: V.muted }}>No common tests between these two dates.</div>
         )}
@@ -889,7 +1001,7 @@ function CompareTab({ uniqueDates, compareDate1, compareDate2, setCompareDate1, 
   );
 }
 
-function BodyMetricsTab({ metrics, V, section, isDark }: any) {
+function BodyMetricsTab({ metrics, V, section, isDark, isMobile }: any) {
   const latest = metrics[0];
   const previous = metrics[1];
   
@@ -917,16 +1029,16 @@ function BodyMetricsTab({ metrics, V, section, isDark }: any) {
                 let bmiRange = "";
                 if (m.label === "BMI" && m.value != null) {
                   if (m.value < 18.5) {
-                    bmiColor = "#f59e0b"; // amber
+                    bmiColor = V.warn;
                     bmiRange = "Optimal: 18.5-24.9";
                   } else if (m.value >= 18.5 && m.value < 25) {
-                    bmiColor = "#10b981"; // green
+                    bmiColor = V.pos;
                     bmiRange = "Optimal: 18.5-24.9";
                   } else if (m.value >= 25 && m.value < 30) {
-                    bmiColor = "#f59e0b"; // amber
+                    bmiColor = V.warn;
                     bmiRange = "Optimal: 18.5-24.9";
                   } else {
-                    bmiColor = "#ef4444"; // red
+                    bmiColor = V.neg;
                     bmiRange = "Optimal: 18.5-24.9";
                   }
                 }
@@ -941,7 +1053,7 @@ function BodyMetricsTab({ metrics, V, section, isDark }: any) {
                       <div style={{ fontSize: 10, color: V.muted, marginTop: 2 }}>{bmiRange}</div>
                     )}
                     {delta !== null && (
-                      <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: delta > 0 ? "#c00" : delta < 0 ? "#070" : "#999" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: delta > 0 ? V.neg : delta < 0 ? V.pos : V.faint }}>
                         {delta > 0 ? "+" : ""}{formatDelta(delta)} {m.unit}
                       </div>
                     )}
@@ -979,7 +1091,7 @@ function BodyMetricsTab({ metrics, V, section, isDark }: any) {
   );
 }
 
-function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests, setTests, V, section, btn }: any) {
+function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests, setTests, V, section, btn, isMobile }: any) {
   const group = groupCards.find((g: any) => g.groupName === selectedGroup);
   const [isEditing, setIsEditing] = useState(false);
   const [editedTests, setEditedTests] = useState<any[]>([]);
@@ -1126,14 +1238,16 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests,
   
   const inputStyle = {
     width: "100%",
-    padding: "8px 12px",
+    padding: isMobile ? "10px 12px" : "8px 12px",
+    minHeight: isMobile ? 40 : undefined,
     fontSize: 13,
     border: `1px solid ${V.border}`,
     borderRadius: 6,
     background: V.surface,
     color: V.text,
+    boxSizing: "border-box" as const,
   };
-  
+
   const labelStyle = {
     fontSize: 11,
     fontWeight: 700,
@@ -1175,7 +1289,7 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests,
       {/* Group Selector */}
       <div style={{ ...section, padding: 16 }}>
         <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, fontWeight: 800, marginBottom: 12 }}>Select Group</div>
-        <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)} style={{ width: "100%", padding: "10px 14px", fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text }}>
+        <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)} style={{ width: "100%", padding: "10px 14px", minHeight: isMobile ? 40 : undefined, fontSize: 14, border: `1px solid ${V.border}`, borderRadius: 8, background: V.surface, color: V.text, boxSizing: "border-box" }}>
           <option value="">-- Select a group --</option>
           {groupCards.map((g: any) => (
             <option key={g.groupName} value={g.groupName}>{g.groupName} ({g.tests.length} markers)</option>
@@ -1197,11 +1311,11 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests,
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 16 }}>Add New Test</div>
           <div style={{ display: "grid", gap: 12 }}>
             <input type="text" value={newTest.name} onChange={(e) => setNewTest({ ...newTest, name: e.target.value })} placeholder="Test Name" style={inputStyle} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
               <input type="text" value={newTest.unit} onChange={(e) => setNewTest({ ...newTest, unit: e.target.value })} placeholder="Unit (e.g., g/dL)" style={inputStyle} />
               <input type="text" value={newTest.method} onChange={(e) => setNewTest({ ...newTest, method: e.target.value })} placeholder="Method (e.g., HPLC)" style={inputStyle} />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
               <input type="number" step="0.01" value={newTest.refMin} onChange={(e) => setNewTest({ ...newTest, refMin: e.target.value })} placeholder="Min Ref" style={inputStyle} />
               <input type="number" step="0.01" value={newTest.refMax} onChange={(e) => setNewTest({ ...newTest, refMax: e.target.value })} placeholder="Max Ref" style={inputStyle} />
             </div>
@@ -1226,7 +1340,7 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests,
           <div style={{ display: "grid", gap: 12 }}>
             {editedTests.map((test, index) => (
               <div key={test.id} style={{ border: `1px solid ${V.border}`, borderRadius: 8, padding: 12, display: "grid", gap: 12 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr", gap: 12 }}>
                   <input type="text" value={test.name} onChange={(e) => updateTest(index, "name", e.target.value)} placeholder="Test Name" style={inputStyle} />
                   <select value={test.groupName} onChange={(e) => updateTest(index, "groupName", e.target.value)} style={inputStyle}>
                     {groupCards.map((g: any) => (
@@ -1234,14 +1348,14 @@ function ManageTab({ groupCards, selectedGroup, setSelectedGroup, userId, tests,
                     ))}
                   </select>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
                   <input type="text" value={test.unit} onChange={(e) => updateTest(index, "unit", e.target.value)} placeholder="Unit" style={inputStyle} />
                   <input type="text" value={test.method} onChange={(e) => updateTest(index, "method", e.target.value)} placeholder="Method" style={inputStyle} />
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 12 }}>
                   <input type="number" step="0.01" value={test.refMin} onChange={(e) => updateTest(index, "refMin", e.target.value)} placeholder="Min" style={inputStyle} />
                   <input type="number" step="0.01" value={test.refMax} onChange={(e) => updateTest(index, "refMax", e.target.value)} placeholder="Max" style={inputStyle} />
-                  <button onClick={() => deleteTest(test.id)} style={{ ...btn, color: "#dc2626", borderColor: "#dc2626" }}>Delete</button>
+                  <button onClick={() => deleteTest(test.id)} style={{ ...btn, color: V.neg, borderColor: V.neg }}>Delete</button>
                 </div>
               </div>
             ))}

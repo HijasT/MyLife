@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type Status = "pending" | "partial" | "paid" | "waived";
 
@@ -24,10 +25,10 @@ function fmtMonth(m: string) {
 }
 
 function statusTone(status: Status) {
-  if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "#16a34a" };
-  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "#ef4444" };
+  if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "var(--positive)" };
+  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "var(--negative)" };
   if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
-  return { bg: "rgba(239,68,68,0.08)", fg: "#ef4444" };
+  return { bg: "rgba(239,68,68,0.08)", fg: "var(--negative)" };
 }
 
 function statusFromSettingsRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
@@ -50,6 +51,7 @@ export default function RemittancePage() {
   const [toast, setToast] = useState("");
   const toastTimerRef = useRef<number | undefined>(undefined);
   const [isDark, setIsDark] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -234,14 +236,22 @@ export default function RemittancePage() {
     faint: "var(--text-muted)",
     input: "var(--main-bg2)",
     accent: "#ef4444",
+    pos: "var(--positive)",
+    posSoft: "var(--positive-soft)",
+    neg: "var(--negative)",
+    negSoft: "var(--negative-soft)",
+    warn: "var(--warning)",
+    warnSoft: "var(--warning-soft)",
+    gold: "var(--gold)",
+    goldSoft: "var(--gold-soft)",
   };
   const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
   const shadow = isDark
     ? "0 1px 3px rgba(0,0,0,0.45)"
     : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)";
-  const btn = { padding: "7px 13px", borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
+  const btn = { padding: isMobile ? "10px 16px" : "7px 13px", minHeight: isMobile ? 40 : undefined, borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
   const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700, boxShadow: "0 4px 14px rgba(239,68,68,0.30)" } as const;
-  const inp = { padding: "8px 12px", borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
+  const inp = { padding: isMobile ? "10px 12px" : "8px 12px", minHeight: isMobile ? 40 : undefined, borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
 
   if (loading) return (
     <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", background: V.bg }}>
@@ -265,9 +275,9 @@ export default function RemittancePage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 20 }}>
           {[
             { label: "Total remitted", value: `AED ${totalSent.toFixed(0)}`, color: V.text },
-            { label: "Total paid", value: `AED ${totalPaid.toFixed(0)}`, color: "#16a34a", note: partialCount > 0 ? `+ ${partialCount} partially paid (amount not tracked)` : undefined },
+            { label: "Total paid", value: `AED ${totalPaid.toFixed(0)}`, color: V.pos, note: partialCount > 0 ? `+ ${partialCount} partially paid (amount not tracked)` : undefined },
             { label: "Months tracked", value: records.length, color: V.muted },
-            { label: "Variance", value: `${totalVariance > 0 ? "+" : ""}${totalVariance.toFixed(0)} INR`, color: totalVariance === 0 ? V.faint : totalVariance > 0 ? "#ef4444" : "#16a34a" },
+            { label: "Variance", value: `${totalVariance > 0 ? "+" : ""}${totalVariance.toFixed(0)} INR`, color: totalVariance === 0 ? V.faint : totalVariance > 0 ? V.neg : V.pos },
           ].map((card) => (
             <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{card.label}</div>
@@ -284,7 +294,7 @@ export default function RemittancePage() {
         )}
 
         <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden", boxShadow: shadow }}>
-          {records.length > 0 && (
+          {!isMobile && records.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 0.9fr 0.7fr 0.9fr 1fr 120px 80px", gap: 8, padding: "9px 16px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, borderBottom: `1px solid ${V.border}`, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)" }}>
               <div>Month</div>
               <div>INR</div>
@@ -307,7 +317,7 @@ export default function RemittancePage() {
                 {isEditing ? (
                   <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtMonth(record.month)}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 140px", gap: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 140px", gap: 10 }}>
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: V.faint, textTransform: "uppercase" }}>
                         INR Amount
                         <input type="text" inputMode="decimal" style={inp} value={editInr} onChange={(e) => setEditInr(e.target.value)} placeholder={record.remittanceInr.toFixed(0)} />
@@ -339,6 +349,46 @@ export default function RemittancePage() {
                       <button style={btn} onClick={() => setEditMonth(null)}>Cancel</button>
                     </div>
                   </div>
+                ) : isMobile ? (
+                  <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, textDecoration: record.status === "paid" || record.status === "waived" ? "line-through" : "none", color: record.status === "paid" || record.status === "waived" ? V.faint : V.text }}>
+                          {fmtMonth(record.month)}
+                        </div>
+                        {record.note && <div style={{ fontSize: 11, color: V.faint, fontStyle: "italic", marginTop: 2 }}>{record.note}</div>}
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: record.status === "paid" ? V.pos : V.accent, textDecoration: record.status === "waived" ? "line-through" : "none", textAlign: "right" }}>
+                        AED {record.remittanceAed.toFixed(0)}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, fontSize: 11, color: V.muted }}>
+                      <div>INR<br /><strong style={{ color: V.text, fontSize: 12, textDecoration: record.status === "waived" ? "line-through" : "none" }}>₹{record.remittanceInr.toLocaleString()}</strong></div>
+                      <div>Rate<br /><strong style={{ color: V.text, fontSize: 12 }}>÷{record.fxRate}</strong></div>
+                      <div>Variance<br /><strong style={{ color: varianceInr === 0 ? V.faint : varianceInr > 0 ? V.neg : V.pos, fontSize: 12 }}>{varianceInr > 0 ? "+" : ""}{varianceInr.toFixed(0)} INR</strong></div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
+                      <select disabled={record.isLocked} value={record.status} onChange={(e) => void updateStatus(record, e.target.value as Status)} style={{ ...inp, padding: "6px 8px", fontSize: 12, borderColor: tone.fg, color: tone.fg, flex: 1 }}>
+                        <option value="pending">Pending</option>
+                        <option value="partial">Partial</option>
+                        <option value="paid">Paid</option>
+                        <option value="waived">Waived</option>
+                      </select>
+                      <button
+                        onClick={() => {
+                          setEditMonth(record.month);
+                          setEditInr(record.remittanceInr.toString());
+                          setEditRate(record.fxRate.toString());
+                          setEditNote(record.note);
+                          setEditStatus(record.status);
+                        }}
+                        disabled={record.isLocked}
+                        style={{ ...btn, padding: "6px 12px", fontSize: 11, color: V.muted }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 0.9fr 0.7fr 0.9fr 1fr 120px 80px", gap: 8, padding: "12px 16px", alignItems: "center" }}>
                     <div>
@@ -349,8 +399,8 @@ export default function RemittancePage() {
                     </div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: V.muted, textDecoration: record.status === "waived" ? "line-through" : "none" }}>₹{record.remittanceInr.toLocaleString()}</div>
                     <div style={{ fontSize: 12, color: V.faint }}>÷{record.fxRate}</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: record.status === "paid" ? "#16a34a" : V.accent, textDecoration: record.status === "waived" ? "line-through" : "none" }}>AED {record.remittanceAed.toFixed(0)}</div>
-                    <div style={{ fontSize: 12, color: varianceInr === 0 ? V.faint : varianceInr > 0 ? "#ef4444" : "#16a34a" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: record.status === "paid" ? V.pos : V.accent, textDecoration: record.status === "waived" ? "line-through" : "none" }}>AED {record.remittanceAed.toFixed(0)}</div>
+                    <div style={{ fontSize: 12, color: varianceInr === 0 ? V.faint : varianceInr > 0 ? V.neg : V.pos }}>
                       {varianceInr > 0 ? "+" : ""}{varianceInr.toFixed(0)} INR<br />
                       <span style={{ fontSize: 11, color: V.faint }}>{varianceAed > 0 ? "+" : ""}AED {varianceAed.toFixed(0)}</span>
                     </div>
@@ -381,7 +431,7 @@ export default function RemittancePage() {
         </div>
       </div>
 
-      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: "#16a34a", border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>{toast}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: V.pos, border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>{toast}</div>}
     </div>
   );
 }

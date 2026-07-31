@@ -6,6 +6,7 @@ import Link from "next/link";
 import { nowDubai, todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type BottleType = "Bottle" | "Decant" | "Sample";
 type BottleStatus = "Wardrobe" | "Archive";
@@ -174,6 +175,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
   const supabase = createClient();
   const router = useRouter();
   const isDark = useDarkMode();
+  const isMobile = useIsMobile();
 
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState("");
@@ -545,6 +547,14 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
     faint: isDark ? "#5c6375" : "#9ca3af",
     inputBg: isDark ? "#1e2130" : "#f9fafb",
     accent: "#ec4899",
+    pos: "var(--positive)",
+    posSoft: "var(--positive-soft)",
+    neg: "var(--negative)",
+    negSoft: "var(--negative-soft)",
+    warn: "var(--warning)",
+    warnSoft: "var(--warning-soft)",
+    gold: "var(--gold)",
+    goldSoft: "var(--gold-soft)",
   };
 
   if (loading) {
@@ -578,7 +588,8 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
   const valueStyle = { fontSize: 14, fontWeight: 600, color: V.text };
   const inputStyle = {
     width: "100%",
-    padding: "9px 12px",
+    padding: isMobile ? "10px 12px" : "9px 12px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 8,
     border: `1px solid ${V.border}`,
     background: V.inputBg,
@@ -588,7 +599,8 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
     boxSizing: "border-box" as const,
   };
   const btnStyle = {
-    padding: "8px 16px",
+    padding: isMobile ? "10px 16px" : "8px 16px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 10,
     border: `1px solid ${V.border}`,
     background: V.card,
@@ -598,7 +610,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
     fontWeight: 600,
   };
   const primaryBtnStyle = { ...btnStyle, background: V.accent, border: "none", color: "#fff", fontWeight: 700 };
-  const dangerBtnStyle = { ...btnStyle, borderColor: "rgba(239,68,68,0.4)", color: "#ef4444" };
+  const dangerBtnStyle = { ...btnStyle, borderColor: "rgba(239,68,68,0.4)", color: V.neg };
 
   function bottlePurchaseFor(id: string) {
     return purchases.find((p) => p.bottleId === id);
@@ -676,8 +688,8 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       <div style={{ maxWidth: 920, margin: "0 auto", padding: "28px 20px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 24, marginBottom: 28, alignItems: "start" }}>
-          <div>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "240px 1fr", gap: 24, marginBottom: 28, alignItems: "start" }}>
+          <div style={{ width: isMobile ? "min(220px,100%)" : "100%", margin: isMobile ? "0 auto" : undefined }}>
             {item.imageUrl ? (
               <img src={item.imageUrl} alt="" style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 16, border: `1px solid ${V.border}` }} />
             ) : (
@@ -772,14 +784,14 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
               const editing = editingBottleId === bottle.id && !!draft;
               return (
                 <div key={bottle.id} style={{ border: `1px solid ${V.border}`, borderRadius: 12, padding: 14, background: V.inputBg }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                    <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: isMobile ? "100%" : undefined }}>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
                         <span style={{ fontSize: 12, fontWeight: 800, padding: "4px 10px", borderRadius: 999, background: bottle.status === "Wardrobe" ? "rgba(245,166,35,0.12)" : "rgba(107,114,128,0.12)", color: bottle.status === "Wardrobe" ? "#d97706" : "#6b7280" }}>{bottle.status}</span>
                         {!editing ? (
                           <span style={{ fontSize: 14, fontWeight: 700 }}>{bottle.bottleType} · {bottle.bottleSizeMl} ml</span>
                         ) : (
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, width: "100%", maxWidth: 380 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10, width: "100%", maxWidth: 380 }}>
                             <select style={inputStyle} value={draft.bottleType} onChange={(e) => setBottleDrafts((prev) => ({ ...prev, [bottle.id]: { ...prev[bottle.id], bottleType: e.target.value as BottleType } }))}>
                               <option>Bottle</option>
                               <option>Decant</option>
@@ -795,7 +807,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
                         <div style={{ gridColumn: "1/-1" }}><span style={labelStyle}>Shop</span>{editing ? <input style={inputStyle} value={draft.shopCombined} onChange={(e) => setBottleDrafts((prev) => ({ ...prev, [bottle.id]: { ...prev[bottle.id], shopCombined: e.target.value } }))} placeholder="Shop name" /> : <div style={valueStyle}>{purchase ? joinShop(purchase.shopName) : "—"}</div>}</div>
                       </div>
                     </div>
-                    <div style={{ display: "grid", gap: 8, minWidth: 128 }}>
+                    <div style={{ display: isMobile ? "flex" : "grid", flexWrap: isMobile ? "wrap" : undefined, gap: 8, minWidth: isMobile ? undefined : 128, width: isMobile ? "100%" : undefined }}>
                       {!editing ? (
                         <button style={btnStyle} onClick={() => openBottleEdit(bottle)}>Edit</button>
                       ) : (
@@ -843,7 +855,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
               <div style={{ fontSize: 18, fontWeight: 800 }}>Add bottle</div>
               <div style={{ fontSize: 12, color: V.muted }}>One purchase creates one bottle. Sensible data modeling, rare but beautiful.</div>
             </div>
-            <div style={{ padding: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ padding: 20, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
               <label><span style={labelStyle}>Bottle type</span><select style={inputStyle} value={newBottle.bottleType} onChange={(e) => setNewBottle((p) => ({ ...p, bottleType: e.target.value as BottleType }))}><option>Bottle</option><option>Decant</option><option>Sample</option></select></label>
               <label><span style={labelStyle}>Size (ml)</span><input style={inputStyle} value={newBottle.sizeMl} onChange={(e) => setNewBottle((p) => ({ ...p, sizeMl: e.target.value }))} /></label>
               <label><span style={labelStyle}>Bottle price (AED)</span><input style={inputStyle} type="number" value={newBottle.price} onChange={(e) => setNewBottle((p) => ({ ...p, price: e.target.value }))} placeholder="0" /></label>
@@ -859,7 +871,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "grid", placeItems: "center", padding: 16 }}>
           <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, padding: 20, width: "min(520px,100%)" }}>
             <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 12 }}>Log a wear</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
               <label><span style={labelStyle}>Date</span><input style={inputStyle} type="date" value={wearForm.wornOn} onChange={(e) => setWearForm((f) => ({ ...f, wornOn: e.target.value }))} /></label>
               <label><span style={labelStyle}>Occasion</span><select style={inputStyle} value={wearForm.occasion} onChange={(e) => setWearForm((f) => ({ ...f, occasion: e.target.value }))}>{OCCASION_OPTIONS.map((opt) => <option key={opt}>{opt}</option>)}</select></label>
               <label><span style={labelStyle}>Sprays</span><input style={inputStyle} value={wearForm.sprays} onChange={(e) => setWearForm((f) => ({ ...f, sprays: e.target.value }))} /></label>
@@ -924,7 +936,7 @@ export default function PerfumeDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: "#16a34a", border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, zIndex: 200 }}>{toast}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: V.pos, border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, zIndex: 200 }}>{toast}</div>}
     </div>
   );
 }

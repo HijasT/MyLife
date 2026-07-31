@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type Category = "Food" | "Clothing" | "Household" | "Electronics" | "Other";
 type SpecialCategory = "Aromatica";
@@ -58,11 +59,11 @@ function daysUntilExpiry(d: string | null, tz: string = APP_TZ): number | null {
 
 function expiryColor(days: number | null): string {
   if (days === null) return "";
-  if (days < 0) return "#ef4444";
-  if (days <= 3) return "#ef4444";
-  if (days <= 7) return "#f59e0b";
+  if (days < 0) return "var(--negative)";
+  if (days <= 3) return "var(--negative)";
+  if (days <= 7) return "var(--warning)";
   if (days <= 30) return "#eab308";
-  return "#16a34a";
+  return "var(--positive)";
 }
 
 function expiryLabel(days: number | null): string {
@@ -98,6 +99,7 @@ export default function InventoryPage() {
     typeof document !== "undefined" &&
       document.documentElement.classList.contains("dark")
   );
+  const isMobile = useIsMobile();
   useEffect(() => {
     if (typeof document === "undefined") return;
     const read = () => setIsDark(document.documentElement.classList.contains("dark"));
@@ -228,10 +230,14 @@ export default function InventoryPage() {
     faint: isDark ? "#5c6375" : "#9ca3af",
     input: isDark ? "#1e2130" : "#f9fafb",
     accent:"#f59e0b",
+    pos: "var(--positive)", posSoft: "var(--positive-soft)",
+    neg: "var(--negative)", negSoft: "var(--negative-soft)",
+    warn: "var(--warning)", warnSoft: "var(--warning-soft)",
+    gold: "var(--gold)", goldSoft: "var(--gold-soft)",
   };
-  const btn = { padding:"8px 14px", borderRadius:10, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:13, fontWeight:600 } as const;
+  const btn = { padding: isMobile ? "10px 16px" : "8px 14px", minHeight: isMobile ? 40 : undefined, borderRadius:10, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:13, fontWeight:600 } as const;
   const btnP = { ...btn, background:V.accent, border:"none", color:"#fff", fontWeight:700 } as const;
-  const inp = { padding:"8px 12px", borderRadius:8, border:`1px solid ${V.border}`, background:V.input, color:V.text, fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" as const };
+  const inp = { padding: isMobile ? "10px 12px" : "8px 12px", minHeight: isMobile ? 40 : undefined, borderRadius:8, border:`1px solid ${V.border}`, background:V.input, color:V.text, fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" as const };
   const lbl = { display:"flex" as const, flexDirection:"column" as const, gap:5, fontSize:12, fontWeight:700, color:V.faint, textTransform:"uppercase" as const, letterSpacing:"0.06em" };
 
   if (loading) return <div style={{ minHeight:"60vh", display:"flex", alignItems:"center", justifyContent:"center", background:V.bg }}><div style={{ width:28, height:28, border:`2.5px solid ${V.accent}`, borderTopColor:"transparent", borderRadius:"50%", animation:"spin 0.7s linear infinite" }}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
@@ -254,12 +260,12 @@ export default function InventoryPage() {
       {/* Alert stats */}
       <div style={{ padding:"12px 24px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))", gap:10 }}>
         {[
-          { label:"Total items", value:stats.total, color:V.muted },
-          { label:"Expiring soon", value:stats.expiring, color:"#f59e0b", alert: stats.expiring > 0 },
-          { label:"Expired", value:stats.expired, color:"#ef4444", alert: stats.expired > 0 },
-          { label:"Running low", value:stats.low, color:"#6366f1", alert: stats.low > 0 },
+          { label:"Total items", value:stats.total, color:V.muted, soft:V.border },
+          { label:"Expiring soon", value:stats.expiring, color:V.warn, soft:V.warnSoft, alert: stats.expiring > 0 },
+          { label:"Expired", value:stats.expired, color:V.neg, soft:V.negSoft, alert: stats.expired > 0 },
+          { label:"Running low", value:stats.low, color:"#6366f1", soft:"rgba(99,102,241,0.18)", alert: stats.low > 0 },
         ].map(s => (
-          <div key={s.label} style={{ background:V.card, border:`1px solid ${s.alert ? s.color + "44" : V.border}`, borderRadius:12, padding:"11px 14px" }}>
+          <div key={s.label} style={{ background:V.card, border:`1px solid ${s.alert ? s.soft : V.border}`, borderRadius:12, padding:"11px 14px" }}>
             <div style={{ fontSize:10, fontWeight:700, color:V.faint, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>{s.label}</div>
             <div style={{ fontSize:20, fontWeight:800, color:s.color }}>{s.value}</div>
           </div>
@@ -346,7 +352,7 @@ export default function InventoryPage() {
               <div style={{ fontSize:18, fontWeight:800 }}>Add inventory item</div>
               <button style={btn} onClick={() => setShowAdd(false)}>✕</button>
             </div>
-            <div style={{ padding:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+            <div style={{ padding:20, display:"grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap:14 }}>
 
               {/* Category selector */}
               <div style={{ gridColumn:"1/-1" }}>
@@ -430,7 +436,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {toast && <div style={{ position:"fixed", bottom:20, right:16, background:isDark?"#1a3a2a":"#f0fdf4", color:"#16a34a", border:"1px solid rgba(22,163,74,0.3)", padding:"12px 18px", borderRadius:12, fontSize:13, fontWeight:700, boxShadow:"0 8px 24px rgba(0,0,0,0.2)", zIndex:200 }}>{toast}</div>}
+      {toast && <div style={{ position:"fixed", bottom:20, right:16, background:isDark?"#1a3a2a":"#f0fdf4", color:V.pos, border:"1px solid rgba(22,163,74,0.3)", padding:"12px 18px", borderRadius:12, fontSize:13, fontWeight:700, boxShadow:"0 8px 24px rgba(0,0,0,0.2)", zIndex:200 }}>{toast}</div>}
     </div>
   );
 }
@@ -449,10 +455,11 @@ function ItemGrid({ items, V, btn, router, onToggle, onQty, timezone }: {
         const m = CAT_META[item.category];
         const days = daysUntilExpiry(item.expiryDate, timezone);
         const expColor = expiryColor(days);
+        const expSoftColor = days !== null && days <= 3 ? V.negSoft : days !== null && days <= 7 ? V.warnSoft : null;
         const isLow = item.lowThreshold !== null && item.quantity <= item.lowThreshold;
         return (
           <div key={item.id}
-            style={{ background:V.card, border:`1px solid ${days !== null && days <= 7 ? expColor + "66" : isLow ? "#6366f155" : V.border}`, borderRadius:14, overflow:"hidden", opacity: item.isFinished ? 0.5 : 1, transition:"all 0.15s" }}>
+            style={{ background:V.card, border:`1px solid ${expSoftColor ?? (isLow ? "#6366f155" : V.border)}`, borderRadius:14, overflow:"hidden", opacity: item.isFinished ? 0.5 : 1, transition:"all 0.15s" }}>
             {/* Image or icon */}
             {item.imageUrl ? (
               <img src={item.imageUrl} alt="" style={{ width:"100%", height:120, objectFit:"cover", display:"block" }} />
@@ -489,7 +496,7 @@ function ItemGrid({ items, V, btn, router, onToggle, onQty, timezone }: {
                   {isLow && <span style={{ fontSize:10, fontWeight:700, color:"#6366f1" }}>Low!</span>}
                 </div>
                 <button onClick={() => onToggle(item)}
-                  style={{ ...btn, padding:"4px 9px", fontSize:11, color: item.isFinished ? "#16a34a" : V.faint }}>
+                  style={{ ...btn, padding:"4px 9px", fontSize:11, color: item.isFinished ? V.pos : V.faint }}>
                   {item.isFinished ? "✓ Done" : "Finish"}
                 </button>
               </div>

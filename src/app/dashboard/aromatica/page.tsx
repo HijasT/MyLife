@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { saveToCache, loadFromCache, markSynced } from "@/hooks/useSyncStatus";
 import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type TabKey = "wardrobe" | "wishlist" | "archive" | "purchases";
 type PerfumeStatus = "wardrobe" | "wishlist" | "archive";
@@ -151,6 +152,7 @@ export default function PerfumesPage() {
   });
 
   const isDark = useDarkMode();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     async function load() {
@@ -347,11 +349,19 @@ export default function PerfumesPage() {
     faint:  isDark ? "#5c6375"  : "#9ca3af",
     input:  isDark ? "#1e2130"  : "#f9fafb",
     accent: "#ec4899",
+    pos:     "var(--positive)",
+    posSoft: "var(--positive-soft)",
+    neg:     "var(--negative)",
+    negSoft: "var(--negative-soft)",
+    warn:     "var(--warning)",
+    warnSoft: "var(--warning-soft)",
+    gold:     "var(--gold)",
+    goldSoft: "var(--gold-soft)",
   };
 
-  const btn   = { padding:"8px 14px", borderRadius:10, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:13, fontWeight:600 } as const;
+  const btn   = { padding: isMobile ? "10px 16px" : "8px 14px", minHeight: isMobile ? 40 : undefined, borderRadius:10, border:`1px solid ${V.border}`, background:V.card, color:V.text, cursor:"pointer", fontSize:13, fontWeight:600 } as const;
   const btnPrimary = { ...btn, background:V.accent, border:"none", color:"#fff", fontWeight:700 } as const;
-  const inputSt = { width:"100%", padding:"9px 12px", borderRadius:8, border:`1px solid ${V.border}`, background:V.input, color:V.text, fontSize:13, outline:"none", boxSizing:"border-box" as const };
+  const inputSt = { width:"100%", padding: isMobile ? "10px 12px" : "9px 12px", minHeight: isMobile ? 40 : undefined, borderRadius:8, border:`1px solid ${V.border}`, background:V.input, color:V.text, fontSize:13, outline:"none", boxSizing:"border-box" as const };
 
   return (
     <div style={{ minHeight:"100vh", background:V.bg, color:V.text, fontFamily:"system-ui,sans-serif" }}>
@@ -384,7 +394,7 @@ export default function PerfumesPage() {
             {s.avg > 0 && <span style={{ color:V.muted }}>Avg bottle: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(s.avg)}</strong></span>}
             {activeTab === "wardrobe" && tabStats.wardrobeValue > 0 && <span style={{ color:V.muted }}>Wardrobe value: <strong style={{ color:V.text, fontWeight:700 }}>{fmtMoney(tabStats.wardrobeValue)}</strong></span>}
             {tabStats.newIds.size > 0 && activeTab === "wardrobe" && (
-              <span style={{ color:"#16a34a", fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter(id => {
+              <span style={{ color:V.pos, fontWeight:600 }}>🆕 {Array.from(tabStats.newIds).filter(id => {
                 const p = items.find(x => x.id === id);
                 return p && isWardrobeItem(p);
               }).length} added this month</span>
@@ -459,7 +469,7 @@ export default function PerfumesPage() {
                 <div><div style={{ fontSize:20, fontWeight:800 }}>{brandFocus}</div><div style={{ fontSize:12, color:V.muted }}>Brand overview</div></div>
                 <button style={btn} onClick={() => setBrandFocus(null)}>Close</button>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(4,minmax(0,1fr))", gap:10, marginBottom:14 }}>
+              <div style={{ display:"grid", gridTemplateColumns: isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(4,minmax(0,1fr))", gap:10, marginBottom:14 }}>
                 <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Perfumes</div><div style={{ fontSize:16, fontWeight:800 }}>{brandItems.length}</div></div>
                 <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Wardrobe</div><div style={{ fontSize:16, fontWeight:800 }}>{brandItems.filter(isWardrobeItem).length}</div></div>
                 <div style={{ background:V.input, border:`1px solid ${V.border}`, borderRadius:12, padding:10 }}><div style={{ fontSize:10, color:V.faint, textTransform:"uppercase", fontWeight:800 }}>Avg rating</div><div style={{ fontSize:16, fontWeight:800 }}>{avgRating ? avgRating.toFixed(1) : "—"}</div></div>
@@ -524,8 +534,8 @@ export default function PerfumesPage() {
                         <div style={{ fontSize:13, fontWeight:700, marginBottom:6, lineHeight:1.3 }}>{item.model}</div>
                         <div style={{ marginBottom:5 }}><Stars value={item.ratingStars} size={11} /></div>
                         <div style={{ display:"flex", gap:3, flexWrap:"wrap", alignItems:"center" }}>
-                          {tabStats.newIds.has(item.id) && <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:999, background:"rgba(22,163,74,0.12)", color:"#16a34a", textTransform:"uppercase", letterSpacing:"0.06em" }}>New</span>}
-                          {isMixed && <span style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:999, background:"rgba(245,166,35,0.12)", color:"#d97706" }}>Mixed</span>}
+                          {tabStats.newIds.has(item.id) && <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:999, background:V.posSoft, color:V.pos, textTransform:"uppercase", letterSpacing:"0.06em" }}>New</span>}
+                          {isMixed && <span style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:999, background:V.warnSoft, color:V.warn }}>Mixed</span>}
                           {item.weatherTags.slice(0,2).map(w => (
                             <span key={w} style={{ fontSize:9, fontWeight:700, padding:"1px 6px", borderRadius:999, background:"rgba(99,102,241,0.1)", color:"#6366f1" }}>{w}</span>
                           ))}
@@ -556,18 +566,38 @@ export default function PerfumesPage() {
             </div>
           </div>
           <div style={{ background:V.card, border:`1px solid ${V.border}`, borderRadius:14, overflow:"hidden" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 0.6fr 0.8fr 1.2fr", gap:8, padding:"10px 16px", background:isDark?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.03)", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint }}>
-              <div>Perfume</div><div>Price</div><div>Date</div><div>Shop</div>
-            </div>
+            {!isMobile && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 0.6fr 0.8fr 1.2fr", gap:8, padding:"10px 16px", background:isDark?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.03)", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:"0.08em", color:V.faint }}>
+                <div>Perfume</div><div>Price</div><div>Date</div><div>Shop</div>
+              </div>
+            )}
             {purchaseHistory.length === 0 && <div style={{ padding:24, textAlign:"center", color:V.faint, fontSize:13 }}>No purchases yet.</div>}
             {purchaseHistory.slice(0, 50).map(p => {
               const perf = items.find(x => x.id === p.perfumeId);
+              const priceNode = p.price > 0 ? fmtMoney(p.price) : <span style={{ color:V.faint }}>Free</span>;
+              const shopNode = p.shopLink
+                ? <a href={p.shopLink} target="_blank" rel="noreferrer" style={{ color:V.accent, textDecoration:"none", fontWeight:600, fontSize:12 }}>{p.shopName}</a>
+                : <span style={{ color:V.muted, fontSize:12 }}>{p.shopName}</span>;
+              if (isMobile) {
+                return (
+                  <div key={p.id} style={{ padding:"12px 16px", borderTop:`1px solid ${V.border}`, display:"flex", flexDirection:"column", gap:6 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                      <button onClick={() => perf && router.push(`/dashboard/aromatica/${perf.id}`)} style={{ background:"none", border:"none", textAlign:"left", cursor:"pointer", padding:0, fontWeight:700, color:V.text, fontSize:14 }}>{perf ? `${perf.brand} ${perf.model}` : "Unknown"}</button>
+                      <div style={{ fontWeight:700, fontSize:14 }}>{priceNode}</div>
+                    </div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, fontSize:12, color:V.muted }}>
+                      <span>{p.date}</span>
+                      {shopNode}
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div key={p.id} style={{ display:"grid", gridTemplateColumns:"1fr 0.6fr 0.8fr 1.2fr", gap:8, padding:"11px 16px", borderTop:`1px solid ${V.border}`, fontSize:13, alignItems:"center" }}>
                   <button onClick={() => perf && router.push(`/dashboard/aromatica/${perf.id}`)} style={{ background:"none", border:"none", textAlign:"left", cursor:"pointer", padding:0, fontWeight:700, color:V.text, fontSize:13 }}>{perf ? `${perf.brand} ${perf.model}` : "Unknown"}</button>
-                  <div style={{ fontWeight:700 }}>{p.price > 0 ? fmtMoney(p.price) : <span style={{ color:V.faint }}>Free</span>}</div>
+                  <div style={{ fontWeight:700 }}>{priceNode}</div>
                   <div style={{ color:V.muted, fontSize:12 }}>{p.date}</div>
-                  <div>{p.shopLink ? <a href={p.shopLink} target="_blank" rel="noreferrer" style={{ color:V.accent, textDecoration:"none", fontWeight:600, fontSize:12 }}>{p.shopName}</a> : <span style={{ color:V.muted, fontSize:12 }}>{p.shopName}</span>}</div>
+                  <div>{shopNode}</div>
                 </div>
               );
             })}
@@ -586,7 +616,7 @@ export default function PerfumesPage() {
               </div>
               <button style={btn} onClick={() => setShowAdd(false)}>✕</button>
             </div>
-            <div style={{ padding:20, display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+            <div style={{ padding:20, display:"grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap:14 }}>
               <label style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, fontWeight:700, color:V.muted, textTransform:"uppercase", letterSpacing:"0.06em" }}>
                 Collection
                 <select style={inputSt} value={af.status} onChange={e => setAf(f => ({ ...f, status: e.target.value as PerfumeStatus }))}>
