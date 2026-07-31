@@ -1535,6 +1535,8 @@ export default function CalendarPage() {
                     onClick={() => setSelectedDate(isSel ? null : dateStr)}
                     style={{
                       minHeight: isMobile ? 66 : 92,
+                      minWidth: 0,
+                      overflow: "hidden",
                       borderRadius: 12,
                       border: `1px solid ${isSel ? V.accent : isToday ? V.accentSoft : V.border}`,
                       background: isToday || isSel ? V.accentSoft : V.card,
@@ -1706,6 +1708,8 @@ export default function CalendarPage() {
                     padding: isMobile ? "6px 4px" : "10px 10px",
                     cursor: "pointer",
                     minHeight: isMobile ? 92 : 120,
+                    minWidth: 0,
+                    overflow: "hidden",
                   }}
                 >
                   <div style={{ marginBottom: 6 }}>
