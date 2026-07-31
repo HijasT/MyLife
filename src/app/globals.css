@@ -99,7 +99,13 @@ body {
 }
 
 .page-enter {
-  animation: fadeUp 0.25s ease forwards;
+  /* No `forwards`: a lingering `transform` after the animation ends creates a
+     new containing block for `position: fixed` descendants (e.g. modals),
+     trapping them at the scroll offset instead of the viewport. Without
+     `forwards` the transform clears once the animation finishes, and the
+     element already matches the `to` keyframe's resting state (opacity 1,
+     no transform) by default. */
+  animation: fadeUp 0.25s ease;
 }
 
 /* Pulse */

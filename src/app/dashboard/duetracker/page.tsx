@@ -384,6 +384,9 @@ export default function DueTrackerPage() {
   const [isDark, setIsDark] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [remittanceEditMode, setRemittanceEditMode] = useState(false);
+  const [remittanceInrDraft, setRemittanceInrDraft] = useState("");
+  const [remittanceRateDraft, setRemittanceRateDraft] = useState("");
+  const [fxRateDrafts, setFxRateDrafts] = useState<Record<string, string>>({});
   const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
@@ -440,13 +443,19 @@ export default function DueTrackerPage() {
 
       const tz = await getUserTimezone(supabase, user.id);
       setTimezone(tz);
-      const realMonth = nowMonth(tz);
+      let realMonth = nowMonth(tz);
+
+      // If the current real-world month is already locked (fully paid off),
+      // open straight into next month instead of a done-and-dusted view.
+      const currentLocked = await loadAll(user.id, realMonth);
+      if (currentLocked) realMonth = nextMonth(realMonth);
+
       if (realMonth !== month) {
         setMonth(realMonth);
         setSettings((s) => ({ ...s, month: realMonth }));
       }
+      if (currentLocked) await loadAll(user.id, realMonth);
 
-      await loadAll(user.id, realMonth);
       const created = await autoCreateMonthEntries(user.id, realMonth);
       if (created) await loadAll(user.id, realMonth);
       setLoading(false);
@@ -503,6 +512,7 @@ export default function DueTrackerPage() {
           },
     );
     markSynced();
+    return s?.is_locked ?? false;
   }
 
   async function changeMonth(next: string) {
@@ -928,10 +938,11 @@ export default function DueTrackerPage() {
   }
 
   async function toggleMonthLock(force?: boolean) {
-    if (!userId) return;
+    if (!userId) return false;
     const nextLocked = typeof force === "boolean" ? force : !settings.isLocked;
     const ok = await persistMonthSettings({ isLocked: nextLocked });
     if (ok) showToast(nextLocked ? "Month locked" : "Month unlocked");
+    return ok;
   }
 
   const visibleItems = useMemo(() => (showHidden ? items : items.filter((item) => !item.isHidden)), [items, showHidden]);
@@ -946,10 +957,38 @@ export default function DueTrackerPage() {
     return dueSettled && (!needsRemittance || remittanceSettled);
   }, [items, entries, settings.remittanceInr, settings.remittanceStatus]);
 
+  // Per-group auto-collapse: once every due in a group is settled (and, for
+  // the remittance group, the remittance itself), fold that group away so a
+  // fully-paid month visually shrinks down to nothing. Only ever adds groups
+  // to the collapsed set — never fights a manual re-expand.
+  useEffect(() => {
+    if (loading) return;
+    const needsRemittance = (settings.remittanceInr ?? 0) > 0;
+    const settledGroups = settings.groups.filter((g) => {
+      const groupItems = items.filter((item) => item.group === g);
+      if (groupItems.length === 0) return false;
+      const dueSettled = groupItems.every((item) => isSettled(getEntry(item.id)?.status ?? "pending"));
+      const remittanceOk = g !== settings.remittanceGroup || !needsRemittance || remittanceSettled;
+      return dueSettled && remittanceOk;
+    });
+    if (settledGroups.every((g) => collapsedGroups.has(g))) return;
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      for (const g of settledGroups) next.add(g);
+      try {
+        localStorage.setItem("due_collapsed", JSON.stringify([...next]));
+      } catch {}
+      return next;
+    });
+  }, [items, entries, settings.groups, settings.remittanceGroup, settings.remittanceInr, remittanceSettled, loading]);
+
   useEffect(() => {
     if (!userId || loading) return;
     if (settings.isLocked || !allSettled) return;
-    void toggleMonthLock(true);
+    void (async () => {
+      const locked = await toggleMonthLock(true);
+      if (locked) await changeMonth(nextMonth(month));
+    })();
   }, [allSettled, userId, loading, settings.isLocked]);
 
   const today = todayDubai(timezone);
@@ -1146,7 +1185,11 @@ export default function DueTrackerPage() {
                   </button>
                   <button
                     style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", borderTop: `1px solid ${V.border}`, color: V.text, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-                    onClick={() => { setShowSettings(true); setShowOverflow(false); }}
+                    onClick={() => {
+                      setFxRateDrafts(Object.fromEntries(Object.entries(settings.fxRates).map(([k, v]) => [k, String(v)])));
+                      setShowSettings(true);
+                      setShowOverflow(false);
+                    }}
                   >
                     Settings
                   </button>
@@ -1327,9 +1370,9 @@ export default function DueTrackerPage() {
                       </div>
                       {remittanceEditMode && (
                         <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 120, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceInr ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceInr: parseNum(e.target.value) }))} placeholder="INR amount" />
+                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 120, padding: "5px 8px", fontSize: 12 }} value={remittanceInrDraft} onChange={(e) => { setRemittanceInrDraft(e.target.value); setSettings((p) => ({ ...p, remittanceInr: parseNum(e.target.value) })); }} placeholder="INR amount" />
                           <span style={{ fontSize: 11, color: V.faint }}>÷</span>
-                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 90, padding: "5px 8px", fontSize: 12 }} value={settings.remittanceRate ?? ""} onChange={(e) => setSettings((p) => ({ ...p, remittanceRate: parseNum(e.target.value) }))} placeholder="Rate" />
+                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 90, padding: "5px 8px", fontSize: 12 }} value={remittanceRateDraft} onChange={(e) => { setRemittanceRateDraft(e.target.value); setSettings((p) => ({ ...p, remittanceRate: parseNum(e.target.value) })); }} placeholder="Rate" />
                           <span style={{ fontSize: 11, color: V.faint }}>AED {remittanceAed.toFixed(0)}</span>
                         </div>
                       )}
@@ -1340,7 +1383,12 @@ export default function DueTrackerPage() {
                     <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                       <span style={{ fontSize: 14, fontWeight: 700, color: remittanceAed > 0 ? V.accent : V.faint, textDecoration: settings.remittanceStatus === "waived" ? "line-through" : "none" }}>AED {remittanceAed.toFixed(0)}</span>
                       <button onClick={() => router.push("/dashboard/duetracker/remittance")} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>History</button>
-                      <button disabled={settings.isLocked} onClick={() => void (remittanceEditMode ? saveRemittance() : Promise.resolve(setRemittanceEditMode(true)))} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: remittanceEditMode ? V.accent : V.muted, opacity: settings.isLocked ? 0.6 : 1 }}>{remittanceEditMode ? "Save" : "Edit"}</button>
+                      <button disabled={settings.isLocked} onClick={() => {
+                        if (remittanceEditMode) { void saveRemittance(); return; }
+                        setRemittanceInrDraft(settings.remittanceInr != null ? String(settings.remittanceInr) : "");
+                        setRemittanceRateDraft(settings.remittanceRate != null ? String(settings.remittanceRate) : "");
+                        setRemittanceEditMode(true);
+                      }} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: remittanceEditMode ? V.accent : V.muted, opacity: settings.isLocked ? 0.6 : 1 }}>{remittanceEditMode ? "Save" : "Edit"}</button>
                     </div>
                   </div>
                 </div>
@@ -1541,7 +1589,10 @@ export default function DueTrackerPage() {
                   <div key={cur} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, width: 40 }}>{cur}:</span>
                     <span style={{ fontSize: 13, color: V.faint }}>1 AED =</span>
-                    <input type="text" inputMode="decimal" style={{ ...inp, width: 90 }} value={settings.fxRates[cur] ?? ""} onChange={(e) => setSettings((p) => ({ ...p, fxRates: { ...p.fxRates, [cur]: Number(e.target.value) || 0 } }))} />
+                    <input type="text" inputMode="decimal" style={{ ...inp, width: 90 }} value={fxRateDrafts[cur] ?? String(settings.fxRates[cur] ?? "")} onChange={(e) => {
+                      setFxRateDrafts((d) => ({ ...d, [cur]: e.target.value }));
+                      setSettings((p) => ({ ...p, fxRates: { ...p.fxRates, [cur]: Number(e.target.value) || 0 } }));
+                    }} />
                     <span style={{ fontSize: 13, color: V.faint }}>{cur}</span>
                   </div>
                 ))}

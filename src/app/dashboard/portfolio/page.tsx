@@ -54,6 +54,7 @@ type ItemStats = {
 // pooled across every asset that has at least one transaction recorded
 // under that name.
 type BrokerStat = {
+  label: string; // display name — first-seen casing for this broker, case-insensitive key
   totalBoughtAed: number;
   totalSoldAed: number;
   investedAed: number; // remaining cost basis, i.e. "current investment"
@@ -388,7 +389,7 @@ export default function PortfolioPage() {
           // reduces the cost basis of the broker it was recorded under.
           const bySource: Record<
             string,
-            { totalUnits: number; costBasisAed: number; totalBoughtAed: number; totalSoldAed: number; realizedPlAed: number }
+            { label: string; totalUnits: number; costBasisAed: number; totalBoughtAed: number; totalSoldAed: number; realizedPlAed: number }
           > = {};
 
           for (const row of data as Array<{
@@ -402,10 +403,12 @@ export default function PortfolioPage() {
             const amountAed = Math.abs(
               toAed(Number(row.total_paid) || 0, row.currency as Currency)
             );
-            const src = (row.source ?? "").trim() || "Unspecified";
+            const rawSrc = (row.source ?? "").trim().replace(/\s+/g, " ") || "Unspecified";
+            // Group case-insensitively so "Liv" and "LIV" are the same broker.
+            const src = rawSrc.toLowerCase();
             const b =
               bySource[src] ??
-              (bySource[src] = { totalUnits: 0, costBasisAed: 0, totalBoughtAed: 0, totalSoldAed: 0, realizedPlAed: 0 });
+              (bySource[src] = { label: rawSrc, totalUnits: 0, costBasisAed: 0, totalBoughtAed: 0, totalSoldAed: 0, realizedPlAed: 0 });
 
             if (units >= 0) {
               totalUnits += units;
@@ -476,6 +479,7 @@ export default function PortfolioPage() {
             const acc =
               brokerAcc[src] ??
               (brokerAcc[src] = {
+                label: b.label,
                 totalBoughtAed: 0,
                 totalSoldAed: 0,
                 investedAed: 0,
@@ -1987,8 +1991,9 @@ export default function PortfolioPage() {
               Broker/platform field. */}
           {Object.keys(brokerStats).length > 0 && (() => {
             const rows = Object.entries(brokerStats)
-              .map(([name, b]) => ({
-                name,
+              .map(([key, b]) => ({
+                key,
+                name: b.label,
                 ...b,
                 pl: b.currentValueAed - b.investedAed,
               }))
@@ -2047,7 +2052,7 @@ export default function PortfolioPage() {
                     const up = row.pl >= 0;
                     return (
                       <div
-                        key={row.name}
+                        key={row.key}
                         style={{
                           display: "grid",
                           gridTemplateColumns: "1.3fr 1fr 1fr 1fr 1fr",
