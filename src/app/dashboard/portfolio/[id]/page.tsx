@@ -6,6 +6,7 @@ import Link from "next/link";
 import { nowDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue, alertsToTrigger } from "@/lib/portfolio";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type Currency = "AED" | "INR" | "USD" | "GBP" | "EUR";
 type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
@@ -242,6 +243,7 @@ export default function PortfolioItemPage() {
     typeof document !== "undefined" &&
       document.documentElement.classList.contains("dark")
   );
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -822,10 +824,19 @@ export default function PortfolioItemPage() {
       ? "0 1px 3px rgba(0,0,0,0.45)"
       : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)",
     shadowAccent: "0 4px 14px rgba(235,102,7,0.30)",
+    pos: "var(--positive)",
+    posSoft: "var(--positive-soft)",
+    neg: "var(--negative)",
+    negSoft: "var(--negative-soft)",
+    warn: "var(--warning)",
+    warnSoft: "var(--warning-soft)",
+    gold: "var(--gold)",
+    goldSoft: "var(--gold-soft)",
   };
 
   const btn = {
-    padding: "8px 14px",
+    padding: isMobile ? "10px 16px" : "8px 14px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 10,
     border: `1px solid ${V.border}`,
     background: V.card,
@@ -847,7 +858,8 @@ export default function PortfolioItemPage() {
   } as const;
 
   const inp = {
-    padding: "8px 12px",
+    padding: isMobile ? "10px 12px" : "8px 12px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 8,
     border: `1px solid ${V.border}`,
     background: V.input,
@@ -906,7 +918,7 @@ export default function PortfolioItemPage() {
   }
 
   const isUp = stats.pl !== null && stats.pl >= 0;
-  const plColor = isUp ? "#16a34a" : "#ef4444";
+  const plColor = isUp ? V.pos : V.neg;
 
   return (
     <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
@@ -917,7 +929,7 @@ export default function PortfolioItemPage() {
         </Link>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={{ ...btn, padding: "6px 12px", fontSize: 12, borderColor: "rgba(239,68,68,0.3)", color: "#ef4444" }} onClick={() => setShowDeleteConfirm("__item__")}>
+          <button style={{ ...btn, padding: "6px 12px", fontSize: 12, borderColor: "rgba(239,68,68,0.3)", color: V.neg }} onClick={() => setShowDeleteConfirm("__item__")}>
             Delete asset
           </button>
           <button style={{ ...btn, padding: "6px 12px", fontSize: 12 }} onClick={() => { setNewPrice(item.currentPrice?.toString() ?? ""); setShowUpdatePrice(true); }}>
@@ -952,7 +964,7 @@ export default function PortfolioItemPage() {
               {item.symbol}
             </span>
             {item.assetType === "gold" && (item.goldPurityKarat || item.weightGrams) && (
-              <span style={{ fontSize: 12, fontWeight: 800, padding: "3px 10px", borderRadius: 999, background: "rgba(255,215,0,0.15)", color: "#b8860b", border: "1px solid rgba(255,215,0,0.4)" }}>
+              <span style={{ fontSize: 12, fontWeight: 800, padding: "3px 10px", borderRadius: 999, background: V.goldSoft, color: V.gold, border: "1px solid rgba(255,215,0,0.4)" }}>
                 🥇 {item.goldPurityKarat ? `${item.goldPurityKarat}K` : ""}{item.goldPurityKarat && item.weightGrams ? " · " : ""}{item.weightGrams ? `${item.weightGrams}g` : ""}
               </span>
             )}
@@ -969,7 +981,7 @@ export default function PortfolioItemPage() {
             { label: "Current value", value: stats.currentValueAed !== null ? `AED ${fmtNum(stats.currentValueAed)}` : "No price", color: V.text },
             { label: "Unrealized P&L", value: stats.pl !== null ? fmtSignedAed(stats.pl) : "—", color: stats.pl !== null ? plColor : V.text },
             { label: "Unrealized P&L %", value: stats.plPct !== null ? `${stats.plPct >= 0 ? "+" : ""}${stats.plPct.toFixed(2)}%` : "—", color: stats.plPct !== null ? plColor : V.text },
-            { label: "Realized P&L", value: fmtSignedAed(stats.realizedPlAed), color: stats.realizedPlAed >= 0 ? "#16a34a" : "#ef4444" },
+            { label: "Realized P&L", value: fmtSignedAed(stats.realizedPlAed), color: stats.realizedPlAed >= 0 ? V.pos : V.neg },
             { label: `Avg cost/${item.unitLabel}`, value: `AED ${fmtNum(stats.avgUnitPrice)}`, color: V.muted },
           ].map((s) => (
             <div key={s.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 12, padding: "12px 15px", boxShadow: V.shadow }}>
@@ -981,7 +993,7 @@ export default function PortfolioItemPage() {
 
         <div style={{ ...section }}>
           <div style={sHead}>Price & alerts</div>
-          <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16 }}>
+          <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.2fr 1fr", gap: 16 }}>
             <div>
               {item.currentPrice ? (
                 <>
@@ -1043,11 +1055,11 @@ export default function PortfolioItemPage() {
                         <div style={{ fontSize: 13, fontWeight: 700 }}>
                           {a.alertType === "above" ? "Above" : "Below"} AED {fmtNum(a.targetPrice)}
                         </div>
-                        <div style={{ fontSize: 11, color: a.triggeredAt ? "#ef4444" : V.faint }}>
+                        <div style={{ fontSize: 11, color: a.triggeredAt ? V.neg : V.faint }}>
                           {a.triggeredAt ? `Triggered ${fmtDateTime(a.triggeredAt)}` : a.isActive ? "Active" : "Inactive"}
                         </div>
                       </div>
-                      <button onClick={() => deleteAlert(a.id)} style={{ ...btn, padding: "4px 8px", fontSize: 11, color: "#ef4444", borderColor: "rgba(239,68,68,0.3)" }}>
+                      <button onClick={() => deleteAlert(a.id)} style={{ ...btn, minHeight: undefined, padding: "4px 8px", fontSize: 11, color: V.neg, borderColor: "rgba(239,68,68,0.3)" }}>
                         Remove
                       </button>
                     </div>
@@ -1079,7 +1091,7 @@ export default function PortfolioItemPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                   <div>
                     <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: p.transactionType === "buy" ? "#16a34a" : "#ef4444", border: `1px solid ${p.transactionType === "buy" ? "rgba(22,163,74,0.25)" : "rgba(239,68,68,0.25)"}`, padding: "2px 8px", borderRadius: 999 }}>
+                      <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: p.transactionType === "buy" ? V.pos : V.neg, border: `1px solid ${p.transactionType === "buy" ? "rgba(22,163,74,0.25)" : "rgba(239,68,68,0.25)"}`, padding: "2px 8px", borderRadius: 999 }}>
                         {p.transactionType}
                       </span>
                       <span style={{ fontSize: 14, fontWeight: 700 }}>
@@ -1096,7 +1108,7 @@ export default function PortfolioItemPage() {
                     </div>
                   </div>
 
-                  <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                  <div style={{ textAlign: isMobile ? "left" : "right", width: isMobile ? "100%" : undefined, display: "flex", flexDirection: "column", gap: 4, alignItems: isMobile ? "flex-start" : "flex-end" }}>
                     <div style={{ fontSize: 14, fontWeight: 800 }}>
                       {p.transactionType === "sell" ? "Received" : "Paid"}: {p.currency} {fmtNum(p.totalPaid)}
                     </div>
@@ -1108,7 +1120,7 @@ export default function PortfolioItemPage() {
                     )}
 
                     {plAed !== null && (
-                      <div style={{ fontSize: 12, fontWeight: 700, color: isUpP ? "#16a34a" : "#ef4444", marginTop: 2 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: isUpP ? V.pos : V.neg, marginTop: 2 }}>
                         {row.plLabel}: {fmtSignedAed(plAed)}
                       </div>
                     )}
@@ -1129,14 +1141,14 @@ export default function PortfolioItemPage() {
                           });
                           setShowAdd(true);
                         }}
-                        style={{ padding: "3px 9px", borderRadius: 6, border: `1px solid ${V.border}`, background: V.card, color: V.muted, cursor: "pointer", fontSize: 11 }}
+                        style={{ padding: isMobile ? "6px 12px" : "3px 9px", borderRadius: 6, border: `1px solid ${V.border}`, background: V.card, color: V.muted, cursor: "pointer", fontSize: 11 }}
                       >
                         Edit
                       </button>
 
                       <button
                         onClick={() => setShowDeleteConfirm(p.id)}
-                        style={{ padding: "3px 9px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.3)", background: "transparent", color: "#ef4444", cursor: "pointer", fontSize: 11 }}
+                        style={{ padding: isMobile ? "6px 12px" : "3px 9px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.3)", background: "transparent", color: V.neg, cursor: "pointer", fontSize: 11 }}
                       >
                         Delete
                       </button>
@@ -1160,7 +1172,7 @@ export default function PortfolioItemPage() {
               <button style={btn} onClick={() => setShowAdd(false)}>✕</button>
             </div>
 
-            <div style={{ padding: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={{ padding: 20, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14 }}>
               <label style={{ ...lbl, gridColumn: "1/-1" }}>
                 Type
                 <select style={inp} value={af.transactionType} onChange={(e) => setAf((p) => ({ ...p, transactionType: e.target.value as TxType }))}>
@@ -1318,7 +1330,7 @@ export default function PortfolioItemPage() {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button style={btn} onClick={() => setShowDeleteConfirm(null)}>Cancel</button>
               <button
-                style={{ ...btn, borderColor: "rgba(239,68,68,0.4)", color: "#ef4444" }}
+                style={{ ...btn, borderColor: "rgba(239,68,68,0.4)", color: V.neg }}
                 onClick={async () => {
                   if (showDeleteConfirm === "__item__") {
                     await deleteItem();
@@ -1335,7 +1347,7 @@ export default function PortfolioItemPage() {
       )}
 
       {toast && (
-        <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: "#16a34a", border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>
+        <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: V.pos, border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>
           {toast}
         </div>
       )}

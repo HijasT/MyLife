@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 import { getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue, alertsToTrigger } from "@/lib/portfolio";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
 type Currency = "AED" | "INR" | "USD" | "GBP" | "EUR";
@@ -342,6 +343,7 @@ export default function PortfolioPage() {
     typeof document !== "undefined" &&
       document.documentElement.classList.contains("dark")
   );
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -1287,10 +1289,19 @@ export default function PortfolioPage() {
       ? "0 1px 3px rgba(0,0,0,0.45)"
       : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)",
     shadowAccent: "0 4px 14px rgba(235,102,7,0.30)",
+    pos: "var(--positive)",
+    posSoft: "var(--positive-soft)",
+    neg: "var(--negative)",
+    negSoft: "var(--negative-soft)",
+    warn: "var(--warning)",
+    warnSoft: "var(--warning-soft)",
+    gold: "var(--gold)",
+    goldSoft: "var(--gold-soft)",
   };
 
   const btn = {
-    padding: "8px 14px",
+    padding: isMobile ? "10px 16px" : "8px 14px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 10,
     border: `1px solid ${V.border}`,
     background: V.card,
@@ -1312,7 +1323,8 @@ export default function PortfolioPage() {
   } as const;
 
   const inp = {
-    padding: "8px 12px",
+    padding: isMobile ? "10px 12px" : "8px 12px",
+    minHeight: isMobile ? 40 : undefined,
     borderRadius: 8,
     border: `1px solid ${V.border}`,
     background: V.input,
@@ -1361,7 +1373,7 @@ export default function PortfolioPage() {
   }
 
   const isUp = totals.pl >= 0;
-  const plColor = isUp ? "#16a34a" : "#ef4444";
+  const plColor = isUp ? V.pos : V.neg;
 
   return (
     <div
@@ -1486,13 +1498,13 @@ export default function PortfolioPage() {
                 style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
               >
                 {!goldApiKey && (
-                  <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 600 }}>
+                  <span style={{ fontSize: 11, color: V.neg, fontWeight: 600 }}>
                     ⚠ Add goldapi.io key for reliable prices
                   </span>
                 )}
 
                 {goldApiKey && (
-                  <span style={{ fontSize: 11, color: "#16a34a", fontWeight: 600 }}>
+                  <span style={{ fontSize: 11, color: V.pos, fontWeight: 600 }}>
                     ✓ goldapi.io
                   </span>
                 )}
@@ -1584,25 +1596,27 @@ export default function PortfolioPage() {
               </div>
             )}
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr 0.7fr",
-                gap: 8,
-                padding: "8px 16px",
-                fontSize: 10,
-                fontWeight: 800,
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                color: V.faint,
-                borderBottom: `1px solid ${V.border}`,
-              }}
-            >
-              <div>Asset</div>
-              <div>Buy (Ask)</div>
-              <div>Sell (Bid)</div>
-              <div>Updated</div>
-            </div>
+            {!isMobile && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr 0.7fr",
+                  gap: 8,
+                  padding: "8px 16px",
+                  fontSize: 10,
+                  fontWeight: 800,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  color: V.faint,
+                  borderBottom: `1px solid ${V.border}`,
+                }}
+              >
+                <div>Asset</div>
+                <div>Buy (Ask)</div>
+                <div>Sell (Bid)</div>
+                <div>Updated</div>
+              </div>
+            )}
 
             {[
               { key: "XAU_OZ", label: "24K Gold", sub: "1 oz" },
@@ -1617,7 +1631,7 @@ export default function PortfolioPage() {
                   key={row.key}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr 1fr 0.7fr",
+                    gridTemplateColumns: isMobile ? "1.3fr 1fr 1fr" : "1fr 1fr 1fr 0.7fr",
                     gap: 8,
                     padding: "11px 16px",
                     borderBottom: `1px solid ${V.border}`,
@@ -1626,15 +1640,17 @@ export default function PortfolioPage() {
                 >
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700 }}>{row.label}</div>
-                    <div style={{ fontSize: 11, color: V.faint }}>{row.sub}</div>
+                    <div style={{ fontSize: 11, color: V.faint }}>
+                      {row.sub}{isMobile && row.sub ? " · " : ""}{isMobile && (p?.updated ?? "—")}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: "#16a34a" }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: V.pos }}>
                     {p ? `AED ${fmtN(p.ask)}` : <span style={{ color: V.faint }}>—</span>}
                   </div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#ef4444" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: V.neg }}>
                     {p ? `AED ${fmtN(p.bid)}` : <span style={{ color: V.faint }}>—</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: V.faint }}>{p?.updated ?? "—"}</div>
+                  {!isMobile && <div style={{ fontSize: 11, color: V.faint }}>{p?.updated ?? "—"}</div>}
                 </div>
               );
             })}
@@ -1843,7 +1859,7 @@ export default function PortfolioPage() {
                             {a.alertType === "above" ? "Above" : "Below"} AED {fmtN(a.targetPrice)}
                           </span>
                           {a.triggeredAt && (
-                            <span style={{ color: "#ef4444", fontWeight: 700, marginLeft: 6 }}>
+                            <span style={{ color: V.neg, fontWeight: 700, marginLeft: 6 }}>
                               ● Triggered
                             </span>
                           )}
@@ -2027,29 +2043,63 @@ export default function PortfolioPage() {
                     By broker / platform
                   </div>
 
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1.3fr 1fr 1fr 1fr 1fr",
-                      gap: 8,
-                      padding: "8px 16px",
-                      fontSize: 10,
-                      fontWeight: 800,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      color: V.faint,
-                      borderBottom: `1px solid ${V.border}`,
-                    }}
-                  >
-                    <div>Broker</div>
-                    <div>Total invested</div>
-                    <div>Total sold</div>
-                    <div>Current investment</div>
-                    <div>P&amp;L</div>
-                  </div>
+                  {!isMobile && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1.3fr 1fr 1fr 1fr 1fr",
+                        gap: 8,
+                        padding: "8px 16px",
+                        fontSize: 10,
+                        fontWeight: 800,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        color: V.faint,
+                        borderBottom: `1px solid ${V.border}`,
+                      }}
+                    >
+                      <div>Broker</div>
+                      <div>Total invested</div>
+                      <div>Total sold</div>
+                      <div>Current investment</div>
+                      <div>P&amp;L</div>
+                    </div>
+                  )}
 
                   {rows.map((row) => {
                     const up = row.pl >= 0;
+                    const plNode = (
+                      <>
+                        {fmtSignedAed(row.pl)}
+                        {row.hasUnknownPrice && (
+                          <span style={{ color: V.faint, fontWeight: 400 }}> *</span>
+                        )}
+                      </>
+                    );
+                    if (isMobile) {
+                      return (
+                        <div
+                          key={row.key}
+                          style={{
+                            padding: "12px 16px",
+                            borderBottom: `1px solid ${V.border}`,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{row.name}</div>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: up ? V.pos : V.neg }}>{plNode}</div>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, fontSize: 11, color: V.muted }}>
+                            <div>Invested<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalBoughtAed)}</strong></div>
+                            <div>Sold<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalSoldAed)}</strong></div>
+                            <div>Current<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.investedAed)}</strong></div>
+                          </div>
+                        </div>
+                      );
+                    }
                     return (
                       <div
                         key={row.key}
@@ -2067,12 +2117,7 @@ export default function PortfolioPage() {
                         <div style={{ color: V.muted }}>AED {fmtN(row.totalBoughtAed)}</div>
                         <div style={{ color: V.muted }}>AED {fmtN(row.totalSoldAed)}</div>
                         <div>AED {fmtN(row.investedAed)}</div>
-                        <div style={{ fontWeight: 700, color: up ? "#16a34a" : "#ef4444" }}>
-                          {fmtSignedAed(row.pl)}
-                          {row.hasUnknownPrice && (
-                            <span style={{ color: V.faint, fontWeight: 400 }}> *</span>
-                          )}
-                        </div>
+                        <div style={{ fontWeight: 700, color: up ? V.pos : V.neg }}>{plNode}</div>
                       </div>
                     );
                   })}
@@ -2230,8 +2275,8 @@ export default function PortfolioPage() {
                                     fontWeight: 800,
                                     padding: "2px 8px",
                                     borderRadius: 999,
-                                    background: "rgba(255,215,0,0.15)",
-                                    color: "#b8860b",
+                                    background: V.goldSoft,
+                                    color: V.gold,
                                     border: "1px solid rgba(255,215,0,0.3)",
                                   }}
                                 >
@@ -2265,7 +2310,7 @@ export default function PortfolioPage() {
                           </div>
                         </div>
 
-                        <div style={{ textAlign: "right" }}>
+                        <div style={{ textAlign: isMobile ? "left" : "right", width: isMobile ? "100%" : undefined }}>
                           <div style={{ fontSize: 16, fontWeight: 800, color: V.text }}>
                             {curVal !== null ? (
                               `AED ${fmtN(curVal)}`
@@ -2279,7 +2324,7 @@ export default function PortfolioPage() {
                               style={{
                                 fontSize: 13,
                                 fontWeight: 700,
-                                color: up ? "#16a34a" : "#ef4444",
+                                color: up ? V.pos : V.neg,
                                 marginTop: 2,
                               }}
                             >
@@ -2295,7 +2340,7 @@ export default function PortfolioPage() {
                           <div
                             style={{
                               display: "flex",
-                              justifyContent: "flex-end",
+                              justifyContent: isMobile ? "flex-start" : "flex-end",
                               gap: 6,
                               marginTop: 4,
                               flexWrap: "wrap",
@@ -2344,9 +2389,10 @@ export default function PortfolioPage() {
                               }}
                               style={{
                                 ...btn,
-                                padding: "3px 10px",
+                                padding: isMobile ? "6px 12px" : "3px 10px",
+                                minHeight: undefined,
                                 fontSize: 10,
-                                color: "#ef4444",
+                                color: V.neg,
                                 borderColor: "rgba(239,68,68,0.3)",
                               }}
                             >
@@ -2375,9 +2421,9 @@ export default function PortfolioPage() {
                               {itemPurchases[item.id].map(tx => {
                                 const isSell = tx.transactionType === "sell";
                                 return (
-                                  <div key={tx.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", borderRadius: 8, fontSize: 12 }}>
+                                  <div key={tx.id} style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 6 : 0, justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "center", padding: "8px 12px", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", borderRadius: 8, fontSize: 12 }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                      <span style={{ padding: "2px 8px", borderRadius: 999, background: isSell ? "rgba(239,68,68,0.12)" : "rgba(16,163,74,0.12)", color: isSell ? "#ef4444" : "#16a34a", fontWeight: 800, fontSize: 10 }}>
+                                      <span style={{ padding: "2px 8px", borderRadius: 999, background: isSell ? V.negSoft : V.posSoft, color: isSell ? V.neg : V.pos, fontWeight: 800, fontSize: 10 }}>
                                         {isSell ? "SELL" : "BUY"}
                                       </span>
                                       <div>
@@ -2390,7 +2436,7 @@ export default function PortfolioPage() {
                                         </div>
                                       </div>
                                     </div>
-                                    <div style={{ fontWeight: 700, color: isSell ? "#16a34a" : V.text }}>
+                                    <div style={{ fontWeight: 700, color: isSell ? V.pos : V.text, marginLeft: isMobile ? 46 : 0 }}>
                                       {isSell ? "+" : ""}{tx.currency} {fmtN(tx.totalPaid)}
                                     </div>
                                   </div>
@@ -2445,70 +2491,106 @@ export default function PortfolioPage() {
                 Recent transactions
               </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 0.6fr 0.7fr 0.8fr 0.8fr",
-                  gap: 8,
-                  padding: "8px 16px",
-                  fontSize: 10,
-                  fontWeight: 800,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: V.faint,
-                  borderBottom: `1px solid ${V.border}`,
-                }}
-              >
-                <div>Asset</div>
-                <div>Type</div>
-                <div>Units</div>
-                <div>Amount</div>
-                <div>Date</div>
-              </div>
-
-              {recent.map((p) => (
+              {!isMobile && (
                 <div
-                  key={p.id}
                   style={{
                     display: "grid",
                     gridTemplateColumns: "1fr 0.6fr 0.7fr 0.8fr 0.8fr",
                     gap: 8,
-                    padding: "10px 16px",
+                    padding: "8px 16px",
+                    fontSize: 10,
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: V.faint,
                     borderBottom: `1px solid ${V.border}`,
-                    fontSize: 13,
-                    alignItems: "center",
                   }}
                 >
-                  <div style={{ fontWeight: 700 }}>
-                    {p.itemName}{" "}
-                    <span style={{ fontSize: 11, color: V.faint }}>
-                      ({p.itemSymbol})
-                    </span>
-                  </div>
-                  <div>
-                    <span
+                  <div>Asset</div>
+                  <div>Type</div>
+                  <div>Units</div>
+                  <div>Amount</div>
+                  <div>Date</div>
+                </div>
+              )}
+
+              {recent.map((p) => {
+                const typeNode = (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      color: p.transactionType === "buy" ? V.pos : V.neg,
+                    }}
+                  >
+                    {p.transactionType}
+                  </span>
+                );
+                if (isMobile) {
+                  return (
+                    <div
+                      key={p.id}
                       style={{
-                        fontSize: 11,
-                        fontWeight: 800,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.08em",
-                        color:
-                          p.transactionType === "buy" ? "#16a34a" : "#ef4444",
+                        padding: "12px 16px",
+                        borderBottom: `1px solid ${V.border}`,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
                       }}
                     >
-                      {p.transactionType}
-                    </span>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>
+                          {p.itemName}{" "}
+                          <span style={{ fontSize: 11, color: V.faint, fontWeight: 400 }}>({p.itemSymbol})</span>
+                        </div>
+                        {typeNode}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: V.muted }}>
+                        <span>{fmtN(p.units, 4)} units</span>
+                        <span style={{ fontSize: 11, color: V.faint }}>
+                          {new Date(p.purchasedAt).toLocaleDateString("en-AE")}
+                        </span>
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>
+                        {p.transactionType === "sell" ? "Received: " : "Paid: "}
+                        {p.currency} {fmtN(p.totalPaid)}
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 0.6fr 0.7fr 0.8fr 0.8fr",
+                      gap: 8,
+                      padding: "10px 16px",
+                      borderBottom: `1px solid ${V.border}`,
+                      fontSize: 13,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>
+                      {p.itemName}{" "}
+                      <span style={{ fontSize: 11, color: V.faint }}>
+                        ({p.itemSymbol})
+                      </span>
+                    </div>
+                    <div>{typeNode}</div>
+                    <div style={{ color: V.muted }}>{fmtN(p.units, 4)}</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {p.transactionType === "sell" ? "Received: " : "Paid: "}
+                      {p.currency} {fmtN(p.totalPaid)}
+                    </div>
+                    <div style={{ fontSize: 11, color: V.faint }}>
+                      {new Date(p.purchasedAt).toLocaleDateString("en-AE")}
+                    </div>
                   </div>
-                  <div style={{ color: V.muted }}>{fmtN(p.units, 4)}</div>
-                  <div style={{ fontWeight: 700 }}>
-                    {p.transactionType === "sell" ? "Received: " : "Paid: "}
-                    {p.currency} {fmtN(p.totalPaid)}
-                  </div>
-                  <div style={{ fontSize: 11, color: V.faint }}>
-                    {new Date(p.purchasedAt).toLocaleDateString("en-AE")}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
 
               {recentHasMore && (
                 <div style={{ padding: "12px 16px", textAlign: "center" }}>
@@ -2568,7 +2650,7 @@ export default function PortfolioPage() {
               style={{
                 padding: 20,
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
                 gap: 14,
               }}
             >
@@ -2826,9 +2908,9 @@ export default function PortfolioPage() {
                     const computedRaw = Number(newPrice) * Number(editGoldWeight) * factor;
                     const computed = toAed(computedRaw, showUpdatePrice.mainCurrency);
                     return (
-                      <div style={{ marginTop: 14, padding: "10px 12px", background: "rgba(255,215,0,0.08)", borderRadius: 10, border: "1px solid rgba(255,215,0,0.3)", fontSize: 12 }}>
+                      <div style={{ marginTop: 14, padding: "10px 12px", background: V.goldSoft, borderRadius: 10, border: "1px solid rgba(255,215,0,0.3)", fontSize: 12 }}>
                         <div style={{ color: V.muted, marginBottom: 4 }}>Calculated current value:</div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "#FFD700" }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: V.gold }}>
                           AED {fmtN(computed)}
                         </div>
                         <div style={{ color: V.faint, fontSize: 10, marginTop: 4 }}>
@@ -2914,7 +2996,7 @@ export default function PortfolioPage() {
             bottom: 20,
             right: 16,
             background: isDark ? "#1a3a2a" : "#f0fdf4",
-            color: "#16a34a",
+            color: V.pos,
             border: "1px solid rgba(22,163,74,0.3)",
             padding: "12px 18px",
             borderRadius: 12,

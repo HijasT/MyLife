@@ -33,6 +33,18 @@
   --text-muted: #9CA3AF;
 
   --divider: #F0EDE8;
+
+  /* Semantic status colors — shared across modules so P&L/paid/overdue
+     styling doesn't get re-hardcoded per file. Positive/negative read the
+     same in both themes; only their soft/background tints differ. */
+  --positive: #16a34a;
+  --positive-soft: rgba(22,163,74,0.12);
+  --negative: #ef4444;
+  --negative-soft: rgba(239,68,68,0.10);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245,158,11,0.12);
+  --gold: #b8860b;
+  --gold-soft: rgba(255,215,0,0.12);
 }
 
 .dark {
@@ -46,6 +58,12 @@
   --text-muted: #5C6375;
 
   --divider: #272B35;
+
+  --positive-soft: rgba(22,163,74,0.16);
+  --negative-soft: rgba(239,68,68,0.14);
+  --warning-soft: rgba(245,158,11,0.16);
+  --gold: #FFD700;
+  --gold-soft: rgba(255,215,0,0.16);
 }
 
 * {
