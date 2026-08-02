@@ -2097,7 +2097,7 @@ export default function PortfolioPage() {
                       <div>Broker</div>
                       <div>Total invested</div>
                       <div>Total sold</div>
-                      <div>Current investment</div>
+                      <div>Remaining investment</div>
                       <div>P&amp;L</div>
                     </div>
                   )}
@@ -2131,7 +2131,7 @@ export default function PortfolioPage() {
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, fontSize: 11, color: V.muted }}>
                             <div>Invested<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalBoughtAed)}</strong></div>
                             <div>Sold<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalSoldAed)}</strong></div>
-                            <div>Current<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.investedAed)}</strong></div>
+                            <div>Remaining<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.investedAed)}</strong></div>
                           </div>
                         </div>
                       );
@@ -2160,7 +2160,7 @@ export default function PortfolioPage() {
 
                   {anyUnknownPrice && (
                     <div style={{ padding: "6px 16px 10px", fontSize: 10, color: V.faint }}>
-                      * current investment/P&amp;L excludes assets without a current price set
+                      * P&amp;L excludes assets without a current price set
                     </div>
                   )}
                 </div>
