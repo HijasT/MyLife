@@ -58,7 +58,7 @@ type BrokerStat = {
   label: string; // display name — first-seen casing for this broker, case-insensitive key
   totalBoughtAed: number;
   totalSoldAed: number;
-  investedAed: number; // remaining cost basis, i.e. "current investment"
+  remainingCostBasisAed: number; // true remaining cost basis of units still held — used for P&L
   currentValueAed: number;
   realizedPlAed: number;
   hasUnknownPrice: boolean; // true if currentValueAed excludes ≥1 item lacking a price
@@ -520,7 +520,7 @@ export default function PortfolioPage() {
                 label: b.label,
                 totalBoughtAed: 0,
                 totalSoldAed: 0,
-                investedAed: 0,
+                remainingCostBasisAed: 0,
                 currentValueAed: 0,
                 realizedPlAed: 0,
                 hasUnknownPrice: false,
@@ -528,7 +528,7 @@ export default function PortfolioPage() {
 
             acc.totalBoughtAed += b.totalBoughtAed;
             acc.totalSoldAed += b.totalSoldAed;
-            acc.investedAed += b.costBasisAed;
+            acc.remainingCostBasisAed += b.costBasisAed;
             acc.realizedPlAed += b.realizedPlAed;
             if (valueAed !== null) acc.currentValueAed += valueAed;
             else acc.hasUnknownPrice = true;
@@ -2047,9 +2047,10 @@ export default function PortfolioPage() {
                 key,
                 name: b.label,
                 ...b,
-                pl: b.currentValueAed - b.investedAed,
+                investedAed: b.totalBoughtAed - b.totalSoldAed,
+                pl: b.currentValueAed - b.remainingCostBasisAed,
               }))
-              .sort((a, b) => b.investedAed - a.investedAed);
+              .sort((a, b) => b.remainingCostBasisAed - a.remainingCostBasisAed);
 
             const anyUnknownPrice = rows.some((r) => r.hasUnknownPrice);
 
@@ -2097,7 +2098,7 @@ export default function PortfolioPage() {
                       <div>Broker</div>
                       <div>Total invested</div>
                       <div>Total sold</div>
-                      <div>Remaining investment</div>
+                      <div>Current investment</div>
                       <div>P&amp;L</div>
                     </div>
                   )}
@@ -2131,7 +2132,7 @@ export default function PortfolioPage() {
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, fontSize: 11, color: V.muted }}>
                             <div>Invested<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalBoughtAed)}</strong></div>
                             <div>Sold<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalSoldAed)}</strong></div>
-                            <div>Remaining<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.investedAed)}</strong></div>
+                            <div>Current<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.investedAed)}</strong></div>
                           </div>
                         </div>
                       );
