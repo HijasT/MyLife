@@ -23,8 +23,7 @@ type BackupModuleKey =
   | "duetracker"
   | "portfolio"
   | "calendar"
-  | "biomarkers"
-  | "inventory";
+  | "biomarkers";
 
 type JsonBackup = {
   app: "MyLife";
@@ -504,7 +503,6 @@ function BackupModal({
           portfolioAlertsRes,
           calendarRes,
           biomarkersRes,
-          inventoryRes,
         ] = await Promise.all([
           supabase
             .from("perfumes")
@@ -534,10 +532,6 @@ function BackupModal({
             .from("biomarker_results")
             .select("*", { count: "exact", head: true })
             .eq("user_id", user.id),
-          supabase
-            .from("inventory_items")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id),
         ]);
 
         setCounts({
@@ -549,7 +543,6 @@ function BackupModal({
             (portfolioAlertsRes.count ?? 0),
           calendar: calendarRes.count ?? 0,
           biomarkers: biomarkersRes.count ?? 0,
-          inventory: inventoryRes.count ?? 0,
         });
       } catch {
         setError("Failed to load export counts.");
@@ -633,17 +626,6 @@ function BackupModal({
           perfumes: perfumes ?? [],
           perfume_purchases: purchases ?? [],
           perfume_bottles: bottles ?? [],
-        };
-      }
-
-      if (selected.includes("inventory")) {
-        const { data: items } = await supabase
-          .from("inventory_items")
-          .select("*")
-          .eq("user_id", user.id);
-
-        backup.modules.inventory = {
-          inventory_items: items ?? [],
         };
       }
 
@@ -937,46 +919,6 @@ function BackupModal({
         parts.push("");
       }
 
-      if (selected.includes("inventory")) {
-        const items = (backup.modules.inventory?.inventory_items as any[]) ?? [];
-        parts.push(`=== inventory_items ===`);
-        parts.push(
-          [
-            "name",
-            "category",
-            "subcategory",
-            "location",
-            "quantity",
-            "unit",
-            "expiry_date",
-            "brand",
-            "is_finished",
-            "purchase_date",
-            "purchase_price",
-            "currency",
-          ].join(",")
-        );
-        items.forEach((r) => {
-          parts.push(
-            [
-              csvCell(r.name),
-              csvCell(r.category),
-              csvCell(r.subcategory),
-              csvCell(r.location),
-              csvCell(r.quantity),
-              csvCell(r.unit),
-              csvCell(r.expiry_date),
-              csvCell(r.brand),
-              csvCell(r.is_finished),
-              csvCell(r.purchase_date),
-              csvCell(r.purchase_price),
-              csvCell(r.currency),
-            ].join(",")
-          );
-        });
-        parts.push("");
-      }
-
       const blob = new Blob([parts.join("\n")], {
         type: "text/csv;charset=utf-8",
       });
@@ -1150,17 +1092,6 @@ function BackupModal({
                 onConflict: "id",
               });
           }
-        }
-      }
-
-      if (restoreSelected.includes("inventory")) {
-        const mod = restoreBackup.modules.inventory;
-        if (mod && Array.isArray(mod.inventory_items) && mod.inventory_items.length) {
-          await supabase
-            .from("inventory_items")
-            .upsert(sanitizeRows(mod.inventory_items, user.id), {
-              onConflict: "id",
-            });
         }
       }
 

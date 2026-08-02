@@ -226,8 +226,10 @@ function daysInMonth(y: number, m: number) {
   return new Date(y, m, 0).getDate();
 }
 
+// Monday-indexed (Mon=0 ... Sun=6) to match the week grid starting on Monday.
 function firstDayOfMonth(y: number, m: number) {
-  return new Date(Date.UTC(y, m - 1, 1, 12, 0, 0)).getUTCDay();
+  const sundayIndexed = new Date(Date.UTC(y, m - 1, 1, 12, 0, 0)).getUTCDay();
+  return (sundayIndexed + 6) % 7;
 }
 
 function fmtMonth(m: string, timezone: string) {
@@ -985,13 +987,13 @@ export default function CalendarPage() {
 
   const weekDates = useMemo(() => {
     const today = makeUtcDate(todayStr);
-    const dow = today.getUTCDay();
-    const sundayStart = new Date(today);
-    sundayStart.setUTCDate(today.getUTCDate() - dow + weekOffset * 7);
+    const mondayOffset = (today.getUTCDay() + 6) % 7; // Mon=0 ... Sun=6
+    const mondayStart = new Date(today);
+    mondayStart.setUTCDate(today.getUTCDate() - mondayOffset + weekOffset * 7);
 
     return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(sundayStart);
-      d.setUTCDate(sundayStart.getUTCDate() + i);
+      const d = new Date(mondayStart);
+      d.setUTCDate(mondayStart.getUTCDate() + i);
       return toYmdFromDate(d);
     });
   }, [weekOffset, todayStr]);
@@ -1495,7 +1497,7 @@ export default function CalendarPage() {
 
           <div style={{ padding: "12px 24px" }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", marginBottom: 4 }}>
-              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
                 <div
                   key={d}
                   style={{

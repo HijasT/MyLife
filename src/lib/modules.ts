@@ -7,7 +7,6 @@ export const MODULES: Module[] = [
   { id:"calendar",    label:"Calendar",       icon:"🗓️",  href:"/dashboard/calendar",    group:"lifestyle", status:"active",      description:"Work hours & life log",      color:"#6366f1" },
   { id:"biomarkers",  label:"BioMarkers",     icon:"🧬", href:"/dashboard/biomarkers",  group:"lifestyle", status:"active",      description:"Lab results & body metrics", color:"#10b981" },
   { id:"aromatica",   label:"Aromatica",      icon:"🌸", href:"/dashboard/aromatica",   group:"lifestyle", status:"active",      description:"Fragrance collection · Bottles · Wear logs", color:"#D85A30" },
-  { id:"inventory",   label:"Inventory",      icon:"📦", href:"/dashboard/inventory",   group:"lifestyle", status:"active", description:"Home · Food · Wardrobe",     color:"#10b981" },
 ];
 
 export const FINANCE_MODULES   = MODULES.filter(m => m.group === "finance");

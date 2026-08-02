@@ -431,14 +431,50 @@ export default function PortfolioPage() {
               totalSellsAed += amountAed;
               realizedPlAed += amountAed - costRemoved;
 
-              const bSellUnits = Math.min(Math.abs(units), b.totalUnits);
-              const bAvgCostBeforeSell = b.totalUnits > 0 ? b.costBasisAed / b.totalUnits : 0;
-              const bCostRemoved = bAvgCostBeforeSell * bSellUnits;
-
-              b.totalUnits = Math.max(0, b.totalUnits - bSellUnits);
-              b.costBasisAed = Math.max(0, b.costBasisAed - bCostRemoved);
+              // Broker-level: draw the sold units from the named bucket
+              // first. If that bucket doesn't hold enough recorded units to
+              // cover the sell — e.g. the sell's Broker/platform field wasn't
+              // spelled identically to the buys it's actually closing out —
+              // spread the shortfall across whichever other buckets still
+              // hold units, proportional to their share, using each bucket's
+              // own average cost. Previously the shortfall was left in the
+              // named bucket with no cost removed, which fabricated a large
+              // "profit" for that broker and left the real holder's cost
+              // basis never drawn down.
               b.totalSoldAed += amountAed;
-              b.realizedPlAed += amountAed - bCostRemoved;
+
+              let remainingSellUnits = sellUnits;
+              const ownRemove = Math.min(remainingSellUnits, b.totalUnits);
+              if (ownRemove > 0) {
+                const bAvgCost = b.totalUnits > 0 ? b.costBasisAed / b.totalUnits : 0;
+                const bCostRemoved = bAvgCost * ownRemove;
+                b.totalUnits = Math.max(0, b.totalUnits - ownRemove);
+                b.costBasisAed = Math.max(0, b.costBasisAed - bCostRemoved);
+                b.realizedPlAed += amountAed * (ownRemove / sellUnits) - bCostRemoved;
+                remainingSellUnits -= ownRemove;
+              }
+
+              if (remainingSellUnits > 1e-9) {
+                const otherBuckets = Object.values(bySource).filter(
+                  (other) => other !== b && other.totalUnits > 0
+                );
+                const otherUnitsTotal = otherBuckets.reduce((sum, o) => sum + o.totalUnits, 0);
+                if (otherUnitsTotal > 0) {
+                  for (const other of otherBuckets) {
+                    const share = other.totalUnits / otherUnitsTotal;
+                    const unitsFromOther = Math.min(other.totalUnits, remainingSellUnits * share);
+                    const otherAvgCost = other.totalUnits > 0 ? other.costBasisAed / other.totalUnits : 0;
+                    const otherCostRemoved = otherAvgCost * unitsFromOther;
+                    other.totalUnits = Math.max(0, other.totalUnits - unitsFromOther);
+                    other.costBasisAed = Math.max(0, other.costBasisAed - otherCostRemoved);
+                    other.realizedPlAed += amountAed * (unitsFromOther / sellUnits) - otherCostRemoved;
+                  }
+                }
+                // If no other bucket has recorded units either (every buy was
+                // logged under a different/typo'd source), there's nothing
+                // truthful left to attribute — leave it rather than inventing
+                // more profit.
+              }
             }
           }
 
