@@ -5,272 +5,45 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 import { getUserTimezone, APP_TZ } from "@/lib/timezone";
-import { FX_TO_AED, toAed, PURITY_FACTOR, calcCurrentValue, alertsToTrigger } from "@/lib/portfolio";
+import {
+  type AssetType,
+  type BrokerStat,
+  type Currency,
+  type ItemStats,
+  type PortfolioAlert,
+  type PortfolioItem,
+  type Purchase,
+  EMPTY_ITEM_STATS,
+  alertsToTrigger,
+  calcCurrentValue,
+  computeItemCostBasis,
+  dbToAlert,
+  dbToItem,
+  dbToPurchase,
+  fetchAllSpotPrices,
+  fetchLivePrice,
+  fetchPriceForLiveLink,
+  fmtN,
+  fmtSignedAed,
+} from "@/lib/portfolio";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { getTheme, styleKit } from "./_components/theme";
+import { Toast } from "./_components/Toast";
+import { LoadingSpinner } from "./_components/LoadingSpinner";
+import { PortfolioHeader } from "./_components/PortfolioHeader";
+import { PricesTab } from "./_components/PricesTab";
+import { AlertsStrip } from "./_components/AlertsStrip";
+import { AllocationAndFilters } from "./_components/AllocationAndFilters";
+import { BrokerTable } from "./_components/BrokerTable";
+import { HoldingCard } from "./_components/HoldingCard";
+import { RecentTransactionsTable } from "./_components/RecentTransactionsTable";
+import { AddItemModal, type NewItemInput } from "./_components/AddItemModal";
+import { UpdatePriceModal } from "./_components/UpdatePriceModal";
+import { DeleteConfirmModal } from "./_components/Modal";
 
-type AssetType = "gold" | "silver" | "stock" | "crypto" | "other";
-type Currency = "AED" | "INR" | "USD" | "GBP" | "EUR";
-
-type PortfolioItem = {
-  id: string;
-  symbol: string;
-  name: string;
-  assetType: AssetType;
-  unitLabel: string;
-  mainCurrency: Currency;
-  currentPrice: number | null;
-  currentPriceUpdatedAt: string | null;
-  notes: string;
-  livePriceSymbol?: string | null;
-  goldPurityKarat?: number | null;
-  weightGrams?: number | null;
-};
-
-type TxType = "buy" | "sell";
-
-type Purchase = {
-  id: string;
-  itemId: string;
-  purchasedAt: string;
-  unitPrice: number;
-  units: number;
-  totalPaid: number;
-  currency: Currency;
-  source: string;
-  itemName?: string;
-  itemSymbol?: string;
-  transactionType: TxType;
-};
-
-type ItemStats = {
-  totalUnits: number;
-  costBasisAed: number;
-  totalBuysAed: number;
-  totalSellsAed: number;
-  realizedPlAed: number;
-  avgUnitPrice: number;
-};
-
-// Per broker/platform (the free-text "source" field on each transaction),
-// pooled across every asset that has at least one transaction recorded
-// under that name.
-type BrokerStat = {
-  label: string; // display name — first-seen casing for this broker, case-insensitive key
-  totalBoughtAed: number;
-  totalSoldAed: number;
-  remainingCostBasisAed: number; // true remaining cost basis of units still held — used for P&L
-  currentValueAed: number;
-  realizedPlAed: number;
-  hasUnknownPrice: boolean; // true if currentValueAed excludes ≥1 item lacking a price
-};
-
-type LivePriceRow = {
-  bid: number;
-  ask: number;
-  updated: string;
-};
-
-type AlertItem = {
-  id: string;
-  itemId: string;
-  itemName: string;
-  itemSymbol: string;
-  alertType: "above" | "below";
-  targetPrice: number;
-  isActive: boolean;
-  triggeredAt: string | null;
-};
-
-const fmtN = (n: number, d = 2) =>
-  n.toLocaleString("en-AE", {
-    minimumFractionDigits: d,
-    maximumFractionDigits: d,
-  });
-
-const fmtSignedAed = (n: number) =>
-  `${n >= 0 ? "+" : "-"}AED ${fmtN(Math.abs(n))}`;
-
-const ASSET_ICONS: Record<AssetType, string> = {
-  gold: "🥇",
-  silver: "🥈",
-  stock: "📊",
-  crypto: "₿",
-  other: "💼",
-};
+type LivePriceRow = { bid: number; ask: number; updated: string };
 
 const RECENT_PAGE_SIZE = 10;
-
-const LIVE_PRICE_OPTIONS = [
-  { value: "", label: "None — manual price update" },
-  { value: "XAU_OZ", label: "24K Gold — 1 oz (AED)" },
-  { value: "XAU_G", label: "24K Gold — 1 g (AED)" },
-  { value: "XAG_OZ", label: "999 Silver — 1 oz (AED)" },
-  { value: "XAG_G", label: "999 Silver — 1 g (AED)" },
-  { value: "PARKIN.DFM", label: "Parkin (DFM)" },
-];
-
-async function fetchLivePrice(symbol: string): Promise<number | null> {
-  const sym = symbol.toUpperCase();
-  const proxy = (url: string) =>
-    `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-
-  try {
-    let usdToAed = FX_TO_AED.USD;
-
-    try {
-      const fxRes = await fetch(
-        "https://api.frankfurter.app/latest?from=USD&to=AED"
-      );
-      const fxData = await fxRes.json();
-      if (fxData?.rates?.AED) usdToAed = fxData.rates.AED;
-    } catch {
-      // fallback to static FX
-    }
-
-    const tickerMap: Record<string, string> = {
-      XAU: "XAUUSD=X",
-      XAG: "XAGUSD=X",
-      BTC: "BTC-USD",
-      ETH: "ETH-USD",
-    };
-
-    const ticker = tickerMap[sym] ?? sym;
-    const r = await fetch(
-      proxy(
-        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`
-      )
-    );
-    const wrapper = await r.json();
-    const data = JSON.parse(wrapper?.contents ?? "{}");
-    const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    const currency = data?.chart?.result?.[0]?.meta?.currency ?? "USD";
-
-    if (!price || price <= 0) return null;
-    return currency === "USD" ? price * usdToAed : price;
-  } catch {
-    return null;
-  }
-}
-
-
-async function fetchPriceForLiveLink(link: string): Promise<number | null> {
-  const sym = (link || "").toUpperCase();
-  const proxy = (url: string) =>
-    `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-
-  let usdToAed = FX_TO_AED.USD;
-  try {
-    const fxRes = await fetch(
-      "https://api.frankfurter.app/latest?from=USD&to=AED"
-    );
-    const fxData = await fxRes.json();
-    if (fxData?.rates?.AED) usdToAed = fxData.rates.AED;
-  } catch {
-    // fallback
-  }
-
-  const OZ_TO_G = 31.1034768;
-
-  if (sym === "XAU_OZ" || sym === "XAU_G" || sym === "XAG_OZ" || sym === "XAG_G") {
-    const metal = sym.startsWith("XAU") ? "XAU" : "XAG";
-    const keyToUse = process.env.NEXT_PUBLIC_GOLDAPI_KEY || "";
-
-    if (keyToUse) {
-      try {
-        const r = await fetch(`https://www.goldapi.io/api/${metal}/AED`, {
-          headers: {
-            "x-access-token": keyToUse,
-            "Content-Type": "application/json",
-          },
-        });
-        if (r.ok) {
-          const data = await r.json();
-          if (data?.price > 0) {
-            return sym.endsWith("_G") ? data.price / OZ_TO_G : data.price;
-          }
-        }
-      } catch {
-        // fallback below
-      }
-    }
-
-    const yahooTicker = metal === "XAU" ? "XAUUSD=X" : "XAGUSD=X";
-    try {
-      const r = await fetch(
-        proxy(
-          `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?interval=1d&range=5d`
-        )
-      );
-      const wrapper = await r.json();
-      const data = JSON.parse(wrapper?.contents ?? "{}");
-      const usdPrice = data?.chart?.result?.[0]?.meta?.regularMarketPrice ?? 0;
-      if (usdPrice > 0) {
-        const aedPrice = usdPrice * usdToAed;
-        return sym.endsWith("_G") ? aedPrice / OZ_TO_G : aedPrice;
-      }
-    } catch {
-      return null;
-    }
-  }
-
-  if (sym === "PARKIN.DFM") {
-    try {
-      const r = await fetch(proxy("https://parkin.ae/stock-price"));
-      const wrapper = await r.json();
-      const html = wrapper?.contents ?? "";
-      const pats = [
-        /TickerValueTD_LastPrice[^>]*>([\d.]+)/,
-        /TickerValueTD[^>]*LastPrice[^>]*>([\d.]+)/,
-        /"lastPrice"\s*:\s*"?([\d.]+)"?/, 
-        /"last"\s*:\s*([\d.]+)/,
-        /PARK[A-Z.]*[^<]{0,30}([\d]{1,3}\.[\d]{1,4})/,
-      ];
-      for (const pat of pats) {
-        const m = html.match(pat);
-        if (m) {
-          const price = parseFloat(m[1]);
-          if (price > 0) return price;
-        }
-      }
-    } catch {
-      return null;
-    }
-  }
-
-  return fetchLivePrice(sym);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dbToItem = (r: any): PortfolioItem => ({
-  id: r.id,
-  symbol: r.symbol,
-  name: r.name,
-  assetType: (r.asset_type ?? "other") as AssetType,
-  unitLabel: r.unit_label ?? "unit",
-  mainCurrency: (r.main_currency ?? "AED") as Currency,
-  currentPrice: r.current_price ?? null,
-  currentPriceUpdatedAt: r.current_price_updated_at ?? null,
-  notes: r.notes ?? "",
-  livePriceSymbol: r.live_price_symbol ?? null,
-  goldPurityKarat: r.gold_purity_karat ?? null,
-  weightGrams: r.weight_grams ?? null,
-});
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dbToPurchase = (r: any): Purchase => ({
-  id: r.id,
-  itemId: r.item_id,
-  purchasedAt: r.purchased_at,
-  unitPrice: Math.abs(r.unit_price),
-  units: Math.abs(r.units),
-  totalPaid: Math.abs(r.total_paid),
-  currency: (r.currency ?? "AED") as Currency,
-  source: r.source ?? "",
-  itemName: r.portfolio_items?.name,
-  itemSymbol: r.portfolio_items?.symbol,
-  transactionType:
-    Number(r.units) < 0 || Number(r.total_paid) < 0 ? "sell" : "buy",
-});
 
 export default function PortfolioPage() {
   const supabase = useMemo(() => createClient(), []);
@@ -290,59 +63,28 @@ export default function PortfolioPage() {
   const [priceLoading, setPriceLoading] = useState(false);
 
   const [goldApiKey, setGoldApiKey] = useState("");
-  const [goldApiInput, setGoldApiInput] = useState("");
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
-
   const [customSymbols, setCustomSymbols] = useState<string[]>(["PARKIN.DFM"]);
-  const [newSymbol, setNewSymbol] = useState("");
 
   const [showAddItem, setShowAddItem] = useState(false);
   const [showDeleteItem, setShowDeleteItem] = useState<string | null>(null);
-  const [showUpdatePrice, setShowUpdatePrice] = useState<PortfolioItem | null>(
-    null
-  );
-  const [newPrice, setNewPrice] = useState("");
+  const [showUpdatePrice, setShowUpdatePrice] = useState<PortfolioItem | null>(null);
   const [toast, setToast] = useState("");
 
-  // Polish: asset type filter + expanded row for transaction drawer
   const [typeFilter, setTypeFilter] = useState<AssetType | "all">("all");
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
   const [itemPurchases, setItemPurchases] = useState<Record<string, Purchase[]>>({});
-  // Edit gold fields from update price modal
-  const [editGoldPurity, setEditGoldPurity] = useState<string>("");
-  const [editGoldWeight, setEditGoldWeight] = useState<string>("");
 
-  // Search + sort on the assets list
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"value" | "pl" | "name">("value");
 
-  // Portfolio-wide alerts (active + recently-triggered), for the alerts strip
-  // and per-card badges — previously alerts were only visible on the item's
-  // own detail page.
-  const [allAlerts, setAllAlerts] = useState<AlertItem[]>([]);
+  const [allAlerts, setAllAlerts] = useState<PortfolioAlert[]>([]);
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 
-  // "Load more" pagination for the recent-transactions feed
   const [recentOffset, setRecentOffset] = useState(0);
   const [recentHasMore, setRecentHasMore] = useState(true);
   const [loadingMoreRecent, setLoadingMoreRecent] = useState(false);
 
-  const [newItem, setNewItem] = useState({
-    symbol: "",
-    name: "",
-    assetType: "other" as AssetType,
-    unitLabel: "unit",
-    mainCurrency: "AED" as Currency,
-    notes: "",
-    livePriceSymbol: "",
-    goldPurityKarat: "24" as string,
-    weightGrams: "" as string,
-  });
-
-  const [isDark, setIsDark] = useState(
-    typeof document !== "undefined" &&
-      document.documentElement.classList.contains("dark")
-  );
+  const [isDark, setIsDark] = useState(typeof document !== "undefined" && document.documentElement.classList.contains("dark"));
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -361,159 +103,17 @@ export default function PortfolioPage() {
 
       await Promise.all(
         itemList.map(async (item) => {
-          const { data } = await supabase
-            .from("portfolio_purchases")
-            .select("units,total_paid,currency,purchased_at,source")
-            .eq("item_id", item.id)
-            .order("purchased_at", { ascending: true });
+          const { data } = await supabase.from("portfolio_purchases").select("units,total_paid,currency,purchased_at,source").eq("item_id", item.id).order("purchased_at", { ascending: true });
 
           if (!data) {
-            results[item.id] = {
-              totalUnits: 0,
-              costBasisAed: 0,
-              totalBuysAed: 0,
-              totalSellsAed: 0,
-              realizedPlAed: 0,
-              avgUnitPrice: 0,
-            };
+            results[item.id] = EMPTY_ITEM_STATS;
             return;
           }
 
-          let totalUnits = 0;
-          let costBasisAed = 0;
-          let totalBuysAed = 0;
-          let totalSellsAed = 0;
-          let realizedPlAed = 0;
+          const { stats, brokerContributions } = computeItemCostBasis(data, item);
+          results[item.id] = stats;
 
-          // Broker/platform breakdown — the same pooled avg-cost algorithm
-          // as above, run independently per "source" (the free-text
-          // Broker/platform field on each transaction) so a sell only
-          // reduces the cost basis of the broker it was recorded under.
-          const bySource: Record<
-            string,
-            { label: string; totalUnits: number; costBasisAed: number; totalBoughtAed: number; totalSoldAed: number; realizedPlAed: number }
-          > = {};
-
-          for (const row of data as Array<{
-            units: number;
-            total_paid: number;
-            currency: string;
-            purchased_at: string;
-            source: string | null;
-          }>) {
-            const units = Number(row.units) || 0;
-            const amountAed = Math.abs(
-              toAed(Number(row.total_paid) || 0, row.currency as Currency)
-            );
-            const rawSrc = (row.source ?? "").trim().replace(/\s+/g, " ") || "Unspecified";
-            // Group case-insensitively so "Liv" and "LIV" are the same broker.
-            const src = rawSrc.toLowerCase();
-            const b =
-              bySource[src] ??
-              (bySource[src] = { label: rawSrc, totalUnits: 0, costBasisAed: 0, totalBoughtAed: 0, totalSoldAed: 0, realizedPlAed: 0 });
-
-            if (units >= 0) {
-              totalUnits += units;
-              costBasisAed += amountAed;
-              totalBuysAed += amountAed;
-
-              b.totalUnits += units;
-              b.costBasisAed += amountAed;
-              b.totalBoughtAed += amountAed;
-            } else {
-              const sellUnits = Math.min(Math.abs(units), totalUnits);
-              const avgCostBeforeSell =
-                totalUnits > 0 ? costBasisAed / totalUnits : 0;
-              const costRemoved = avgCostBeforeSell * sellUnits;
-
-              totalUnits = Math.max(0, totalUnits - sellUnits);
-              costBasisAed = Math.max(0, costBasisAed - costRemoved);
-              totalSellsAed += amountAed;
-              realizedPlAed += amountAed - costRemoved;
-
-              // Broker-level: draw the sold units from the named bucket
-              // first. If that bucket doesn't hold enough recorded units to
-              // cover the sell — e.g. the sell's Broker/platform field wasn't
-              // spelled identically to the buys it's actually closing out —
-              // spread the shortfall across whichever other buckets still
-              // hold units, proportional to their share, using each bucket's
-              // own average cost. Previously the shortfall was left in the
-              // named bucket with no cost removed, which fabricated a large
-              // "profit" for that broker and left the real holder's cost
-              // basis never drawn down.
-              b.totalSoldAed += amountAed;
-
-              let remainingSellUnits = sellUnits;
-              const ownRemove = Math.min(remainingSellUnits, b.totalUnits);
-              if (ownRemove > 0) {
-                const bAvgCost = b.totalUnits > 0 ? b.costBasisAed / b.totalUnits : 0;
-                const bCostRemoved = bAvgCost * ownRemove;
-                b.totalUnits = Math.max(0, b.totalUnits - ownRemove);
-                b.costBasisAed = Math.max(0, b.costBasisAed - bCostRemoved);
-                b.realizedPlAed += amountAed * (ownRemove / sellUnits) - bCostRemoved;
-                remainingSellUnits -= ownRemove;
-              }
-
-              if (remainingSellUnits > 1e-9) {
-                const otherBuckets = Object.values(bySource).filter(
-                  (other) => other !== b && other.totalUnits > 0
-                );
-                const otherUnitsTotal = otherBuckets.reduce((sum, o) => sum + o.totalUnits, 0);
-                if (otherUnitsTotal > 0) {
-                  for (const other of otherBuckets) {
-                    const share = other.totalUnits / otherUnitsTotal;
-                    const unitsFromOther = Math.min(other.totalUnits, remainingSellUnits * share);
-                    const otherAvgCost = other.totalUnits > 0 ? other.costBasisAed / other.totalUnits : 0;
-                    const otherCostRemoved = otherAvgCost * unitsFromOther;
-                    other.totalUnits = Math.max(0, other.totalUnits - unitsFromOther);
-                    other.costBasisAed = Math.max(0, other.costBasisAed - otherCostRemoved);
-                    other.realizedPlAed += amountAed * (unitsFromOther / sellUnits) - otherCostRemoved;
-                  }
-                }
-                // If no other bucket has recorded units either (every buy was
-                // logged under a different/typo'd source), there's nothing
-                // truthful left to attribute — leave it rather than inventing
-                // more profit.
-              }
-            }
-          }
-
-          results[item.id] = {
-            totalUnits,
-            costBasisAed,
-            totalBuysAed,
-            totalSellsAed,
-            realizedPlAed,
-            avgUnitPrice: totalUnits > 0 ? costBasisAed / totalUnits : 0,
-          };
-
-          // Attribute this item's current value to each broker bucket.
-          // Units-based assets convert exactly (calcCurrentValue on the
-          // broker's own remaining units). Weight-based gold has no
-          // per-unit valuation to split, so its current value is
-          // approximated by each broker's share of the item's remaining
-          // cost basis.
-          const isWeightGold =
-            item.assetType === "gold" && !!item.weightGrams && item.weightGrams > 0 && !!item.goldPurityKarat;
-          const fullCurrentValue = calcCurrentValue(item, totalUnits);
-          const sourceCount = Object.keys(bySource).length;
-
-          for (const [src, b] of Object.entries(bySource)) {
-            let valueAed: number | null;
-
-            if (isWeightGold) {
-              valueAed =
-                fullCurrentValue === null
-                  ? null
-                  : costBasisAed > 0
-                  ? fullCurrentValue * (b.costBasisAed / costBasisAed)
-                  : sourceCount === 1
-                  ? fullCurrentValue
-                  : 0;
-            } else {
-              valueAed = calcCurrentValue(item, b.totalUnits);
-            }
-
+          for (const [src, b] of Object.entries(brokerContributions)) {
             const acc =
               brokerAcc[src] ??
               (brokerAcc[src] = {
@@ -525,47 +125,28 @@ export default function PortfolioPage() {
                 realizedPlAed: 0,
                 hasUnknownPrice: false,
               });
-
             acc.totalBoughtAed += b.totalBoughtAed;
             acc.totalSoldAed += b.totalSoldAed;
-            acc.remainingCostBasisAed += b.costBasisAed;
+            acc.remainingCostBasisAed += b.remainingCostBasisAed;
             acc.realizedPlAed += b.realizedPlAed;
-            if (valueAed !== null) acc.currentValueAed += valueAed;
+            if (b.currentValueAed !== null) acc.currentValueAed += b.currentValueAed;
             else acc.hasUnknownPrice = true;
           }
-        })
+        }),
       );
 
       setAllStats(results);
       setBrokerStats(brokerAcc);
     },
-    [supabase]
+    [supabase],
   );
 
   const loadAllAlerts = useCallback(
     async (uid: string) => {
-      const { data } = await supabase
-        .from("portfolio_alerts")
-        .select("*,portfolio_items(name,symbol)")
-        .eq("user_id", uid)
-        .or("is_active.eq.true,triggered_at.not.is.null")
-        .order("created_at", { ascending: false });
-
-      setAllAlerts(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (data ?? []).map((r: any) => ({
-          id: r.id,
-          itemId: r.item_id,
-          itemName: r.portfolio_items?.name ?? "Unknown",
-          itemSymbol: r.portfolio_items?.symbol ?? "",
-          alertType: r.alert_type,
-          targetPrice: Number(r.target_price) || 0,
-          isActive: !!r.is_active,
-          triggeredAt: r.triggered_at ?? null,
-        }))
-      );
+      const { data } = await supabase.from("portfolio_alerts").select("*,portfolio_items(name,symbol)").eq("user_id", uid).or("is_active.eq.true,triggered_at.not.is.null").order("created_at", { ascending: false });
+      setAllAlerts((data ?? []).map(dbToAlert));
     },
-    [supabase]
+    [supabase],
   );
 
   // Checks portfolio_alerts for any items whose price just changed and
@@ -576,9 +157,7 @@ export default function PortfolioPage() {
     async (updated: Array<{ id: string; currentPrice: number | null }>) => {
       if (!userId) return;
 
-      const priceByItem = new Map(
-        updated.filter((u) => u.currentPrice != null).map((u) => [u.id, u.currentPrice as number])
-      );
+      const priceByItem = new Map(updated.filter((u) => u.currentPrice != null).map((u) => [u.id, u.currentPrice as number]));
       if (priceByItem.size === 0) return;
 
       const { data: alertRows } = await supabase
@@ -608,17 +187,12 @@ export default function PortfolioPage() {
       if (idsToTrigger.length === 0) return;
 
       const nowIso = new Date().toISOString();
-      await supabase
-        .from("portfolio_alerts")
-        .update({ triggered_at: nowIso, is_active: false })
-        .in("id", idsToTrigger);
+      await supabase.from("portfolio_alerts").update({ triggered_at: nowIso, is_active: false }).in("id", idsToTrigger);
 
-      showToast(
-        `${idsToTrigger.length} price alert${idsToTrigger.length > 1 ? "s" : ""} triggered`
-      );
+      showToast(`${idsToTrigger.length} price alert${idsToTrigger.length > 1 ? "s" : ""} triggered`);
       await loadAllAlerts(userId);
     },
-    [userId, supabase, loadAllAlerts]
+    [userId, supabase, loadAllAlerts],
   );
 
   useEffect(() => {
@@ -636,29 +210,15 @@ export default function PortfolioPage() {
       setTimezone(await getUserTimezone(supabase, user.id));
 
       const [ir, pr, profileRes] = await Promise.all([
-        supabase
-          .from("portfolio_items")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at"),
-        supabase
-          .from("portfolio_purchases")
-          .select("*,portfolio_items(name,symbol)")
-          .eq("user_id", user.id)
-          .order("purchased_at", { ascending: false })
-          .limit(10),
-        supabase
-          .from("profiles")
-          .select("goldapi_key, metal_prices")
-          .eq("id", user.id)
-          .single(),
+        supabase.from("portfolio_items").select("*").eq("user_id", user.id).order("created_at"),
+        supabase.from("portfolio_purchases").select("*,portfolio_items(name,symbol)").eq("user_id", user.id).order("purchased_at", { ascending: false }).limit(RECENT_PAGE_SIZE),
+        supabase.from("profiles").select("goldapi_key, metal_prices").eq("id", user.id).single(),
       ]);
 
       const loadedItems = (ir.data ?? []).map(dbToItem);
       setItems(loadedItems);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const recentRows = (pr.data ?? []).map((r: any) => dbToPurchase(r));
+      const recentRows = (pr.data ?? []).map(dbToPurchase);
       setRecent(recentRows);
       setRecentOffset(recentRows.length);
       setRecentHasMore(recentRows.length === RECENT_PAGE_SIZE);
@@ -669,20 +229,15 @@ export default function PortfolioPage() {
 
       const envGoldKey = process.env.NEXT_PUBLIC_GOLDAPI_KEY ?? "";
       const dbGoldKey = profileRes.data?.goldapi_key ?? "";
-
       setGoldApiKey(dbGoldKey || envGoldKey);
-      setGoldApiInput(dbGoldKey || envGoldKey);
 
       if (profileRes.data?.metal_prices) {
         const rawMetalPrices = profileRes.data.metal_prices as Record<string, unknown>;
-
         // __custom_symbols is a reserved key smuggled into this JSONB column
         // (same pattern as Due Tracker's __remittance_group/__remittance_status
         // in cash_in) to persist the custom symbol list without a schema
         // migration — it must be kept out of the price-row map below.
-        const storedCustomSymbols = Array.isArray(rawMetalPrices.__custom_symbols)
-          ? (rawMetalPrices.__custom_symbols as string[])
-          : ["PARKIN.DFM"];
+        const storedCustomSymbols = Array.isArray(rawMetalPrices.__custom_symbols) ? (rawMetalPrices.__custom_symbols as string[]) : ["PARKIN.DFM"];
         setCustomSymbols(storedCustomSymbols);
 
         const priceRows: Record<string, LivePriceRow> = {};
@@ -701,38 +256,19 @@ export default function PortfolioPage() {
   async function fetchAllLivePrices() {
     setLiveLoading(true);
 
-    const updatable = items.filter(
-      (i) => i.livePriceSymbol || ["gold", "silver", "stock", "crypto"].includes(i.assetType)
-    );
-
+    const updatable = items.filter((i) => i.livePriceSymbol || ["gold", "silver", "stock", "crypto"].includes(i.assetType));
     const updates: PortfolioItem[] = [...items];
 
     await Promise.all(
       updatable.map(async (item) => {
-        const price = item.livePriceSymbol
-          ? await fetchPriceForLiveLink(item.livePriceSymbol)
-          : await fetchLivePrice(item.symbol);
+        const price = item.livePriceSymbol ? await fetchPriceForLiveLink(item.livePriceSymbol) : await fetchLivePrice(item.symbol);
         if (price && price > 0) {
           const nowIso = new Date().toISOString();
-
-          await supabase
-            .from("portfolio_items")
-            .update({
-              current_price: price,
-              current_price_updated_at: nowIso,
-            })
-            .eq("id", item.id);
-
+          await supabase.from("portfolio_items").update({ current_price: price, current_price_updated_at: nowIso }).eq("id", item.id);
           const idx = updates.findIndex((x) => x.id === item.id);
-          if (idx >= 0) {
-            updates[idx] = {
-              ...updates[idx],
-              currentPrice: price,
-              currentPriceUpdatedAt: nowIso,
-            };
-          }
+          if (idx >= 0) updates[idx] = { ...updates[idx], currentPrice: price, currentPriceUpdatedAt: nowIso };
         }
-      })
+      }),
     );
 
     setItems([...updates]);
@@ -742,215 +278,15 @@ export default function PortfolioPage() {
       updatable.map((i) => {
         const u = updates.find((x) => x.id === i.id);
         return { id: i.id, currentPrice: u?.currentPrice ?? null };
-      })
+      }),
     );
   }
 
   async function fetchSpotPrices() {
     setPriceLoading(true);
 
-    const results: Record<string, LivePriceRow> = {};
-    const now = new Date().toLocaleTimeString("en-AE", {
-      timeZone: timezone,
-    });
-    const proxy = (url: string) =>
-      `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-
-    let usdToAed = FX_TO_AED.USD;
-
-    try {
-      const fxRes = await fetch(
-        "https://api.frankfurter.app/latest?from=USD&to=AED"
-      );
-      const fxData = await fxRes.json();
-      if (fxData?.rates?.AED) usdToAed = fxData.rates.AED;
-    } catch {
-      // fallback
-    }
-
-    const getYahooAed = async (ticker: string): Promise<number | null> => {
-      try {
-        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
-        const r = await fetch(proxy(yahooUrl));
-        const wrapper = await r.json();
-        const text = wrapper?.contents;
-        if (!text) return null;
-
-        const data = JSON.parse(text);
-        const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-        const currency = data?.chart?.result?.[0]?.meta?.currency ?? "USD";
-
-        if (!price || price <= 0) return null;
-        return currency === "USD" ? price * usdToAed : price;
-      } catch {
-        return null;
-      }
-    };
-
-    const OZ_TO_G = 31.1034768;
-    const keyToUse = goldApiKey || process.env.NEXT_PUBLIC_GOLDAPI_KEY || "";
-
-    if (keyToUse) {
-      try {
-        const [goldRes, silverRes] = await Promise.all([
-          fetch("https://www.goldapi.io/api/XAU/AED", {
-            headers: {
-              "x-access-token": keyToUse,
-              "Content-Type": "application/json",
-            },
-          }),
-          fetch("https://www.goldapi.io/api/XAG/AED", {
-            headers: {
-              "x-access-token": keyToUse,
-              "Content-Type": "application/json",
-            },
-          }),
-        ]);
-
-        if (goldRes.ok) {
-          const gold = await goldRes.json();
-          if (gold?.price > 0) {
-            const ozAed = gold.price;
-            const gAed = ozAed / OZ_TO_G;
-            results.XAU_OZ = {
-              bid: gold.prev_close_price ?? ozAed * 0.999,
-              ask: ozAed,
-              updated: now,
-            };
-            results.XAU_G = {
-              bid: (gold.prev_close_price ?? ozAed * 0.999) / OZ_TO_G,
-              ask: gAed,
-              updated: now,
-            };
-          }
-        }
-
-        if (silverRes.ok) {
-          const silver = await silverRes.json();
-          if (silver?.price > 0) {
-            const ozAed = silver.price;
-            const gAed = ozAed / OZ_TO_G;
-            results.XAG_OZ = {
-              bid: silver.prev_close_price ?? ozAed * 0.999,
-              ask: ozAed,
-              updated: now,
-            };
-            results.XAG_G = {
-              bid: (silver.prev_close_price ?? ozAed * 0.999) / OZ_TO_G,
-              ask: gAed,
-              updated: now,
-            };
-          }
-        }
-      } catch {
-        // fallback below
-      }
-    }
-
-    if (!results.XAU_OZ || !results.XAG_OZ) {
-      try {
-        const r = await fetch(
-          proxy(
-            "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD=X?interval=1d&range=5d"
-          )
-        );
-        const w = await r.json();
-        const p =
-          JSON.parse(w?.contents ?? "{}")?.chart?.result?.[0]?.meta
-            ?.regularMarketPrice ?? 0;
-
-        if (p > 0) {
-          const ozAed = p * usdToAed;
-          const gAed = ozAed / OZ_TO_G;
-          results.XAU_OZ = {
-            bid: ozAed * 0.999,
-            ask: ozAed,
-            updated: now,
-          };
-          results.XAU_G = {
-            bid: gAed * 0.999,
-            ask: gAed,
-            updated: now,
-          };
-        }
-      } catch {
-        // skip
-      }
-
-      try {
-        const r = await fetch(
-          proxy(
-            "https://query1.finance.yahoo.com/v8/finance/chart/XAGUSD=X?interval=1d&range=5d"
-          )
-        );
-        const w = await r.json();
-        const p =
-          JSON.parse(w?.contents ?? "{}")?.chart?.result?.[0]?.meta
-            ?.regularMarketPrice ?? 0;
-
-        if (p > 0) {
-          const ozAed = p * usdToAed;
-          const gAed = ozAed / OZ_TO_G;
-          results.XAG_OZ = {
-            bid: ozAed * 0.999,
-            ask: ozAed,
-            updated: now,
-          };
-          results.XAG_G = {
-            bid: gAed * 0.999,
-            ask: gAed,
-            updated: now,
-          };
-        }
-      } catch {
-        // skip
-      }
-    }
-
-    try {
-      const r = await fetch(proxy("https://parkin.ae/stock-price"));
-      const wrapper = await r.json();
-      const html: string = wrapper?.contents ?? "";
-      let parkinPrice = 0;
-
-      const pats = [
-        /TickerValueTD_LastPrice[^>]*>([\d.]+)/,
-        /TickerValueTD[^>]*LastPrice[^>]*>([\d.]+)/,
-        /"lastPrice"\s*:\s*"?([\d.]+)"?/,
-        /"last"\s*:\s*([\d.]+)/,
-        /PARK[A-Z.]*[^<]{0,30}([\d]{1,3}\.[\d]{1,4})/,
-      ];
-
-      for (const pat of pats) {
-        const m = html.match(pat);
-        if (m) {
-          parkinPrice = parseFloat(m[1]);
-          if (parkinPrice > 0) break;
-        }
-      }
-
-      if (parkinPrice > 0) {
-        results["PARKIN.DFM"] = {
-          bid: parkinPrice * 0.999,
-          ask: parkinPrice,
-          updated: now,
-        };
-      }
-    } catch {
-      // skip
-    }
-
-    for (const sym of customSymbols.filter((s) => s !== "PARKIN.DFM")) {
-      const price = await getYahooAed(sym);
-      if (price && price > 0) {
-        results[sym] = {
-          bid: price * 0.999,
-          ask: price,
-          updated: now,
-        };
-      }
-    }
-
+    const nowLabel = new Date().toLocaleTimeString("en-AE", { timeZone: timezone });
+    const results = await fetchAllSpotPrices(customSymbols, goldApiKey, nowLabel);
     setLivePrices(results);
 
     if (userId && Object.keys(results).length > 0) {
@@ -958,63 +294,38 @@ export default function PortfolioPage() {
       // wholesale — otherwise this refresh would silently wipe out the
       // persisted custom symbol list.
       const merged: Record<string, unknown> = { ...results, __custom_symbols: customSymbols };
-      await supabase
-        .from("profiles")
-        .update({ metal_prices: merged })
-        .eq("id", userId);
+      await supabase.from("profiles").update({ metal_prices: merged }).eq("id", userId);
     }
 
     if (userId && Object.keys(results).length > 0) {
-      const { data: allItems } = await supabase
-        .from("portfolio_items")
-        .select("id,live_price_symbol,current_price")
-        .eq("user_id", userId);
-
+      const { data: allItems } = await supabase.from("portfolio_items").select("id,live_price_symbol,current_price").eq("user_id", userId);
       const nowIso = new Date().toISOString();
 
       for (const item of allItems ?? []) {
         const link = item.live_price_symbol ?? "";
         const lp = results[link];
-
         if (lp && Math.abs(lp.bid - (item.current_price ?? 0)) > 0.001) {
-          await supabase
-            .from("portfolio_items")
-            .update({
-              current_price: lp.bid,
-              current_price_updated_at: nowIso,
-            })
-            .eq("id", item.id);
+          await supabase.from("portfolio_items").update({ current_price: lp.bid, current_price_updated_at: nowIso }).eq("id", item.id);
         }
       }
 
-      const { data: updated } = await supabase
-        .from("portfolio_items")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at");
-
+      const { data: updated } = await supabase.from("portfolio_items").select("*").eq("user_id", userId).order("created_at");
       if (updated) {
         setItems(updated.map(dbToItem));
-        await checkAndTriggerAlerts(
-          updated.map((u) => ({ id: u.id, currentPrice: u.current_price ?? null }))
-        );
+        await checkAndTriggerAlerts(updated.map((u) => ({ id: u.id, currentPrice: u.current_price ?? null })));
       }
     }
 
     setPriceLoading(false);
 
     if (Object.keys(results).length > 0) {
-      showToast(
-        `Updated ${Object.keys(results).length} price${
-          Object.keys(results).length > 1 ? "s" : ""
-        }`
-      );
+      showToast(`Updated ${Object.keys(results).length} price${Object.keys(results).length > 1 ? "s" : ""}`);
     } else {
       showToast("No prices found. Check API key or try again in 30s");
     }
   }
 
-  async function addItem() {
+  async function addItem(newItem: NewItemInput) {
     if (!userId || !newItem.symbol.trim() || !newItem.name.trim()) {
       showToast("Symbol and name required");
       return;
@@ -1045,29 +356,8 @@ export default function PortfolioPage() {
     if (data) {
       const added = dbToItem(data);
       setItems((p) => [...p, added]);
-      setAllStats((p) => ({
-        ...p,
-        [added.id]: {
-          totalUnits: 0,
-          costBasisAed: 0,
-          totalBuysAed: 0,
-          totalSellsAed: 0,
-          realizedPlAed: 0,
-          avgUnitPrice: 0,
-        },
-      }));
+      setAllStats((p) => ({ ...p, [added.id]: EMPTY_ITEM_STATS }));
       setShowAddItem(false);
-      setNewItem({
-        symbol: "",
-        name: "",
-        assetType: "other",
-        unitLabel: "unit",
-        mainCurrency: "AED",
-        notes: "",
-        livePriceSymbol: "",
-        goldPurityKarat: "24",
-        weightGrams: "",
-      });
       showToast("Asset added");
     }
   }
@@ -1095,31 +385,22 @@ export default function PortfolioPage() {
     showToast("Asset deleted");
   }
 
-  async function updateCurrentPrice(item: PortfolioItem) {
-    const price = parseFloat(newPrice);
+  async function updateCurrentPrice(item: PortfolioItem, priceInput: string, goldPurityInput: string, goldWeightInput: string) {
+    const price = parseFloat(priceInput);
     if (isNaN(price) || price <= 0) {
       showToast("Enter a valid price");
       return;
     }
 
     const nowIso = new Date().toISOString();
+    const updatePayload: Record<string, unknown> = { current_price: price, current_price_updated_at: nowIso };
 
-    const updatePayload: Record<string, unknown> = {
-      current_price: price,
-      current_price_updated_at: nowIso,
-    };
-
-    // If gold, also save purity + weight
     if (item.assetType === "gold") {
-      updatePayload.gold_purity_karat = editGoldPurity ? Number(editGoldPurity) : null;
-      updatePayload.weight_grams = editGoldWeight ? Number(editGoldWeight) : null;
+      updatePayload.gold_purity_karat = goldPurityInput ? Number(goldPurityInput) : null;
+      updatePayload.weight_grams = goldWeightInput ? Number(goldWeightInput) : null;
     }
 
-    const { error } = await supabase
-      .from("portfolio_items")
-      .update(updatePayload)
-      .eq("id", item.id);
-
+    const { error } = await supabase.from("portfolio_items").update(updatePayload).eq("id", item.id);
     if (error) {
       showToast("Failed to update price");
       return;
@@ -1132,16 +413,13 @@ export default function PortfolioPage() {
               ...x,
               currentPrice: price,
               currentPriceUpdatedAt: nowIso,
-              goldPurityKarat: item.assetType === "gold" ? (editGoldPurity ? Number(editGoldPurity) : null) : x.goldPurityKarat,
-              weightGrams: item.assetType === "gold" ? (editGoldWeight ? Number(editGoldWeight) : null) : x.weightGrams,
+              goldPurityKarat: item.assetType === "gold" ? (goldPurityInput ? Number(goldPurityInput) : null) : x.goldPurityKarat,
+              weightGrams: item.assetType === "gold" ? (goldWeightInput ? Number(goldWeightInput) : null) : x.weightGrams,
             }
-          : x
-      )
+          : x,
+      ),
     );
     setShowUpdatePrice(null);
-    setNewPrice("");
-    setEditGoldPurity("");
-    setEditGoldWeight("");
     showToast(item.assetType === "gold" ? "Gold details updated" : "Price updated");
   }
 
@@ -1170,6 +448,22 @@ export default function PortfolioPage() {
     void persistCustomSymbols(customSymbols.filter((x) => x !== sym));
   }
 
+  async function saveApiKey(key: string) {
+    setGoldApiKey(key);
+    if (userId) {
+      await supabase.from("profiles").update({ goldapi_key: key || null }).eq("id", userId);
+    }
+    showToast(key ? "API key saved" : "API key removed");
+  }
+
+  async function removeApiKey() {
+    if (userId) {
+      await supabase.from("profiles").update({ goldapi_key: null }).eq("id", userId);
+    }
+    setGoldApiKey("");
+    showToast("API key removed");
+  }
+
   async function loadMoreRecent() {
     if (!userId || loadingMoreRecent || !recentHasMore) return;
     setLoadingMoreRecent(true);
@@ -1181,26 +475,27 @@ export default function PortfolioPage() {
       .order("purchased_at", { ascending: false })
       .range(recentOffset, recentOffset + RECENT_PAGE_SIZE - 1);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows = (data ?? []).map((r: any) => dbToPurchase(r));
+    const rows = (data ?? []).map(dbToPurchase);
     setRecent((p) => [...p, ...rows]);
     setRecentOffset((o) => o + rows.length);
     setRecentHasMore(rows.length === RECENT_PAGE_SIZE);
     setLoadingMoreRecent(false);
   }
 
-  function downloadCsv(filename: string, rows: string[][]) {
-    const csv = rows
-      .map((row) =>
-        row
-          .map((cell) => {
-            const s = String(cell ?? "");
-            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-          })
-          .join(",")
-      )
-      .join("\r\n");
+  async function toggleTransactionDrawer(itemId: string) {
+    if (expandedItemId === itemId) {
+      setExpandedItemId(null);
+      return;
+    }
+    setExpandedItemId(itemId);
+    if (!itemPurchases[itemId]) {
+      const { data } = await supabase.from("portfolio_purchases").select("*").eq("item_id", itemId).order("purchased_at", { ascending: false }).limit(15);
+      setItemPurchases((p) => ({ ...p, [itemId]: (data ?? []).map(dbToPurchase) }));
+    }
+  }
 
+  function downloadCsv(filename: string, rows: string[][]) {
+    const csv = rows.map((row) => row.map((cell) => (/[",\n]/.test(String(cell ?? "")) ? `"${String(cell ?? "").replace(/"/g, '""')}"` : String(cell ?? ""))).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1213,90 +508,42 @@ export default function PortfolioPage() {
   }
 
   function exportAssetsCsv() {
-    const header = [
-      "Symbol",
-      "Name",
-      "Type",
-      "Total units",
-      "Avg cost (AED)",
-      "Current value (AED)",
-      "Invested (AED)",
-      "P&L (AED)",
-      "P&L %",
-    ];
-
+    const header = ["Symbol", "Name", "Type", "Total units", "Avg cost (AED)", "Current value (AED)", "Invested (AED)", "P&L (AED)", "P&L %"];
     const rows = items.map((item) => {
-      const s = allStats[item.id] ?? {
-        totalUnits: 0,
-        costBasisAed: 0,
-        totalBuysAed: 0,
-        totalSellsAed: 0,
-        realizedPlAed: 0,
-        avgUnitPrice: 0,
-      };
+      const s = allStats[item.id] ?? EMPTY_ITEM_STATS;
       const cv = calcCurrentValue(item, s.totalUnits);
       const pl = cv !== null ? cv - s.costBasisAed : null;
       const plPct = pl !== null && s.costBasisAed > 0 ? (pl / s.costBasisAed) * 100 : null;
-
-      return [
-        item.symbol,
-        item.name,
-        item.assetType,
-        s.totalUnits.toFixed(4),
-        s.avgUnitPrice.toFixed(2),
-        cv !== null ? cv.toFixed(2) : "",
-        s.costBasisAed.toFixed(2),
-        pl !== null ? pl.toFixed(2) : "",
-        plPct !== null ? plPct.toFixed(2) : "",
-      ];
+      return [item.symbol, item.name, item.assetType, s.totalUnits.toFixed(4), s.avgUnitPrice.toFixed(2), cv !== null ? cv.toFixed(2) : "", s.costBasisAed.toFixed(2), pl !== null ? pl.toFixed(2) : "", plPct !== null ? plPct.toFixed(2) : ""];
     });
-
     downloadCsv(`portfolio-assets-${new Date().toISOString().slice(0, 10)}.csv`, [header, ...rows]);
   }
 
   const totals = useMemo(() => {
     let invested = 0;
     let current = 0;
-
     for (const item of items) {
       const s = allStats[item.id];
       if (!s) continue;
-
       invested += s.costBasisAed;
       const cv = calcCurrentValue(item, s.totalUnits);
       current += cv !== null ? cv : s.costBasisAed;
     }
-
-    return {
-      invested,
-      current,
-      pl: current - invested,
-      plPct: invested > 0 ? ((current - invested) / invested) * 100 : 0,
-    };
+    return { invested, current, pl: current - invested, plPct: invested > 0 ? ((current - invested) / invested) * 100 : 0 };
   }, [items, allStats]);
 
   // Search + sort compose with the existing type-filter tabs: filter by
   // type AND search text, then sort.
   const visibleItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-
     const filtered = items.filter((item) => {
       if (typeFilter !== "all" && item.assetType !== typeFilter) return false;
       if (!q) return true;
-      return (
-        item.name.toLowerCase().includes(q) || item.symbol.toLowerCase().includes(q)
-      );
+      return item.name.toLowerCase().includes(q) || item.symbol.toLowerCase().includes(q);
     });
 
     const withDerived = filtered.map((item) => {
-      const s = allStats[item.id] ?? {
-        totalUnits: 0,
-        costBasisAed: 0,
-        totalBuysAed: 0,
-        totalSellsAed: 0,
-        realizedPlAed: 0,
-        avgUnitPrice: 0,
-      };
+      const s = allStats[item.id] ?? EMPTY_ITEM_STATS;
       const curVal = calcCurrentValue(item, s.totalUnits);
       const pl = curVal !== null ? curVal - s.costBasisAed : null;
       return { item, s, curVal, pl };
@@ -1311,1741 +558,155 @@ export default function PortfolioPage() {
     return withDerived;
   }, [items, allStats, typeFilter, searchQuery, sortBy]);
 
-  const V = {
-    bg: "var(--main-bg)",
-    card: "var(--card-bg)",
-    border: "var(--card-border)",
-    text: "var(--text-primary)",
-    muted: "var(--text-secondary)",
-    faint: "var(--text-muted)",
-    input: "var(--main-bg2)",
-    accent: "#eb6607",
-    accentSoft: isDark ? "rgba(235,102,7,0.16)" : "rgba(235,102,7,0.10)",
-    shadow: isDark
-      ? "0 1px 3px rgba(0,0,0,0.45)"
-      : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)",
-    shadowAccent: "0 4px 14px rgba(235,102,7,0.30)",
-    pos: "var(--positive)",
-    posSoft: "var(--positive-soft)",
-    neg: "var(--negative)",
-    negSoft: "var(--negative-soft)",
-    warn: "var(--warning)",
-    warnSoft: "var(--warning-soft)",
-    gold: "var(--gold)",
-    goldSoft: "var(--gold-soft)",
-  };
+  const typeBreakdown = useMemo(() => {
+    const breakdown: Record<AssetType, number> = { gold: 0, silver: 0, stock: 0, crypto: 0, other: 0 };
+    for (const item of items) {
+      const s = allStats[item.id];
+      if (!s) continue;
+      const cv = calcCurrentValue(item, s.totalUnits);
+      const valueAed = cv !== null ? cv : s.costBasisAed || 0;
+      breakdown[item.assetType] = (breakdown[item.assetType] ?? 0) + Math.max(0, valueAed);
+    }
+    return breakdown;
+  }, [items, allStats]);
 
-  const btn = {
-    padding: isMobile ? "10px 16px" : "8px 14px",
-    minHeight: isMobile ? 40 : undefined,
-    borderRadius: 10,
-    border: `1px solid ${V.border}`,
-    background: V.card,
-    color: V.text,
-    cursor: "pointer",
-    fontSize: 13,
-    fontWeight: 600,
-    boxShadow: V.shadow,
-    transition: "all 150ms ease",
-  } as const;
+  const itemCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: items.length };
+    for (const it of items) counts[it.assetType] = (counts[it.assetType] ?? 0) + 1;
+    return counts;
+  }, [items]);
 
-  const btnP = {
-    ...btn,
-    background: V.accent,
-    border: "none",
-    color: "#fff",
-    fontWeight: 700,
-    boxShadow: V.shadowAccent,
-  } as const;
+  const V = getTheme(isDark);
+  const { btn, btnP, inp, lbl } = styleKit(V, isMobile, isDark);
 
-  const inp = {
-    padding: isMobile ? "10px 12px" : "8px 12px",
-    minHeight: isMobile ? 40 : undefined,
-    borderRadius: 8,
-    border: `1px solid ${V.border}`,
-    background: V.input,
-    color: V.text,
-    fontSize: 13,
-    outline: "none",
-    width: "100%",
-    boxSizing: "border-box" as const,
-  };
-
-  const lbl = {
-    display: "flex" as const,
-    flexDirection: "column" as const,
-    gap: 5,
-    fontSize: 12,
-    fontWeight: 700,
-    color: V.muted,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-  };
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          minHeight: "60vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: V.bg,
-        }}
-      >
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            border: `2.5px solid ${V.accent}`,
-            borderTopColor: "transparent",
-            borderRadius: "50%",
-            animation: "spin 0.7s linear infinite",
-          }}
-        />
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      </div>
-    );
-  }
+  if (loading) return <LoadingSpinner bg={V.bg} accent={V.accent} />;
 
   const isUp = totals.pl >= 0;
   const plColor = isUp ? V.pos : V.neg;
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: V.bg,
-        color: V.text,
-        fontFamily: "system-ui,sans-serif",
-      }}
-    >
-      <div
-        style={{
-          padding: "22px 24px 0",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 12,
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800 }}>
-            Port<span style={{ color: V.accent, fontStyle: "italic" }}>folio</span>
-          </div>
-          <div style={{ fontSize: 13, color: V.faint, marginTop: 2 }}>
-            Stocks · Gold · Metals
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              borderRadius: 10,
-              overflow: "hidden",
-              border: `1px solid ${V.border}`,
-            }}
-          >
-            {(["assets", "prices"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setActiveTab(t)}
-                style={{
-                  padding: "7px 14px",
-                  background: activeTab === t ? V.accent : "transparent",
-                  color: activeTab === t ? "#fff" : V.muted,
-                  border: "none",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  textTransform: "capitalize",
-                }}
-              >
-                {t === "prices" ? "📊 Live Prices" : "My Assets"}
-              </button>
-            ))}
-          </div>
-
-          {activeTab === "assets" && (
-            <button style={btn} onClick={fetchAllLivePrices} disabled={liveLoading}>
-              {liveLoading ? "Fetching…" : "🔄 Update prices"}
-            </button>
-          )}
-
-          {activeTab === "assets" && items.length > 0 && (
-            <button style={btn} onClick={exportAssetsCsv}>
-              ⬇ Export CSV
-            </button>
-          )}
-
-          {activeTab === "assets" && (
-            <button style={btnP} onClick={() => setShowAddItem(true)}>
-              + Add asset
-            </button>
-          )}
-
-          {activeTab === "prices" && (
-            <button style={btnP} onClick={fetchSpotPrices} disabled={priceLoading}>
-              {priceLoading ? "Loading…" : "🔄 Refresh"}
-            </button>
-          )}
-        </div>
-      </div>
+    <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
+      <PortfolioHeader
+        V={V}
+        btn={btn}
+        btnP={btnP}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        liveLoading={liveLoading}
+        priceLoading={priceLoading}
+        hasItems={items.length > 0}
+        onUpdatePrices={() => void fetchAllLivePrices()}
+        onExportCsv={exportAssetsCsv}
+        onAddAsset={() => setShowAddItem(true)}
+        onRefreshSpotPrices={() => void fetchSpotPrices()}
+      />
 
       {activeTab === "prices" && (
-        <div style={{ padding: "14px 24px" }}>
-          <div
-            style={{
-              background: V.card,
-              border: `1px solid ${V.border}`,
-              borderRadius: 14,
-              overflow: "hidden",
-              marginBottom: 16,
-            }}
-          >
-            <div
-              style={{
-                padding: "12px 16px",
-                borderBottom: `1px solid ${V.border}`,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: 8,
-                background: isDark
-                  ? "rgba(255,255,255,0.03)"
-                  : "rgba(0,0,0,0.02)",
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 800 }}>
-                Spot Prices — AED
-              </span>
-
-              <div
-                style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
-              >
-                {!goldApiKey && (
-                  <span style={{ fontSize: 11, color: V.neg, fontWeight: 600 }}>
-                    ⚠ Add goldapi.io key for reliable prices
-                  </span>
-                )}
-
-                {goldApiKey && (
-                  <span style={{ fontSize: 11, color: V.pos, fontWeight: 600 }}>
-                    ✓ goldapi.io
-                  </span>
-                )}
-
-                <button
-                  onClick={() => {
-                    setGoldApiInput(goldApiKey);
-                    setShowApiKeyInput((v) => !v);
-                  }}
-                  style={{ ...btn, padding: "3px 10px", fontSize: 11, color: V.accent }}
-                >
-                  {goldApiKey ? "Change API key" : "🔑 Add API key"}
-                </button>
-              </div>
-            </div>
-
-            {showApiKeyInput && (
-              <div
-                style={{
-                  padding: "12px 16px",
-                  borderBottom: `1px solid ${V.border}`,
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  background: isDark
-                    ? "rgba(245,166,35,0.04)"
-                    : "rgba(245,166,35,0.02)",
-                }}
-              >
-                <div style={{ fontSize: 12, color: V.faint, flex: "0 0 auto" }}>
-                  goldapi.io key:
-                </div>
-                <input
-                  style={{
-                    ...inp,
-                    flex: 1,
-                    minWidth: 200,
-                    fontFamily: "monospace",
-                    fontSize: 12,
-                  }}
-                  type="password"
-                  value={goldApiInput}
-                  onChange={(e) => setGoldApiInput(e.target.value)}
-                  placeholder="goldapi.io/dashboard → copy your key"
-                />
-                <button
-                  style={{ ...btnP, padding: "6px 12px", fontSize: 12 }}
-                  onClick={async () => {
-                    const val = goldApiInput.trim();
-                    if (userId) {
-                      setGoldApiKey(val);
-                      await supabase
-                        .from("profiles")
-                        .update({ goldapi_key: val || null })
-                        .eq("id", userId);
-                    }
-                    setShowApiKeyInput(false);
-                    showToast(val ? "API key saved" : "API key removed");
-                  }}
-                >
-                  Save
-                </button>
-                <button
-                  style={{ ...btn, padding: "6px 10px", fontSize: 12 }}
-                  onClick={async () => {
-                    if (userId) {
-                      await supabase
-                        .from("profiles")
-                        .update({ goldapi_key: null })
-                        .eq("id", userId);
-                    }
-                    setGoldApiKey("");
-                    setGoldApiInput("");
-                    setShowApiKeyInput(false);
-                    showToast("API key removed");
-                  }}
-                >
-                  Remove
-                </button>
-                <a
-                  href="https://www.goldapi.io/"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ fontSize: 11, color: V.accent }}
-                >
-                  Get key →
-                </a>
-              </div>
-            )}
-
-            {!isMobile && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr 0.7fr",
-                  gap: 8,
-                  padding: "8px 16px",
-                  fontSize: 10,
-                  fontWeight: 800,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                  color: V.faint,
-                  borderBottom: `1px solid ${V.border}`,
-                }}
-              >
-                <div>Asset</div>
-                <div>Buy (Ask)</div>
-                <div>Sell (Bid)</div>
-                <div>Updated</div>
-              </div>
-            )}
-
-            {[
-              { key: "XAU_OZ", label: "24K Gold", sub: "1 oz" },
-              { key: "XAU_G", label: "24K Gold", sub: "1 g" },
-              { key: "XAG_OZ", label: "999 Silver", sub: "1 oz" },
-              { key: "XAG_G", label: "999 Silver", sub: "1 g" },
-              ...customSymbols.map((s) => ({ key: s, label: s, sub: "" })),
-            ].map((row) => {
-              const p = livePrices[row.key];
-              return (
-                <div
-                  key={row.key}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: isMobile ? "1.3fr 1fr 1fr" : "1fr 1fr 1fr 0.7fr",
-                    gap: 8,
-                    padding: "11px 16px",
-                    borderBottom: `1px solid ${V.border}`,
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{row.label}</div>
-                    <div style={{ fontSize: 11, color: V.faint }}>
-                      {row.sub}{isMobile && row.sub ? " · " : ""}{isMobile && (p?.updated ?? "—")}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: V.pos }}>
-                    {p ? `AED ${fmtN(p.ask)}` : <span style={{ color: V.faint }}>—</span>}
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: V.neg }}>
-                    {p ? `AED ${fmtN(p.bid)}` : <span style={{ color: V.faint }}>—</span>}
-                  </div>
-                  {!isMobile && <div style={{ fontSize: 11, color: V.faint }}>{p?.updated ?? "—"}</div>}
-                </div>
-              );
-            })}
-          </div>
-
-          <div
-            style={{
-              background: V.card,
-              border: `1px solid ${V.border}`,
-              borderRadius: 12,
-              padding: "14px 16px",
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
-              Custom symbols
-            </div>
-
-            <div
-              style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}
-            >
-              {customSymbols.map((s) => (
-                <div
-                  key={s}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background: isDark
-                      ? "rgba(255,255,255,0.08)"
-                      : "rgba(0,0,0,0.06)",
-                    fontSize: 12,
-                    fontWeight: 600,
-                  }}
-                >
-                  {s}
-                  <button
-                    onClick={() => removeCustomSymbol(s)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: V.faint,
-                      fontSize: 14,
-                      lineHeight: 1,
-                      padding: 0,
-                      marginLeft: 2,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                style={{ ...inp, flex: 1 }}
-                value={newSymbol}
-                onChange={(e) => setNewSymbol(e.target.value)}
-                placeholder="e.g. AAPL, PARKIN.DFM, BTC-USD"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && newSymbol.trim()) {
-                    addCustomSymbol(newSymbol);
-                    setNewSymbol("");
-                  }
-                }}
-              />
-              <button
-                style={btnP}
-                onClick={() => {
-                  if (newSymbol.trim()) {
-                    addCustomSymbol(newSymbol);
-                    setNewSymbol("");
-                  }
-                }}
-              >
-                Add
-              </button>
-            </div>
-
-            <div style={{ fontSize: 11, color: V.faint, marginTop: 8 }}>
-              Yahoo Finance symbols: stocks use ticker (AAPL), DFM stocks add .DFM
-              (PARKIN.DFM), crypto add -USD (BTC-USD)
-            </div>
-          </div>
-        </div>
+        <PricesTab
+          V={V}
+          btn={btn}
+          btnP={btnP}
+          inp={inp}
+          isMobile={isMobile}
+          isDark={isDark}
+          goldApiKey={goldApiKey}
+          livePrices={livePrices}
+          customSymbols={customSymbols}
+          onSaveApiKey={(key) => void saveApiKey(key)}
+          onRemoveApiKey={() => void removeApiKey()}
+          onAddCustomSymbol={addCustomSymbol}
+          onRemoveCustomSymbol={removeCustomSymbol}
+        />
       )}
 
       {activeTab === "assets" && (
         <>
-          <div
-            style={{
-              padding: "12px 24px 0",
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill,minmax(155px,1fr))",
-              gap: 10,
-            }}
-          >
-            {[
-              {
-                label: "Total invested",
-                value: `AED ${fmtN(totals.invested)}`,
-                color: V.accent,
-              },
-              {
-                label: "Current value",
-                value: `AED ${fmtN(totals.current)}`,
-                color: V.text,
-              },
-              {
-                label: "P&L",
-                value: fmtSignedAed(totals.pl),
-                color: plColor,
-              },
-              {
-                label: "Return",
-                value: `${totals.plPct >= 0 ? "+" : ""}${totals.plPct.toFixed(2)}%`,
-                color: plColor,
-              },
-            ].map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  background: V.card,
-                  border: `1px solid ${V.border}`,
-                  borderRadius: 12,
-                  padding: "14px 16px",
-                  boxShadow: V.shadow,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: V.faint,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 4,
-                  }}
-                >
-                  {s.label}
+          <div style={{ padding: "12px 24px 0" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(155px,1fr))", gap: 10 }}>
+              {[
+                { label: "Total invested", value: `AED ${fmtN(totals.invested)}`, color: V.accent },
+                { label: "Current value", value: `AED ${fmtN(totals.current)}`, color: V.text },
+                { label: "P&L", value: fmtSignedAed(totals.pl), color: plColor },
+                { label: "Return", value: `${totals.plPct >= 0 ? "+" : ""}${totals.plPct.toFixed(2)}%`, color: plColor },
+              ].map((s) => (
+                <div key={s.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 12, padding: "14px 16px", boxShadow: V.shadow }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{s.label}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: s.color }}>{s.value}</div>
                 </div>
-                <div style={{ fontSize: 17, fontWeight: 800, color: s.color }}>
-                  {s.value}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
-          {/* Portfolio-wide alerts strip — active + recently-triggered alerts
-              across all items, so the user doesn't have to open each asset's
-              detail page to know an alert is live or fired. */}
-          {allAlerts.filter((a) => !dismissedAlertIds.includes(a.id)).length > 0 && (
-            <div style={{ padding: "12px 24px 0" }}>
-              <div
-                style={{
-                  background: V.card,
-                  border: `1px solid ${V.border}`,
-                  borderRadius: 12,
-                  padding: "10px 14px",
-                  boxShadow: V.shadow,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color: V.faint,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 8,
-                  }}
-                >
-                  🔔 Alerts
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {allAlerts
-                    .filter((a) => !dismissedAlertIds.includes(a.id))
-                    .map((a) => (
-                      <div
-                        key={a.id}
-                        onClick={() => router.push(`/dashboard/portfolio/${a.itemId}`)}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 10,
-                          padding: "6px 10px",
-                          borderRadius: 8,
-                          cursor: "pointer",
-                          background: a.triggeredAt
-                            ? "rgba(239,68,68,0.08)"
-                            : isDark
-                            ? "rgba(255,255,255,0.03)"
-                            : "rgba(0,0,0,0.02)",
-                          fontSize: 12,
-                        }}
-                      >
-                        <div>
-                          <strong style={{ color: V.text }}>
-                            {a.itemName} ({a.itemSymbol})
-                          </strong>{" "}
-                          <span style={{ color: V.muted }}>
-                            {a.alertType === "above" ? "Above" : "Below"} AED {fmtN(a.targetPrice)}
-                          </span>
-                          {a.triggeredAt && (
-                            <span style={{ color: V.neg, fontWeight: 700, marginLeft: 6 }}>
-                              ● Triggered
-                            </span>
-                          )}
-                        </div>
-                        {a.triggeredAt && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDismissedAlertIds((p) => [...p, a.id]);
-                            }}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                              color: V.faint,
-                              fontSize: 11,
-                              fontWeight: 700,
-                            }}
-                          >
-                            Dismiss
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </div>
+          <AlertsStrip V={V} isDark={isDark} alerts={allAlerts} dismissedIds={dismissedAlertIds} onOpenItem={(itemId) => router.push(`/dashboard/portfolio/${itemId}`)} onDismiss={(id) => setDismissedAlertIds((p) => [...p, id])} />
+
+          {items.length > 0 && (
+            <AllocationAndFilters
+              V={V}
+              isDark={isDark}
+              inp={inp}
+              typeBreakdown={typeBreakdown}
+              itemCounts={itemCounts}
+              typeFilter={typeFilter}
+              onTypeFilterChange={setTypeFilter}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              sortBy={sortBy}
+              onSortChange={setSortBy}
+            />
           )}
 
-          {/* Allocation breakdown bar + Asset type filter tabs */}
-          {items.length > 0 && (() => {
-            const typeBreakdown: Record<AssetType, number> = { gold: 0, silver: 0, stock: 0, crypto: 0, other: 0 };
-            for (const item of items) {
-              const s = allStats[item.id];
-              if (!s) continue;
-              // Use current value (gold-aware) as allocation proxy, fall back to cost basis
-              const cv = calcCurrentValue(item, s.totalUnits);
-              const valueAed = cv !== null ? cv : (s.costBasisAed || 0);
-              typeBreakdown[item.assetType] = (typeBreakdown[item.assetType] ?? 0) + Math.max(0, valueAed);
-            }
-            const totalVal = Object.values(typeBreakdown).reduce((a, b) => a + b, 0);
-            const typeColors: Record<AssetType, string> = {
-              gold: "#FFD700", silver: "#C0C0C0", stock: "#3b82f6", crypto: "#f59e0b", other: "#94a3b8",
-            };
-            const sortedTypes = (Object.entries(typeBreakdown) as [AssetType, number][])
-              .filter(([, v]) => v > 0)
-              .sort(([, a], [, b]) => b - a);
-
-            return (
-              <div style={{ padding: "16px 24px 0" }}>
-                {/* Allocation bar */}
-                {totalVal > 0 && sortedTypes.length > 1 && (
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
-                      <span>Allocation breakdown</span>
-                      <span>{sortedTypes.length} asset type{sortedTypes.length > 1 ? "s" : ""}</span>
-                    </div>
-                    <div style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)" }}>
-                      {sortedTypes.map(([type, val]) => (
-                        <div key={type}
-                          title={`${type}: AED ${fmtN(val)} (${((val / totalVal) * 100).toFixed(1)}%)`}
-                          style={{ width: `${(val / totalVal) * 100}%`, background: typeColors[type], transition: "width 0.3s" }} />
-                      ))}
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
-                      {sortedTypes.map(([type, val]) => (
-                        <div key={type} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                          <span style={{ width: 10, height: 10, borderRadius: 3, background: typeColors[type] }} />
-                          <span style={{ color: V.muted, textTransform: "capitalize", fontWeight: 700 }}>{ASSET_ICONS[type]} {type}</span>
-                          <span style={{ color: V.faint }}>{((val / totalVal) * 100).toFixed(1)}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Asset type tabs */}
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", borderBottom: `1px solid ${V.border}`, paddingBottom: 0 }}>
-                  {(() => {
-                    const counts: Record<string, number> = { all: items.length };
-                    for (const it of items) counts[it.assetType] = (counts[it.assetType] ?? 0) + 1;
-                    const tabs: Array<{ key: AssetType | "all"; label: string; emoji: string }> = [
-                      { key: "all",    label: "All",    emoji: "📊" },
-                      { key: "gold",   label: "Gold",   emoji: "🥇" },
-                      { key: "silver", label: "Silver", emoji: "🥈" },
-                      { key: "stock",  label: "Stocks", emoji: "📈" },
-                      { key: "crypto", label: "Crypto", emoji: "₿" },
-                      { key: "other",  label: "Other",  emoji: "📌" },
-                    ];
-                    return tabs.filter(t => t.key === "all" || (counts[t.key] ?? 0) > 0).map(t => {
-                      const isActive = typeFilter === t.key;
-                      return (
-                        <button key={t.key} onClick={() => setTypeFilter(t.key)}
-                          style={{
-                            padding: "7px 14px",
-                            borderRadius: "8px 8px 0 0",
-                            border: `1px solid ${isActive ? V.border : "transparent"}`,
-                            borderBottom: isActive ? `1px solid ${V.card}` : "1px solid transparent",
-                            background: isActive ? V.card : "transparent",
-                            color: isActive ? V.text : V.muted,
-                            cursor: "pointer",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            marginBottom: -1,
-                            position: "relative",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                          }}>
-                          <span>{t.emoji}</span>
-                          <span>{t.label}</span>
-                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: isActive ? V.accent + "22" : isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)", color: isActive ? V.accent : V.faint, fontWeight: 800 }}>
-                            {counts[t.key] ?? 0}
-                          </span>
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-
-                {/* Search + sort */}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
-                  <input
-                    style={{ ...inp, flex: "1 1 220px", minWidth: 160, width: "auto" }}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="🔎 Search by name or symbol…"
-                  />
-                  <select
-                    style={{ ...inp, width: "auto", minWidth: 170 }}
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as "value" | "pl" | "name")}
-                  >
-                    <option value="value">Sort: Current value ↓</option>
-                    <option value="pl">Sort: P&amp;L ↓</option>
-                    <option value="name">Sort: Name A–Z</option>
-                  </select>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* By broker/platform — pooled across every asset that has ≥1
-              transaction recorded under that name in the free-text
-              Broker/platform field. */}
-          {Object.keys(brokerStats).length > 0 && (() => {
-            const rows = Object.entries(brokerStats)
-              .map(([key, b]) => ({
-                key,
-                name: b.label,
-                ...b,
-                investedAed: b.totalBoughtAed - b.totalSoldAed,
-                pl: b.currentValueAed - b.remainingCostBasisAed,
-              }))
-              .sort((a, b) => b.remainingCostBasisAed - a.remainingCostBasisAed);
-
-            const anyUnknownPrice = rows.some((r) => r.hasUnknownPrice);
-
-            return (
-              <div style={{ padding: "16px 24px 0" }}>
-                <div
-                  style={{
-                    background: V.card,
-                    border: `1px solid ${V.border}`,
-                    borderRadius: 14,
-                    overflow: "hidden",
-                    boxShadow: V.shadow,
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "11px 16px",
-                      borderBottom: `1px solid ${V.border}`,
-                      fontSize: 11,
-                      fontWeight: 800,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.1em",
-                      color: V.faint,
-                      background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
-                    }}
-                  >
-                    By broker / platform
-                  </div>
-
-                  {!isMobile && (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1.3fr 1fr 1fr 1fr 1fr",
-                        gap: 8,
-                        padding: "8px 16px",
-                        fontSize: 10,
-                        fontWeight: 800,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.08em",
-                        color: V.faint,
-                        borderBottom: `1px solid ${V.border}`,
-                      }}
-                    >
-                      <div>Broker</div>
-                      <div>Total invested</div>
-                      <div>Total sold</div>
-                      <div>Current investment</div>
-                      <div>P&amp;L</div>
-                    </div>
-                  )}
-
-                  {rows.map((row) => {
-                    const up = row.pl >= 0;
-                    const plNode = (
-                      <>
-                        {fmtSignedAed(row.pl)}
-                        {row.hasUnknownPrice && (
-                          <span style={{ color: V.faint, fontWeight: 400 }}> *</span>
-                        )}
-                      </>
-                    );
-                    if (isMobile) {
-                      return (
-                        <div
-                          key={row.key}
-                          style={{
-                            padding: "12px 16px",
-                            borderBottom: `1px solid ${V.border}`,
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 6,
-                          }}
-                        >
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14 }}>{row.name}</div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: up ? V.pos : V.neg }}>{plNode}</div>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, fontSize: 11, color: V.muted }}>
-                            <div>Invested<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalBoughtAed)}</strong></div>
-                            <div>Sold<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.totalSoldAed)}</strong></div>
-                            <div>Current<br /><strong style={{ color: V.text, fontSize: 12 }}>AED {fmtN(row.investedAed)}</strong></div>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div
-                        key={row.key}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "1.3fr 1fr 1fr 1fr 1fr",
-                          gap: 8,
-                          padding: "10px 16px",
-                          borderBottom: `1px solid ${V.border}`,
-                          fontSize: 13,
-                          alignItems: "center",
-                        }}
-                      >
-                        <div style={{ fontWeight: 700 }}>{row.name}</div>
-                        <div style={{ color: V.muted }}>AED {fmtN(row.totalBoughtAed)}</div>
-                        <div style={{ color: V.muted }}>AED {fmtN(row.totalSoldAed)}</div>
-                        <div>AED {fmtN(row.investedAed)}</div>
-                        <div style={{ fontWeight: 700, color: up ? V.pos : V.neg }}>{plNode}</div>
-                      </div>
-                    );
-                  })}
-
-                  {anyUnknownPrice && (
-                    <div style={{ padding: "6px 16px 10px", fontSize: 10, color: V.faint }}>
-                      * P&amp;L excludes assets without a current price set
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
+          <BrokerTable V={V} isDark={isDark} isMobile={isMobile} brokerStats={brokerStats} />
 
           <div style={{ padding: "14px 24px" }}>
             {items.length === 0 ? (
               <div style={{ padding: "60px 0", textAlign: "center" }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>📈</div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: V.muted }}>
-                  No assets yet
-                </div>
-                <div style={{ fontSize: 13, color: V.faint, marginTop: 6 }}>
-                  Click + Add asset to start
-                </div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: V.muted }}>No assets yet</div>
+                <div style={{ fontSize: 13, color: V.faint, marginTop: 6 }}>Click + Add asset to start</div>
               </div>
             ) : visibleItems.length === 0 ? (
               <div style={{ padding: "40px 0", textAlign: "center" }}>
-                <div style={{ fontSize: 13, color: V.faint }}>
-                  No assets match your search/filter
-                </div>
+                <div style={{ fontSize: 13, color: V.faint }}>No assets match your search/filter</div>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {visibleItems.map(({ item, s, curVal, pl }) => {
-                  const plPct =
-                    pl !== null && s.costBasisAed > 0
-                      ? (pl / s.costBasisAed) * 100
-                      : null;
-                  const up = pl !== null && pl >= 0;
-                  const activeAlertCount = allAlerts.filter(
-                    (a) => a.itemId === item.id && a.isActive && !a.triggeredAt
-                  ).length;
-
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => router.push(`/dashboard/portfolio/${item.id}`)}
-                      style={{
-                        background: V.card,
-                        border: `1px solid ${V.border}`,
-                        borderRadius: 14,
-                        padding: "16px 18px",
-                        cursor: "pointer",
-                        transition: "border-color 0.15s",
-                      }}
-                      onMouseEnter={(e) =>
-                        ((e.currentTarget as HTMLDivElement).style.borderColor =
-                          "rgba(245,166,35,0.4)")
-                      }
-                      onMouseLeave={(e) =>
-                        ((e.currentTarget as HTMLDivElement).style.borderColor =
-                          V.border)
-                      }
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "flex-start",
-                          gap: 12,
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <div
-                          style={{ display: "flex", gap: 12, alignItems: "center" }}
-                        >
-                          <div
-                            style={{
-                              width: 44,
-                              height: 44,
-                              borderRadius: 12,
-                              background: `${V.accent}15`,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: 22,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {ASSET_ICONS[item.assetType]}
-                          </div>
-
-                          <div>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: 8,
-                                alignItems: "center",
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              <span style={{ fontSize: 16, fontWeight: 800 }}>
-                                {item.name}
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  padding: "2px 8px",
-                                  borderRadius: 999,
-                                  background: "rgba(245,166,35,0.1)",
-                                  color: V.accent,
-                                }}
-                              >
-                                {item.symbol}
-                              </span>
-                              {activeAlertCount > 0 && (
-                                <span
-                                  title={`${activeAlertCount} active alert${activeAlertCount > 1 ? "s" : ""}`}
-                                  style={{
-                                    fontSize: 10,
-                                    fontWeight: 800,
-                                    padding: "2px 8px",
-                                    borderRadius: 999,
-                                    background: "rgba(59,130,246,0.14)",
-                                    color: "#3b82f6",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: 3,
-                                  }}
-                                >
-                                  🔔 {activeAlertCount}
-                                </span>
-                              )}
-                              {item.livePriceSymbol && (
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    padding: "2px 8px",
-                                    borderRadius: 999,
-                                    background: isDark
-                                      ? "rgba(255,255,255,0.08)"
-                                      : "rgba(0,0,0,0.06)",
-                                    color: V.faint,
-                                  }}
-                                >
-                                  {item.livePriceSymbol}
-                                </span>
-                              )}
-                              {item.assetType === "gold" && (item.goldPurityKarat || item.weightGrams) && (
-                                <span
-                                  style={{
-                                    fontSize: 10,
-                                    fontWeight: 800,
-                                    padding: "2px 8px",
-                                    borderRadius: 999,
-                                    background: V.goldSoft,
-                                    color: V.gold,
-                                    border: "1px solid rgba(255,215,0,0.3)",
-                                  }}
-                                >
-                                  {item.goldPurityKarat ? `${item.goldPurityKarat}K` : ""}
-                                  {item.goldPurityKarat && item.weightGrams ? " · " : ""}
-                                  {item.weightGrams ? `${item.weightGrams}g` : ""}
-                                </span>
-                              )}
-                            </div>
-
-                            <div style={{ fontSize: 12, color: V.faint, marginTop: 2 }}>
-                              {fmtN(s.totalUnits, 4)} {item.unitLabel} · Avg AED{" "}
-                              {fmtN(s.avgUnitPrice)} / {item.unitLabel}
-                            </div>
-
-                            {item.currentPrice && (
-                              <div style={{ fontSize: 12, color: V.muted, marginTop: 1 }}>
-                                Price:{" "}
-                                <strong style={{ color: V.text }}>
-                                  AED {fmtN(item.currentPrice)}
-                                </strong>
-                                {item.currentPriceUpdatedAt && (
-                                  <span style={{ color: V.faint, marginLeft: 6 }}>
-                                    {new Date(
-                                      item.currentPriceUpdatedAt
-                                    ).toLocaleDateString("en-AE")}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div style={{ textAlign: isMobile ? "left" : "right", width: isMobile ? "100%" : undefined }}>
-                          <div style={{ fontSize: 16, fontWeight: 800, color: V.text }}>
-                            {curVal !== null ? (
-                              `AED ${fmtN(curVal)}`
-                            ) : (
-                              <span style={{ color: V.faint }}>No price</span>
-                            )}
-                          </div>
-
-                          {pl !== null && plPct !== null && (
-                            <div
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 700,
-                                color: up ? V.pos : V.neg,
-                                marginTop: 2,
-                              }}
-                            >
-                              {fmtSignedAed(pl)} ({plPct >= 0 ? "+" : ""}
-                              {plPct.toFixed(2)}%)
-                            </div>
-                          )}
-
-                          <div style={{ fontSize: 11, color: V.faint, marginTop: 2 }}>
-                            Invested: AED {fmtN(s.costBasisAed)}
-                          </div>
-
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: isMobile ? "flex-start" : "flex-end",
-                              gap: 6,
-                              marginTop: 4,
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            <button
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                if (expandedItemId === item.id) {
-                                  setExpandedItemId(null);
-                                } else {
-                                  setExpandedItemId(item.id);
-                                  if (!itemPurchases[item.id]) {
-                                    const { data } = await supabase
-                                      .from("portfolio_purchases")
-                                      .select("*")
-                                      .eq("item_id", item.id)
-                                      .order("purchased_at", { ascending: false })
-                                      .limit(15);
-                                    setItemPurchases(p => ({ ...p, [item.id]: (data ?? []).map(dbToPurchase) }));
-                                  }
-                                }
-                              }}
-                              style={{ ...btn, padding: "3px 10px", fontSize: 10 }}
-                            >
-                              {expandedItemId === item.id ? "▲ Hide" : "▼ History"}
-                            </button>
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowUpdatePrice(item);
-                                setNewPrice(item.currentPrice?.toString() ?? "");
-                                setEditGoldPurity((item.goldPurityKarat ?? 24).toString());
-                                setEditGoldWeight(item.weightGrams?.toString() ?? "");
-                              }}
-                              style={{ ...btn, padding: "3px 10px", fontSize: 10 }}
-                            >
-                              Update price
-                            </button>
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setShowDeleteItem(item.id);
-                              }}
-                              style={{
-                                ...btn,
-                                padding: isMobile ? "6px 12px" : "3px 10px",
-                                minHeight: undefined,
-                                fontSize: 10,
-                                color: V.neg,
-                                borderColor: "rgba(239,68,68,0.3)",
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Transaction history drawer */}
-                      {expandedItemId === item.id && (
-                        <div
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ marginTop: 14, paddingTop: 14, borderTop: `1px dashed ${V.border}` }}
-                        >
-                          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: V.faint, marginBottom: 8, display: "flex", justifyContent: "space-between" }}>
-                            <span>Transaction history</span>
-                            <span>{(itemPurchases[item.id] ?? []).length} transactions</span>
-                          </div>
-                          {!itemPurchases[item.id] ? (
-                            <div style={{ fontSize: 12, color: V.faint, padding: "10px 0", textAlign: "center" }}>Loading…</div>
-                          ) : itemPurchases[item.id].length === 0 ? (
-                            <div style={{ fontSize: 12, color: V.faint, padding: "10px 0", textAlign: "center" }}>No transactions yet</div>
-                          ) : (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
-                              {itemPurchases[item.id].map(tx => {
-                                const isSell = tx.transactionType === "sell";
-                                return (
-                                  <div key={tx.id} style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 6 : 0, justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "center", padding: "8px 12px", background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", borderRadius: 8, fontSize: 12 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                      <span style={{ padding: "2px 8px", borderRadius: 999, background: isSell ? V.negSoft : V.posSoft, color: isSell ? V.neg : V.pos, fontWeight: 800, fontSize: 10 }}>
-                                        {isSell ? "SELL" : "BUY"}
-                                      </span>
-                                      <div>
-                                        <div style={{ fontWeight: 600, color: V.text }}>
-                                          {fmtN(tx.units, 4)} {item.unitLabel} @ {tx.currency} {fmtN(tx.unitPrice)}
-                                        </div>
-                                        <div style={{ fontSize: 10, color: V.faint }}>
-                                          {new Date(tx.purchasedAt).toLocaleDateString("en-AE", { year: "numeric", month: "short", day: "numeric" })}
-                                          {tx.source ? ` · ${tx.source}` : ""}
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <div style={{ fontWeight: 700, color: isSell ? V.pos : V.text, marginLeft: isMobile ? 46 : 0 }}>
-                                      {isSell ? "+" : ""}{tx.currency} {fmtN(tx.totalPaid)}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          <div style={{ marginTop: 10, textAlign: "center" }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(`/dashboard/portfolio/${item.id}`);
-                              }}
-                              style={{ ...btn, padding: "5px 14px", fontSize: 11, color: V.accent, borderColor: V.accent + "44" }}
-                            >
-                              View full detail →
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {visibleItems.map(({ item, s, curVal, pl }) => (
+                  <HoldingCard
+                    key={item.id}
+                    V={V}
+                    btn={btn}
+                    isDark={isDark}
+                    isMobile={isMobile}
+                    item={item}
+                    stats={s}
+                    currentValue={curVal}
+                    pl={pl}
+                    activeAlertCount={allAlerts.filter((a) => a.itemId === item.id && a.isActive && !a.triggeredAt).length}
+                    isExpanded={expandedItemId === item.id}
+                    transactions={itemPurchases[item.id]}
+                    onOpenDetail={() => router.push(`/dashboard/portfolio/${item.id}`)}
+                    onToggleExpand={() => void toggleTransactionDrawer(item.id)}
+                    onUpdatePrice={() => setShowUpdatePrice(item)}
+                    onDelete={() => setShowDeleteItem(item.id)}
+                  />
+                ))}
               </div>
             )}
           </div>
 
-          {recent.length > 0 && (
-            <div
-              style={{
-                margin: "0 24px 24px",
-                background: V.card,
-                border: `1px solid ${V.border}`,
-                borderRadius: 14,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  padding: "11px 16px",
-                  borderBottom: `1px solid ${V.border}`,
-                  fontSize: 11,
-                  fontWeight: 800,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                  color: V.faint,
-                  background: isDark
-                    ? "rgba(255,255,255,0.03)"
-                    : "rgba(0,0,0,0.02)",
-                }}
-              >
-                Recent transactions
-              </div>
-
-              {!isMobile && (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 0.6fr 0.7fr 0.8fr 0.8fr",
-                    gap: 8,
-                    padding: "8px 16px",
-                    fontSize: 10,
-                    fontWeight: 800,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: V.faint,
-                    borderBottom: `1px solid ${V.border}`,
-                  }}
-                >
-                  <div>Asset</div>
-                  <div>Type</div>
-                  <div>Units</div>
-                  <div>Amount</div>
-                  <div>Date</div>
-                </div>
-              )}
-
-              {recent.map((p) => {
-                const typeNode = (
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 800,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      color: p.transactionType === "buy" ? V.pos : V.neg,
-                    }}
-                  >
-                    {p.transactionType}
-                  </span>
-                );
-                if (isMobile) {
-                  return (
-                    <div
-                      key={p.id}
-                      style={{
-                        padding: "12px 16px",
-                        borderBottom: `1px solid ${V.border}`,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14 }}>
-                          {p.itemName}{" "}
-                          <span style={{ fontSize: 11, color: V.faint, fontWeight: 400 }}>({p.itemSymbol})</span>
-                        </div>
-                        {typeNode}
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: V.muted }}>
-                        <span>{fmtN(p.units, 4)} units</span>
-                        <span style={{ fontSize: 11, color: V.faint }}>
-                          {new Date(p.purchasedAt).toLocaleDateString("en-AE")}
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>
-                        {p.transactionType === "sell" ? "Received: " : "Paid: "}
-                        {p.currency} {fmtN(p.totalPaid)}
-                      </div>
-                    </div>
-                  );
-                }
-                return (
-                  <div
-                    key={p.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 0.6fr 0.7fr 0.8fr 0.8fr",
-                      gap: 8,
-                      padding: "10px 16px",
-                      borderBottom: `1px solid ${V.border}`,
-                      fontSize: 13,
-                      alignItems: "center",
-                    }}
-                  >
-                    <div style={{ fontWeight: 700 }}>
-                      {p.itemName}{" "}
-                      <span style={{ fontSize: 11, color: V.faint }}>
-                        ({p.itemSymbol})
-                      </span>
-                    </div>
-                    <div>{typeNode}</div>
-                    <div style={{ color: V.muted }}>{fmtN(p.units, 4)}</div>
-                    <div style={{ fontWeight: 700 }}>
-                      {p.transactionType === "sell" ? "Received: " : "Paid: "}
-                      {p.currency} {fmtN(p.totalPaid)}
-                    </div>
-                    <div style={{ fontSize: 11, color: V.faint }}>
-                      {new Date(p.purchasedAt).toLocaleDateString("en-AE")}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {recentHasMore && (
-                <div style={{ padding: "12px 16px", textAlign: "center" }}>
-                  <button style={btn} onClick={loadMoreRecent} disabled={loadingMoreRecent}>
-                    {loadingMoreRecent ? "Loading…" : "Load more"}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          <RecentTransactionsTable V={V} btn={btn} isDark={isDark} isMobile={isMobile} recent={recent} hasMore={recentHasMore} loadingMore={loadingMoreRecent} onLoadMore={() => void loadMoreRecent()} />
         </>
       )}
 
-      {showAddItem && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            zIndex: 50,
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "center",
-            padding: 16,
-            overflowY: "auto",
-          }}
-          onClick={() => setShowAddItem(false)}
-        >
-          <div
-            style={{
-              background: V.card,
-              border: `1px solid ${V.border}`,
-              borderRadius: 18,
-              width: "min(520px,100%)",
-              maxHeight: "90vh",
-              overflow: "auto",
-              marginTop: 12,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                padding: "18px 20px",
-                borderBottom: `1px solid ${V.border}`,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <div style={{ fontSize: 18, fontWeight: 800 }}>Add asset</div>
-              <button style={btn} onClick={() => setShowAddItem(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div
-              style={{
-                padding: 20,
-                display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-                gap: 14,
-              }}
-            >
-              <label style={lbl}>
-                Symbol
-                <input
-                  style={inp}
-                  value={newItem.symbol}
-                  onChange={(e) =>
-                    setNewItem((p) => ({ ...p, symbol: e.target.value }))
-                  }
-                  placeholder="e.g. XAU"
-                />
-              </label>
-
-              <label style={lbl}>
-                Name
-                <input
-                  style={inp}
-                  value={newItem.name}
-                  onChange={(e) =>
-                    setNewItem((p) => ({ ...p, name: e.target.value }))
-                  }
-                  placeholder="e.g. Gold"
-                />
-              </label>
-
-              <label style={lbl}>
-                Type
-                <select
-                  style={inp}
-                  value={newItem.assetType}
-                  onChange={(e) =>
-                    setNewItem((p) => ({
-                      ...p,
-                      assetType: e.target.value as AssetType,
-                    }))
-                  }
-                >
-                  <option value="gold">Gold</option>
-                  <option value="silver">Silver</option>
-                  <option value="stock">Stock</option>
-                  <option value="crypto">Crypto</option>
-                  <option value="other">Other</option>
-                </select>
-              </label>
-
-              <label style={lbl}>
-                Unit
-                <input
-                  style={inp}
-                  value={newItem.unitLabel}
-                  onChange={(e) =>
-                    setNewItem((p) => ({ ...p, unitLabel: e.target.value }))
-                  }
-                  placeholder="oz, share…"
-                />
-              </label>
-
-              <label style={lbl}>
-                Currency
-                <select
-                  style={inp}
-                  value={newItem.mainCurrency}
-                  onChange={(e) =>
-                    setNewItem((p) => ({
-                      ...p,
-                      mainCurrency: e.target.value as Currency,
-                    }))
-                  }
-                >
-                  <option>AED</option>
-                  <option>USD</option>
-                  <option>INR</option>
-                  <option>GBP</option>
-                  <option>EUR</option>
-                </select>
-              </label>
-
-              <label style={{ ...lbl, gridColumn: "1/-1" }}>
-                Live price link
-                <select
-                  style={inp}
-                  value={newItem.livePriceSymbol}
-                  onChange={(e) =>
-                    setNewItem((p) => ({
-                      ...p,
-                      livePriceSymbol: e.target.value,
-                    }))
-                  }
-                >
-                  {[
-                    ...LIVE_PRICE_OPTIONS,
-                    ...customSymbols
-                      .filter(
-                        (s) =>
-                          !LIVE_PRICE_OPTIONS.some((o) => o.value === s)
-                      )
-                      .map((s) => ({
-                        value: s,
-                        label: s,
-                      })),
-                  ].map((opt) => (
-                    <option key={opt.value || "none"} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <span style={{ fontSize: 11, color: V.faint, marginTop: 2 }}>
-                  Asset current price will auto-update from Live Prices tab
-                  using the Bid/Sell rate.
-                </span>
-              </label>
-
-              {/* Gold-specific fields — shown only when asset type is gold */}
-              {newItem.assetType === "gold" && (
-                <>
-                  <label style={lbl}>
-                    Purity
-                    <select
-                      style={inp}
-                      value={newItem.goldPurityKarat}
-                      onChange={(e) =>
-                        setNewItem((p) => ({ ...p, goldPurityKarat: e.target.value }))
-                      }
-                    >
-                      <option value="24">24K (pure, 99.9%)</option>
-                      <option value="22">22K (91.6%)</option>
-                      <option value="21">21K (87.5%)</option>
-                      <option value="18">18K (75%)</option>
-                    </select>
-                  </label>
-
-                  <label style={lbl}>
-                    Weight (grams)
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      style={inp}
-                      value={newItem.weightGrams}
-                      onChange={(e) =>
-                        setNewItem((p) => ({ ...p, weightGrams: e.target.value }))
-                      }
-                      placeholder="e.g. 10.5"
-                    />
-                  </label>
-                </>
-              )}
-
-              <label style={{ ...lbl, gridColumn: "1/-1" }}>
-                Notes
-                <input
-                  style={inp}
-                  value={newItem.notes}
-                  onChange={(e) =>
-                    setNewItem((p) => ({ ...p, notes: e.target.value }))
-                  }
-                />
-              </label>
-            </div>
-
-            <div
-              style={{
-                padding: "0 20px 20px",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-              }}
-            >
-              <button style={btn} onClick={() => setShowAddItem(false)}>
-                Cancel
-              </button>
-              <button style={btnP} onClick={addItem}>
-                Add
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showAddItem && <AddItemModal V={V} btn={btn} btnP={btnP} inp={inp} lbl={lbl} isMobile={isMobile} customSymbols={customSymbols} onClose={() => setShowAddItem(false)} onSubmit={(item) => void addItem(item)} />}
 
       {showUpdatePrice && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            zIndex: 50,
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "center",
-            padding: 16,
-            overflowY: "auto",
-          }}
-          onClick={() => setShowUpdatePrice(null)}
-        >
-          <div
-            style={{
-              background: V.card,
-              border: `1px solid ${V.border}`,
-              borderRadius: 18,
-              width: "min(380px,100%)",
-              marginTop: 12,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              style={{
-                padding: "18px 20px",
-                borderBottom: `1px solid ${V.border}`,
-                fontSize: 18,
-                fontWeight: 800,
-              }}
-            >
-              {showUpdatePrice.assetType === "gold" ? "Update gold" : "Update price"} — {showUpdatePrice.name}
-            </div>
-
-            <div style={{ padding: 20 }}>
-              <label style={lbl}>
-                {showUpdatePrice.mainCurrency} per {showUpdatePrice.unitLabel}
-                {showUpdatePrice.assetType === "gold" && (
-                  <span style={{ fontSize: 10, color: V.faint, fontWeight: 400, textTransform: "none", marginLeft: 6 }}>
-                    (spot price per gram of pure 24K)
-                  </span>
-                )}
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  style={inp}
-                  value={newPrice}
-                  onChange={(e) => setNewPrice(e.target.value)}
-                  placeholder="e.g. 9500"
-                  autoFocus
-                />
-              </label>
-
-              {/* Gold-specific edit fields */}
-              {showUpdatePrice.assetType === "gold" && (
-                <>
-                  <label style={{ ...lbl, marginTop: 14 }}>
-                    Purity
-                    <select style={inp} value={editGoldPurity} onChange={(e) => setEditGoldPurity(e.target.value)}>
-                      <option value="24">24K (99.9%)</option>
-                      <option value="22">22K (91.6%)</option>
-                      <option value="21">21K (87.5%)</option>
-                      <option value="18">18K (75%)</option>
-                    </select>
-                  </label>
-                  <label style={{ ...lbl, marginTop: 14 }}>
-                    Weight (grams)
-                    <input type="text" inputMode="decimal" style={inp} value={editGoldWeight}
-                      onChange={(e) => setEditGoldWeight(e.target.value)} placeholder="e.g. 10.5" />
-                  </label>
-                  {newPrice && editGoldWeight && editGoldPurity && (() => {
-                    const factor = PURITY_FACTOR[Number(editGoldPurity)] ?? 1;
-                    const computedRaw = Number(newPrice) * Number(editGoldWeight) * factor;
-                    const computed = toAed(computedRaw, showUpdatePrice.mainCurrency);
-                    return (
-                      <div style={{ marginTop: 14, padding: "10px 12px", background: V.goldSoft, borderRadius: 10, border: "1px solid rgba(255,215,0,0.3)", fontSize: 12 }}>
-                        <div style={{ color: V.muted, marginBottom: 4 }}>Calculated current value:</div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: V.gold }}>
-                          AED {fmtN(computed)}
-                        </div>
-                        <div style={{ color: V.faint, fontSize: 10, marginTop: 4 }}>
-                          = {editGoldWeight}g × AED {newPrice}/g × {(factor * 100).toFixed(1)}%
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
-            </div>
-
-            <div
-              style={{
-                padding: "0 20px 20px",
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-              }}
-            >
-              <button style={btn} onClick={() => setShowUpdatePrice(null)}>
-                Cancel
-              </button>
-              <button style={btnP} onClick={() => updateCurrentPrice(showUpdatePrice)}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <UpdatePriceModal V={V} btn={btn} btnP={btnP} inp={inp} lbl={lbl} item={showUpdatePrice} onClose={() => setShowUpdatePrice(null)} onSubmit={(price, purity, weight) => void updateCurrentPrice(showUpdatePrice, price, purity, weight)} />
       )}
 
-      {showDeleteItem && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.6)",
-            zIndex: 50,
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "center",
-            padding: 16,
-            overflowY: "auto",
-          }}
-          onClick={() => setShowDeleteItem(null)}
-        >
-          <div
-            style={{
-              background: V.card,
-              border: `1px solid ${V.border}`,
-              borderRadius: 16,
-              padding: 22,
-              width: "min(360px,100%)",
-              marginTop: 12,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>
-              Delete asset?
-            </div>
-            <div style={{ fontSize: 13, color: V.muted, marginBottom: 16 }}>
-              All purchases for this asset will also be deleted.
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button style={btn} onClick={() => setShowDeleteItem(null)}>
-                Cancel
-              </button>
-              <button
-                style={{ ...btn, borderColor: "rgba(239,68,68,0.4)", color: "#ef4444" }}
-                onClick={() => deleteItem(showDeleteItem)}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showDeleteItem && <DeleteConfirmModal V={V} btn={btn} title="Delete asset?" message="All purchases for this asset will also be deleted." onCancel={() => setShowDeleteItem(null)} onConfirm={() => void deleteItem(showDeleteItem)} />}
 
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 20,
-            right: 16,
-            background: isDark ? "#1a3a2a" : "#f0fdf4",
-            color: V.pos,
-            border: "1px solid rgba(22,163,74,0.3)",
-            padding: "12px 18px",
-            borderRadius: 12,
-            fontSize: 13,
-            fontWeight: 700,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-            zIndex: 200,
-          }}
-        >
-          {toast}
-        </div>
-      )}
+      <Toast message={toast} isDark={isDark} pos={V.pos} />
     </div>
   );
 }
