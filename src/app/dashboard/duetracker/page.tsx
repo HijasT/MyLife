@@ -4,367 +4,51 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
-import { nowDubai, todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
+import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { useIsMobile } from "@/hooks/useIsMobile";
-
-type Currency = "AED" | "INR" | "USD";
-type Status = "pending" | "partial" | "paid" | "waived";
-type FilterKey = "all" | "pending" | "partial" | "paid" | "waived" | "overdue" | "upcoming";
-type SortKey = "manual" | "dueDay" | "amountDesc" | "amountAsc" | "name" | "status";
-
-type DueItem = {
-  id: string;
-  name: string;
-  group: string;
-  dueDay: number | null;
-  statementDay: number | null;
-  defaultCurrency: Currency;
-  defaultAmount: number | null;
-  isFixed: boolean;
-  isHidden: boolean;
-  sortOrder: number;
-};
-
-type DueEntry = {
-  id: string;
-  dueItemId: string;
-  month: string;
-  amount: number | null;
-  currency: Currency;
-  status: Status;
-  paidAt: string | null;
-  note: string;
-  amountPaid: number;
-  lastPaidAt: string | null;
-  carryForwardAmount: number;
-  carriedForwardFrom: string | null;
-};
+import {
+  type Currency,
+  type DueEntry,
+  type DueItem,
+  type MonthSettings,
+  type Status,
+  DEFAULT_GROUPS,
+  DEFAULT_RATES,
+  buildCarryForwardNote,
+  dbToEntry,
+  dbToItem,
+  fmtMonth,
+  getCarryForwardAmount,
+  getCycleDates,
+  getTotalDue,
+  isPaid,
+  isSettled,
+  nextMonth,
+  nowMonth,
+  prevMonth,
+  remittanceGroupFromRow,
+  remittanceStatusFromRow,
+  toAed,
+} from "@/lib/duetracker";
+import type { FilterKey, SortKey } from "./types";
+import { getTheme, styleKit } from "./_components/theme";
+import { Toast } from "./_components/Toast";
+import { LoadingSpinner } from "./_components/LoadingSpinner";
+import { StatGrid } from "./_components/StatGrid";
+import { DueTrackerHeader } from "./_components/DueTrackerHeader";
+import { MonthNav } from "./_components/MonthNav";
+import { GroupCard } from "./_components/GroupCard";
+import { DueRow } from "./_components/DueRow";
+import { RemittanceWidget } from "./_components/RemittanceWidget";
+import { AddDueModal, type NewDueItemInput } from "./_components/AddDueModal";
+import { MonthSettingsModal } from "./_components/MonthSettingsModal";
+import { PaymentModal } from "./_components/PaymentModal";
 
 type PaymentModalState = {
   item: DueItem;
   entry: DueEntry;
   remaining: number;
 };
-
-type MonthSettings = {
-  month: string;
-  mainCurrency: Currency;
-  note: string;
-  cashIn: Record<string, number | string>;
-  fxRates: Record<string, number>;
-  groups: string[];
-  remittanceInr: number | null;
-  remittanceRate: number | null;
-  remittanceStatus: Status;
-  isLocked: boolean;
-  // Which group is treated as the remittance-tracked destination (defaults to "India"
-  // for backward compatibility). User-editable since groups are free-form/renamable.
-  remittanceGroup: string;
-};
-
-type ThemeVars = {
-  bg: string;
-  card: string;
-  border: string;
-  text: string;
-  muted: string;
-  faint: string;
-  input: string;
-  accent: string;
-  pos: string;
-  posSoft: string;
-  neg: string;
-  negSoft: string;
-  warn: string;
-  warnSoft: string;
-  gold: string;
-  goldSoft: string;
-};
-
-const DEFAULT_GROUPS = ["UAE", "India"];
-const DEFAULT_RATES: Record<string, number> = { INR: 25.2, USD: 3.67 };
-
-function nowMonth(tz: string = APP_TZ) {
-  return nowDubai(tz).slice(0, 7);
-}
-
-function prevMonth(m: string) {
-  const [y, mo] = m.split("-").map(Number);
-  const d = new Date(y, mo - 2, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function nextMonth(m: string) {
-  const [y, mo] = m.split("-").map(Number);
-  const d = new Date(y, mo, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function fmtMonth(m: string) {
-  const [y, mo] = m.split("-");
-  return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-AE", {
-    month: "long",
-    year: "numeric",
-  });
-}
-
-function fmtDateTime(iso: string | null, tz: string = APP_TZ) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-AE", {
-    timeZone: tz,
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function ordinal(n: number) {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-}
-function daysBetween(fromDate: Date, toDate: Date) {
-  const from = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
-  const to = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate());
-  return Math.round((to.getTime() - from.getTime()) / 86400000);
-}
-
-function monthDayDate(baseMonth: string, day: number) {
-  const [y, mo] = baseMonth.split("-").map(Number);
-  const lastDay = new Date(y, mo, 0).getDate();
-  return new Date(y, mo - 1, Math.min(day, lastDay));
-}
-
-function monthKeyFromDate(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function fmtMonthDay(date: Date) {
-  return date.toLocaleDateString("en-AE", { month: "short", day: "numeric" });
-}
-
-function getCycleDates(statementDay: number | null, dueDay: number | null, todayIso: string, status?: Status) {
-  if (!statementDay && !dueDay) return null;
-  const today = new Date(`${todayIso}T00:00:00`);
-  const thisMonth = todayIso.slice(0, 7);
-  const prev = prevMonth(thisMonth);
-  const next = nextMonth(thisMonth);
-
-  const buildPair = (statementMonth: string) => {
-    const statementDate = statementDay ? monthDayDate(statementMonth, statementDay) : null;
-    let dueDate: Date | null = null;
-    if (dueDay) {
-      // No statement day at all: the due day is just a same-month recurring date,
-      // there's no statement/due cycle to span a month boundary with.
-      // With a statement day: due falls in the same month if it's after the statement
-      // day within that month, otherwise it spans into the next month.
-      const dueMonth = !statementDay ? statementMonth : statementDay < dueDay ? statementMonth : nextMonth(statementMonth);
-      dueDate = monthDayDate(dueMonth, dueDay);
-    }
-    return { statementDate, dueDate };
-  };
-
-  const previousPair = buildPair(prev);
-  const currentPair = buildPair(thisMonth);
-  const nextPair = buildPair(next);
-
-  let active = currentPair;
-  if (currentPair.statementDate && today < currentPair.statementDate) {
-    active = currentPair;
-  } else if (currentPair.dueDate && today <= currentPair.dueDate) {
-    active = currentPair;
-  } else {
-    active = nextPair;
-  }
-
-  let nextLabel: "statement" | "due" | null = null;
-  let nextDate: Date | null = null;
-  const settled = status ? isSettled(status) : false;
-
-  if (settled) {
-    if (active.dueDate && today <= active.dueDate && nextPair.statementDate) {
-      nextLabel = "statement";
-      nextDate = nextPair.statementDate;
-    } else if (active.statementDate && today < active.statementDate) {
-      nextLabel = "statement";
-      nextDate = active.statementDate;
-    } else if (nextPair.statementDate) {
-      nextLabel = "statement";
-      nextDate = nextPair.statementDate;
-      active = nextPair;
-    }
-  } else {
-    if (active.statementDate && today < active.statementDate) {
-      nextLabel = "statement";
-      nextDate = active.statementDate;
-    } else if (active.dueDate && today <= active.dueDate) {
-      nextLabel = "due";
-      nextDate = active.dueDate;
-    } else if (nextPair.statementDate) {
-      nextLabel = "statement";
-      nextDate = nextPair.statementDate;
-      active = nextPair;
-    }
-  }
-
-  // Overdue determination independent of the "what to show next" rolling logic above:
-  // the most recent cycle (previous or current month's) whose due date has actually
-  // passed relative to today. `active`/`nextPair` roll forward once the current cycle's
-  // due date has passed, so they can never be used to detect overdue — this looks at
-  // previousPair/currentPair directly instead.
-  const pastDueDates = [previousPair.dueDate, currentPair.dueDate].filter(
-    (d): d is Date => !!d && d < today,
-  );
-  const mostRecentUnsettledDueDate =
-    pastDueDates.length > 0 ? pastDueDates.reduce((a, b) => (a > b ? a : b)) : null;
-
-  return {
-    statementDate: active.statementDate,
-    dueDate: active.dueDate,
-    nextLabel,
-    nextDate,
-    daysUntilNext: nextDate ? daysBetween(today, nextDate) : null,
-    previousStatementDate: previousPair.statementDate,
-    previousDueDate: previousPair.dueDate,
-    mostRecentUnsettledDueDate,
-  };
-}
-
-function toAed(amount: number, currency: Currency, rates: Record<string, number>) {
-  if (currency === "AED") return amount;
-  const rate = rates[currency];
-  return rate ? amount / rate : amount;
-}
-
-function getTheme(): ThemeVars {
-  return {
-    bg: "var(--main-bg)",
-    card: "var(--card-bg)",
-    border: "var(--card-border)",
-    text: "var(--text-primary)",
-    muted: "var(--text-secondary)",
-    faint: "var(--text-muted)",
-    input: "var(--main-bg2)",
-    accent: "#ef4444",
-    pos: "var(--positive)",
-    posSoft: "var(--positive-soft)",
-    neg: "var(--negative)",
-    negSoft: "var(--negative-soft)",
-    warn: "var(--warning)",
-    warnSoft: "var(--warning-soft)",
-    gold: "var(--gold)",
-    goldSoft: "var(--gold-soft)",
-  };
-}
-
-// Distinct from the module's red accent — flags the remaining/outstanding amount
-// specifically on a "partial" entry, so it reads differently from a plain pending due.
-const PARTIAL_REMAINING_COLOR = "var(--warning)";
-
-function isSettled(status: Status) {
-  return status === "paid" || status === "waived";
-}
-
-function isPaid(status: Status) {
-  return status === "paid";
-}
-
-function statusTone(status: Status) {
-  if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "var(--positive)" };
-  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "var(--negative)" };
-  if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
-  return { bg: "rgba(239,68,68,0.08)", fg: "var(--negative)" };
-}
-
-function parseNum(v: string) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function getMonthlyAmount(item: DueItem, entry?: DueEntry) {
-  return entry?.amount ?? item.defaultAmount ?? 0;
-}
-
-function getTotalDue(item: DueItem, entry?: DueEntry) {
-  return getMonthlyAmount(item, entry) + (entry?.carryForwardAmount ?? 0);
-}
-
-function getEntryRemaining(item: DueItem, entry?: DueEntry | null) {
-  if (!entry) return 0;
-  return getTotalDue(item, entry) - (entry.amountPaid ?? 0);
-}
-
-function getCarryForwardAmount(entry?: DueEntry | null) {
-  if (!entry) return 0;
-  if (entry.status === "waived") return 0;
-  return (entry.amount ?? 0) + (entry.carryForwardAmount ?? 0) - (entry.amountPaid ?? 0);
-}
-
-function buildCarryForwardNote(previousMonth: string, currency: Currency, carryForwardAmount: number, existingNote?: string | null) {
-  if (carryForwardAmount === 0) return (existingNote ?? "").trim();
-  const label = carryForwardAmount < 0 ? "Credit carried from" : "Carry forward from";
-  const carryLine = `${label} ${fmtMonth(previousMonth)}: ${currency} ${carryForwardAmount.toFixed(2)}`;
-  const cleaned = (existingNote ?? "")
-    .split("\n")
-    .filter((line) => {
-      const trimmed = line.trim();
-      return trimmed && !trimmed.startsWith("Carry forward from ") && !trimmed.startsWith("Credit carried from ");
-    })
-    .join("\n")
-    .trim();
-  return cleaned ? `${cleaned}\n${carryLine}` : carryLine;
-}
-
-function remittanceStatusFromRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
-  const raw = row.cash_in?.__remittance_status;
-  if (raw === "pending" || raw === "partial" || raw === "paid" || raw === "waived") return raw;
-  return row.remittance_paid ? "paid" : "pending";
-}
-
-// Which group is the remittance-tracked destination — stored inside the existing
-// cash_in JSONB column (same pattern as __remittance_status) rather than requiring
-// a new due_month_settings column. Defaults to "India" for backward compatibility.
-function remittanceGroupFromRow(row: { cash_in?: Record<string, unknown> | null }): string {
-  const raw = row.cash_in?.__remittance_group;
-  return typeof raw === "string" && raw.trim() ? raw : "India";
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function dbToItem(r: any): DueItem {
-  return {
-    id: r.id,
-    name: r.name,
-    group: r.group_name ?? "General",
-    dueDay: r.due_date_day ?? null,
-    statementDay: r.statement_date ?? null,
-    defaultCurrency: (r.default_currency ?? "AED") as Currency,
-    defaultAmount: r.default_amount ?? null,
-    isFixed: r.is_fixed ?? false,
-    isHidden: r.is_hidden ?? false,
-    sortOrder: r.sort_order ?? 0,
-  };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function dbToEntry(r: any): DueEntry {
-  return {
-    id: r.id,
-    dueItemId: r.due_item_id,
-    month: r.month,
-    amount: r.amount ?? null,
-    currency: (r.currency ?? "AED") as Currency,
-    status: (r.status ?? "pending") as Status,
-    paidAt: r.paid_at ?? null,
-    note: r.note ?? "",
-    amountPaid: Number(r.amount_paid ?? 0),
-    lastPaidAt: r.last_paid_at ?? null,
-    carryForwardAmount: Number(r.carry_forward_amount ?? 0),
-    carriedForwardFrom: r.carried_forward_from ?? null,
-  };
-}
 
 export default function DueTrackerPage() {
   const supabase = createClient();
@@ -392,7 +76,6 @@ export default function DueTrackerPage() {
   const [showAddItem, setShowAddItem] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
-  const [showOverflow, setShowOverflow] = useState(false);
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sortBy, setSortBy] = useState<SortKey>("manual");
@@ -406,22 +89,10 @@ export default function DueTrackerPage() {
   const [remittanceRateDraft, setRemittanceRateDraft] = useState("");
   const [fxRateDrafts, setFxRateDrafts] = useState<Record<string, string>>({});
   const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentNote, setPaymentNote] = useState("");
-  const [savingPayment, setSavingPayment] = useState(false);
   // Tracks which item's payment modal is currently being opened (ensureEntry round-trip
   // in flight) so the row can show visible pending feedback instead of appearing to do
   // nothing while the network request completes.
   const [openingPaymentFor, setOpeningPaymentFor] = useState<string | null>(null);
-  const [newItem, setNewItem] = useState({
-    name: "",
-    group: "UAE",
-    statementDay: "",
-    dueDay: "",
-    defaultCurrency: "AED" as Currency,
-    defaultAmount: "",
-    isFixed: false,
-  });
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set<string>();
     try {
@@ -442,17 +113,10 @@ export default function DueTrackerPage() {
   }, []);
 
   useEffect(() => {
-    if (!showOverflow) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowOverflow(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [showOverflow]);
-
-  useEffect(() => {
     async function load() {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         setLoading(false);
         return;
@@ -479,6 +143,7 @@ export default function DueTrackerPage() {
       setLoading(false);
     }
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadAll(uid: string, m: string) {
@@ -627,8 +292,6 @@ export default function DueTrackerPage() {
         return;
       }
       setPaymentModal({ item, entry, remaining });
-      setPaymentAmount(remaining.toFixed(2));
-      setPaymentNote("");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not open payment form");
     } finally {
@@ -636,37 +299,16 @@ export default function DueTrackerPage() {
     }
   }
 
-  function closePaymentModal() {
-    if (savingPayment) return;
-    setPaymentModal(null);
-    setPaymentAmount("");
-    setPaymentNote("");
-  }
-
-  async function submitPaymentModal() {
+  async function submitPayment(amount: number, note: string) {
     if (!paymentModal || !userId) return;
-    const amount = Number(paymentAmount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      showToast("Enter a valid payment amount");
-      return;
-    }
-    setSavingPayment(true);
-    try {
-      const { error } = await supabase.from("due_payments").insert({
-        user_id: userId,
-        due_entry_id: paymentModal.entry.id,
-        paid_amount: amount,
-        note: paymentNote.trim() || null,
-      });
-      if (error) throw error;
-      await refreshEntry(paymentModal.entry.id);
-      closePaymentModal();
-      showToast(amount >= paymentModal.remaining ? "Payment saved and cleared" : "Partial payment saved");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not save payment");
-    } finally {
-      setSavingPayment(false);
-    }
+    const { error } = await supabase.from("due_payments").insert({
+      user_id: userId,
+      due_entry_id: paymentModal.entry.id,
+      paid_amount: amount,
+      note: note || null,
+    });
+    if (error) throw error;
+    await refreshEntry(paymentModal.entry.id);
   }
 
   async function updateEntryStatus(item: DueItem, status: Status) {
@@ -715,42 +357,48 @@ export default function DueTrackerPage() {
         .eq("id", entry.id)
         .eq("user_id", userId ?? "");
       if (error) throw error;
-      setEntries((p) => p.map((e) => (e.id === entry.id ? { ...e, [field]: value } as DueEntry : e)));
+      setEntries((p) => p.map((e) => (e.id === entry.id ? ({ ...e, [field]: value } as DueEntry) : e)));
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Could not update entry");
     }
   }
 
-  async function saveSettings() {
-    if (!userId) return;
-    if (settings.isLocked) {
-      showToast("Month is locked");
-      return;
-    }
+  async function saveSettingsPayload(nextSettings: MonthSettings) {
+    if (!userId) return false;
     const payload = {
       user_id: userId,
       month,
-      main_currency: settings.mainCurrency,
-      note: settings.note,
-      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus, __remittance_group: settings.remittanceGroup },
-      fx_rates: settings.fxRates,
-      groups: settings.groups,
-      remittance_inr: settings.remittanceInr,
-      remittance_rate: settings.remittanceRate,
-      remittance_paid: settings.remittanceStatus === "paid",
-      is_locked: settings.isLocked,
+      main_currency: nextSettings.mainCurrency,
+      note: nextSettings.note,
+      cash_in: { ...nextSettings.cashIn, __remittance_status: nextSettings.remittanceStatus, __remittance_group: nextSettings.remittanceGroup },
+      fx_rates: nextSettings.fxRates,
+      groups: nextSettings.groups,
+      remittance_inr: nextSettings.remittanceInr,
+      remittance_rate: nextSettings.remittanceRate,
+      remittance_paid: nextSettings.remittanceStatus === "paid",
+      is_locked: nextSettings.isLocked,
     };
     const { error } = await supabase.from("due_month_settings").upsert(payload, { onConflict: "user_id,month" });
     if (error) {
       showToast(error.message);
+      return false;
+    }
+    return true;
+  }
+
+  async function saveSettings() {
+    if (settings.isLocked) {
+      showToast("Month is locked");
       return;
     }
-    setShowSettings(false);
-    showToast("Settings saved");
+    const ok = await saveSettingsPayload(settings);
+    if (ok) {
+      setShowSettings(false);
+      showToast("Settings saved");
+    }
   }
 
   async function saveRemittance() {
-    if (!userId) return;
     if (settings.isLocked) {
       showToast("Month is locked");
       return;
@@ -765,28 +413,14 @@ export default function DueTrackerPage() {
       showToast("Rate must be more than 0");
       return;
     }
-    const { error } = await supabase.from("due_month_settings").upsert({
-      user_id: userId,
-      month,
-      main_currency: settings.mainCurrency,
-      note: settings.note,
-      cash_in: { ...settings.cashIn, __remittance_status: settings.remittanceStatus, __remittance_group: settings.remittanceGroup },
-      fx_rates: settings.fxRates,
-      groups: settings.groups,
-      remittance_inr: inr,
-      remittance_rate: rate,
-      remittance_paid: settings.remittanceStatus === "paid",
-      is_locked: settings.isLocked,
-    }, { onConflict: "user_id,month" });
-    if (error) {
-      showToast(error.message);
-      return;
+    const ok = await saveSettingsPayload(settings);
+    if (ok) {
+      setRemittanceEditMode(false);
+      showToast("Remittance saved");
     }
-    setRemittanceEditMode(false);
-    showToast("Remittance saved");
   }
 
-  async function addDueItem() {
+  async function addDueItem(newItem: NewDueItemInput) {
     if (settings.isLocked) {
       showToast("Month is locked");
       return;
@@ -808,7 +442,6 @@ export default function DueTrackerPage() {
       return;
     }
     setItems((p) => [...p, dbToItem(data)]);
-    setNewItem({ name: "", group: "UAE", statementDay: "", dueDay: "", defaultCurrency: "AED", defaultAmount: "", isFixed: false });
     setShowAddItem(false);
     showToast("Added");
   }
@@ -844,7 +477,7 @@ export default function DueTrackerPage() {
       is_fixed: "isFixed",
     };
     const localField = fieldMap[field];
-    setItems((p) => p.map((x) => (x.id === item.id ? { ...x, [localField]: value } as DueItem : x)));
+    setItems((p) => p.map((x) => (x.id === item.id ? ({ ...x, [localField]: value } as DueItem) : x)));
     showToast("Saved");
   }
 
@@ -934,25 +567,9 @@ export default function DueTrackerPage() {
   async function persistMonthSettings(next: Partial<MonthSettings>) {
     if (!userId) return false;
     const merged = { ...settings, ...next };
-    const { error } = await supabase.from("due_month_settings").upsert({
-      user_id: userId,
-      month,
-      main_currency: merged.mainCurrency,
-      note: merged.note,
-      cash_in: { ...merged.cashIn, __remittance_status: merged.remittanceStatus, __remittance_group: merged.remittanceGroup },
-      fx_rates: merged.fxRates,
-      groups: merged.groups,
-      remittance_inr: merged.remittanceInr,
-      remittance_rate: merged.remittanceRate,
-      remittance_paid: merged.remittanceStatus === "paid",
-      is_locked: merged.isLocked,
-    }, { onConflict: "user_id,month" });
-    if (error) {
-      showToast(error.message);
-      return false;
-    }
-    setSettings(merged);
-    return true;
+    const ok = await saveSettingsPayload(merged);
+    if (ok) setSettings(merged);
+    return ok;
   }
 
   async function toggleMonthLock(force?: boolean) {
@@ -973,6 +590,7 @@ export default function DueTrackerPage() {
     const dueSettled = items.every((item) => isSettled(getEntry(item.id)?.status ?? "pending"));
     const needsRemittance = (settings.remittanceInr ?? 0) > 0;
     return dueSettled && (!needsRemittance || remittanceSettled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, entries, settings.remittanceInr, settings.remittanceStatus]);
 
   // Per-group auto-collapse: once every due in a group is settled (and, for
@@ -998,6 +616,7 @@ export default function DueTrackerPage() {
       } catch {}
       return next;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, entries, settings.groups, settings.remittanceGroup, settings.remittanceInr, remittanceSettled, loading]);
 
   useEffect(() => {
@@ -1007,10 +626,10 @@ export default function DueTrackerPage() {
       const locked = await toggleMonthLock(true);
       if (locked) await changeMonth(nextMonth(month));
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allSettled, userId, loading, settings.isLocked]);
 
   const today = todayDubai(timezone);
-  const currentDay = Number(today.slice(8, 10));
 
   const enrichedItems = useMemo(() => {
     return visibleItems.map((item) => {
@@ -1026,7 +645,8 @@ export default function DueTrackerPage() {
       const upcoming = !!cycle?.nextDate && (cycle.daysUntilNext ?? 99) >= 0 && (cycle.daysUntilNext ?? 99) <= 3 && !(entry && isSettled(entry.status));
       return { item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle };
     });
-  }, [visibleItems, entries, prevEntries, month, currentDay, today]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems, entries, prevEntries, month, today]);
 
   const filteredSortedItems = useMemo(() => {
     const statusRank: Record<Status, number> = { pending: 0, partial: 1, paid: 2, waived: 3 };
@@ -1078,6 +698,7 @@ export default function DueTrackerPage() {
         const cur = effectiveCurrency(item, entry);
         return sum + (cur === "INR" ? amount : toAed(amount, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2));
       }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, entries, settings.fxRates, settings.remittanceGroup]);
 
   const remittanceInr = settings.remittanceInr ?? 0;
@@ -1116,6 +737,7 @@ export default function DueTrackerPage() {
       settledCount,
       totalCount: itemCount,
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, entries, settings.fxRates, settings.remittanceGroup, remittanceAed, remittanceInr, settings.remittanceStatus]);
 
   const lastMonthTotal = useMemo(() => {
@@ -1135,131 +757,72 @@ export default function DueTrackerPage() {
         return sum + (currency === "INR" ? amount : toAed(amount, currency, settings.fxRates) * (settings.fxRates.INR ?? 25.2));
       }, 0);
     return total + prevIndia / (settings.fxRates.INR ?? 25.2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, prevEntries, settings.fxRates, settings.remittanceGroup]);
 
-  const V = getTheme();
-  const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
-  const shadow = isDark
-    ? "0 1px 3px rgba(0,0,0,0.45)"
-    : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)";
-  const btn = { padding: isMobile ? "10px 16px" : "8px 14px", minHeight: isMobile ? 40 : undefined, borderRadius: 10, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 13, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
-  const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700, boxShadow: "0 4px 14px rgba(239,68,68,0.30)" } as const;
-  const inp = { padding: isMobile ? "10px 12px" : "8px 12px", minHeight: isMobile ? 40 : undefined, borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
+  const V = getTheme(isDark);
+  const { shadow, btn, btnP, inp } = styleKit(V, isDark, isMobile);
 
   if (loading) {
-    return (
-      <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", background: V.bg }}>
-        <div style={{ width: 28, height: 28, border: `2.5px solid ${V.accent}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      </div>
-    );
+    return <LoadingSpinner bg={V.bg} accent={V.accent} />;
   }
 
   return (
     <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <div style={{ padding: "22px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 13, color: V.accent, fontWeight: 700, letterSpacing: "0.04em" }}>DUE TRACKER</div>
-          <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.1, marginTop: 2 }}>{fmtMonth(month)}</div>
-          <div style={{ fontSize: 13, color: V.faint, marginTop: 4 }}>Recurring payments &amp; status</div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <button style={settings.isLocked ? btnP : btn} onClick={() => void toggleMonthLock(settings.isLocked ? false : true)}>{settings.isLocked ? "Unlock month" : "Lock month"}</button>
-          <button style={btnP} onClick={() => setShowAddItem(true)}>+ Add due</button>
-          <div style={{ position: "relative" }}>
-            <button
-              style={{ ...btn, padding: "8px 12px" }}
-              onClick={() => setShowOverflow((v) => !v)}
-              aria-label="More options"
-            >
-              ⋯
-            </button>
-            {showOverflow && (
-              <>
-                <div
-                  style={{ position: "fixed", inset: 0, zIndex: 19 }}
-                  onClick={() => setShowOverflow(false)}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 6px)",
-                    right: 0,
-                    minWidth: 180,
-                    background: V.card,
-                    border: `1px solid ${V.border}`,
-                    borderRadius: 12,
-                    boxShadow: shadow,
-                    overflow: "hidden",
-                    zIndex: 20,
-                  }}
-                >
-                  <button
-                    style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", color: V.text, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-                    onClick={() => { setShowHidden((v) => !v); setShowOverflow(false); }}
-                  >
-                    {showHidden ? "Hide hidden dues" : "Show hidden dues"}
-                  </button>
-                  <button
-                    style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", borderTop: `1px solid ${V.border}`, color: V.text, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
-                    onClick={() => {
-                      setFxRateDrafts(Object.fromEntries(Object.entries(settings.fxRates).map(([k, v]) => [k, String(v)])));
-                      setShowSettings(true);
-                      setShowOverflow(false);
-                    }}
-                  >
-                    Settings
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+      <style>{`@keyframes duetracker-spin{to{transform:rotate(360deg)}}`}</style>
 
-      <div style={{ padding: "14px 24px 0", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <button style={btn} onClick={() => void changeMonth(prevMonth(month))} aria-label="Previous month">‹</button>
-        <span style={{ fontSize: 18, fontWeight: 700, minWidth: 180, textAlign: "center" }}>{fmtMonth(month)}</span>
-        <button style={btn} onClick={() => void changeMonth(nextMonth(month))} aria-label="Next month">›</button>
-        <button style={{ ...btn, fontSize: 12, padding: "6px 12px" }} onClick={() => void changeMonth(nowMonth(timezone))}>Today</button>
-        <div style={{ flex: 1 }} />
-        <select value={filter} onChange={(e) => setFilter(e.target.value as FilterKey)} style={{ ...inp, minWidth: 120 }}>
-          <option value="all">All</option>
-          <option value="pending">Pending</option>
-          <option value="paid">Paid</option>
-                    <option value="waived">Waived</option>
-          <option value="overdue">Overdue</option>
-          <option value="upcoming">Upcoming</option>
-        </select>
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)} style={{ ...inp, minWidth: 130 }}>
-          <option value="manual">Manual</option>
-          <option value="dueDay">Due day</option>
-          <option value="amountDesc">Amount ↓</option>
-          <option value="amountAsc">Amount ↑</option>
-          <option value="name">Name</option>
-          <option value="status">Status</option>
-        </select>
-      </div>
+      <DueTrackerHeader
+        V={V}
+        btn={btn}
+        btnP={btnP}
+        monthLabel={fmtMonth(month)}
+        isLocked={settings.isLocked}
+        showHidden={showHidden}
+        onToggleLock={() => void toggleMonthLock()}
+        onToggleShowHidden={() => setShowHidden((v) => !v)}
+        onOpenSettings={() => {
+          setFxRateDrafts(Object.fromEntries(Object.entries(settings.fxRates).map(([k, v]) => [k, String(v)])));
+          setShowSettings(true);
+        }}
+        onOpenAddItem={() => setShowAddItem(true)}
+      />
 
-      <div style={{ padding: "14px 24px 0", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
-        {[
-          { label: "Total due (AED)", value: `AED ${stats.totalAed.toFixed(0)}`, color: V.text },
-          { label: "Paid", value: `AED ${stats.paidAed.toFixed(0)}`, color: V.pos },
-          { label: "Pending", value: `AED ${stats.pendingAed.toFixed(0)}`, color: V.accent },
-        ].map((card) => (
-          <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>{card.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: card.color, marginTop: 4, lineHeight: 1.1 }}>{card.value}</div>
-          </div>
-        ))}
-        <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Settled</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: V.muted, marginTop: 4, lineHeight: 1.1 }}>{stats.settledCount}/{stats.totalCount}</div>
-          <div style={{ marginTop: 8, height: 5, background: V.input, borderRadius: 3, overflow: "hidden" }}>
-            <div style={{ width: `${stats.totalCount > 0 ? Math.round((stats.settledCount / stats.totalCount) * 100) : 0}%`, height: "100%", background: V.accent }} />
-          </div>
-        </div>
+      <MonthNav
+        V={V}
+        btn={btn}
+        inp={inp}
+        monthLabel={fmtMonth(month)}
+        filter={filter}
+        sortBy={sortBy}
+        onPrev={() => void changeMonth(prevMonth(month))}
+        onNext={() => void changeMonth(nextMonth(month))}
+        onToday={() => void changeMonth(nowMonth(timezone))}
+        onFilterChange={setFilter}
+        onSortChange={setSortBy}
+      />
+
+      <div style={{ padding: "14px 24px 0" }}>
+        <StatGrid
+          V={V}
+          shadow={shadow}
+          cards={[
+            { label: "Total due (AED)", value: `AED ${stats.totalAed.toFixed(0)}` },
+            { label: "Paid", value: `AED ${stats.paidAed.toFixed(0)}`, color: V.pos },
+            { label: "Pending", value: `AED ${stats.pendingAed.toFixed(0)}`, color: V.accent },
+            {
+              label: "Settled",
+              value: (
+                <>
+                  {stats.settledCount}/{stats.totalCount}
+                  <div style={{ marginTop: 8, height: 5, background: V.input, borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ width: `${stats.totalCount > 0 ? Math.round((stats.settledCount / stats.totalCount) * 100) : 0}%`, height: "100%", background: V.accent }} />
+                  </div>
+                </>
+              ),
+              color: V.muted,
+            },
+          ]}
+        />
       </div>
 
       <div style={{ margin: "12px 24px 0", background: V.input, borderRadius: 10, padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
@@ -1277,9 +840,7 @@ export default function DueTrackerPage() {
       )}
 
       {settings.note && (
-        <div style={{ margin: "12px 24px 0", padding: "10px 14px", background: accentSoft, border: `1px solid ${V.accent}33`, borderRadius: 10, fontSize: 13, color: V.text }}>
-          {settings.note}
-        </div>
+        <div style={{ margin: "12px 24px 0", padding: "10px 14px", background: V.accentSoft, border: `1px solid ${V.accent}33`, borderRadius: 10, fontSize: 13, color: V.text }}>{settings.note}</div>
       )}
 
       <div style={{ padding: "14px 24px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1299,12 +860,8 @@ export default function DueTrackerPage() {
             const totalDue = effectiveAmount(item, entry);
             const cur = effectiveCurrency(item, entry);
             const paidPortion = Math.max(entry?.amountPaid ?? 0, 0);
-            const totalValue = isIndia
-              ? (cur === "INR" ? totalDue : toAed(totalDue, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2))
-              : toAed(totalDue, cur, settings.fxRates);
-            const paidValue = isIndia
-              ? (cur === "INR" ? paidPortion : toAed(paidPortion, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2))
-              : toAed(paidPortion, cur, settings.fxRates);
+            const totalValue = isIndia ? (cur === "INR" ? totalDue : toAed(totalDue, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2)) : toAed(totalDue, cur, settings.fxRates);
+            const paidValue = isIndia ? (cur === "INR" ? paidPortion : toAed(paidPortion, cur, settings.fxRates) * (settings.fxRates.INR ?? 25.2)) : toAed(paidPortion, cur, settings.fxRates);
 
             groupTotal += totalValue;
             groupPaid += paidValue;
@@ -1319,412 +876,160 @@ export default function DueTrackerPage() {
 
           const groupDue = groupTotal - groupPaid - groupWaived;
           const currLabel = isIndia ? "INR" : "AED";
+          const showRemittance = !isIndia && group === nonRemittanceGroup;
 
           return (
-            <div key={group} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden", boxShadow: shadow }}>
-              <div
-                onClick={() => toggleGroup(group)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    toggleGroup(group);
-                  }
-                }}
-                style={{ padding: "11px 16px", borderBottom: isCollapsed ? undefined : `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "center", flexWrap: isMobile ? "wrap" : "nowrap", gap: isMobile ? 6 : 0, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)", cursor: "pointer", userSelect: "none" }}
-              >
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <span style={{ fontSize: 12, color: V.faint, transition: "transform 0.2s", display: "inline-block", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>▾</span>
-                  <span style={{ fontSize: 14, fontWeight: 800 }}>{group}</span>
-                  <span style={{ fontSize: 11, color: V.faint }}>{allGroupItems.length}</span>
-                </div>
-                <div style={{ display: "flex", gap: isMobile ? 8 : 14, fontSize: 12, color: V.muted, flexWrap: isMobile ? "wrap" : "nowrap", justifyContent: isMobile ? "flex-end" : undefined }} onClick={(e) => e.stopPropagation()}>
-                  <span>Total: <strong style={{ color: V.text }}>{currLabel} {groupTotal.toFixed(0)}</strong></span>
-                  <span style={{ color: V.pos }}>Paid: <strong>{currLabel} {groupPaid.toFixed(0)}</strong></span>
-                  <span style={{ color: "#94a3b8" }}>Waived: <strong>{currLabel} {groupWaived.toFixed(0)}</strong></span>
-                  <span style={{ color: groupDue < 0 ? V.pos : V.neg }}>Due: <strong>{currLabel} {groupDue.toFixed(0)}</strong></span>
-                </div>
-              </div>
-
-              {!isCollapsed && !isIndia && group === nonRemittanceGroup && (
-                <div style={{ padding: "12px 16px", borderBottom: `1px solid ${V.border}`, background: isDark ? "rgba(239,68,68,0.04)" : "rgba(239,68,68,0.02)" }}>
-                  <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                    <select disabled={settings.isLocked} value={settings.remittanceStatus} onChange={(e) => setSettings((p) => ({ ...p, remittanceStatus: e.target.value as Status }))} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12 }}>
-                      <option value="pending">Pending</option>
-                      <option value="partial">Partial</option>
-                      <option value="paid">Paid</option>
-                                            <option value="waived">Waived</option>
-                    </select>
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <button onClick={() => router.push("/dashboard/duetracker/remittance")} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 14, fontWeight: 700, color: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? V.faint : V.text, textDecoration: isPaid(settings.remittanceStatus) || settings.remittanceStatus === "waived" ? "line-through" : "none" }}>
-                          Remittance
-                        </button>
-                        <select
-                          disabled={settings.isLocked}
-                          value={settings.remittanceStatus}
-                          onChange={(e) => {
-                            const nextStatus = e.target.value as Status;
-                            setSettings((p) => ({ ...p, remittanceStatus: nextStatus }));
-                            void persistMonthSettings({ remittanceStatus: nextStatus });
-                          }}
-                          style={{
-                            ...inp,
-                            padding: "4px 8px",
-                            fontSize: 11,
-                            minWidth: 110,
-                            background: statusTone(settings.remittanceStatus).bg,
-                            color: statusTone(settings.remittanceStatus).fg,
-                            opacity: settings.isLocked ? 0.6 : 1,
-                          }}
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="partial">Partial</option>
-                          <option value="paid">Paid</option>
-                                                    <option value="waived">Waived</option>
-                        </select>
-                        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(239,68,68,0.12)", color: V.accent }}>Manual</span>
-                      </div>
-                      {remittanceEditMode && (
-                        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 120, padding: "5px 8px", fontSize: 12 }} value={remittanceInrDraft} onChange={(e) => { setRemittanceInrDraft(e.target.value); setSettings((p) => ({ ...p, remittanceInr: parseNum(e.target.value) })); }} placeholder="INR amount" />
-                          <span style={{ fontSize: 11, color: V.faint }}>÷</span>
-                          <input disabled={settings.isLocked} type="text" inputMode="decimal" style={{ ...inp, width: 90, padding: "5px 8px", fontSize: 12 }} value={remittanceRateDraft} onChange={(e) => { setRemittanceRateDraft(e.target.value); setSettings((p) => ({ ...p, remittanceRate: parseNum(e.target.value) })); }} placeholder="Rate" />
-                          <span style={{ fontSize: 11, color: V.faint }}>AED {remittanceAed.toFixed(0)}</span>
-                        </div>
-                      )}
-                      <div style={{ fontSize: 11, color: V.faint, marginTop: 5 }}>
-                        India subtotal: INR {indiaTotalInr.toFixed(0)} · Variance: {remittanceDiffInr === 0 ? "0" : `${remittanceDiffInr > 0 ? "+" : ""}${remittanceDiffInr.toFixed(0)} INR`} ({remittanceDiffAed > 0 ? "+" : ""}AED {remittanceDiffAed.toFixed(0)})
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                      <span style={{ fontSize: 14, fontWeight: 700, color: remittanceAed > 0 ? V.accent : V.faint, textDecoration: settings.remittanceStatus === "waived" ? "line-through" : "none" }}>AED {remittanceAed.toFixed(0)}</span>
-                      <button onClick={() => router.push("/dashboard/duetracker/remittance")} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>History</button>
-                      <button disabled={settings.isLocked} onClick={() => {
-                        if (remittanceEditMode) { void saveRemittance(); return; }
-                        setRemittanceInrDraft(settings.remittanceInr != null ? String(settings.remittanceInr) : "");
-                        setRemittanceRateDraft(settings.remittanceRate != null ? String(settings.remittanceRate) : "");
-                        setRemittanceEditMode(true);
-                      }} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: remittanceEditMode ? V.accent : V.muted, opacity: settings.isLocked ? 0.6 : 1 }}>{remittanceEditMode ? "Save" : "Edit"}</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {!isCollapsed && rows.map(({ item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle }) => {
-                const status = entry?.status ?? "pending";
-                const tone = statusTone(status);
-                const isEditing = editItemId === item.id;
-                const prev = getPrevEntry(item.id);
-                const strike = isSettled(status);
-                const isOpeningPayment = openingPaymentFor === item.id;
-
-                return (
-                  <div
-                    key={item.id}
-                    style={{
-                      padding: "11px 16px",
-                      borderBottom: `1px solid ${V.border}`,
-                      opacity: item.isHidden ? 0.45 : isOpeningPayment ? 0.65 : 1,
-                      background: status === "pending" ? "rgba(239,68,68,0.05)" : "transparent",
-                      borderLeft: status === "pending" ? `3px solid ${V.neg}` : "3px solid transparent",
-                      transition: "opacity 120ms ease",
+            <GroupCard
+              key={group}
+              V={V}
+              shadow={shadow}
+              isDark={isDark}
+              isMobile={isMobile}
+              group={group}
+              itemCount={allGroupItems.length}
+              isCollapsed={isCollapsed}
+              onToggleCollapse={() => toggleGroup(group)}
+              currLabel={currLabel}
+              total={groupTotal}
+              paid={groupPaid}
+              waived={groupWaived}
+              due={groupDue}
+              remittanceSlot={
+                showRemittance ? (
+                  <RemittanceWidget
+                    V={V}
+                    inp={inp}
+                    btn={btn}
+                    isDark={isDark}
+                    isLocked={settings.isLocked}
+                    status={settings.remittanceStatus}
+                    editMode={remittanceEditMode}
+                    inrDraft={remittanceInrDraft}
+                    rateDraft={remittanceRateDraft}
+                    remittanceAed={remittanceAed}
+                    indiaTotalInr={indiaTotalInr}
+                    diffInr={remittanceDiffInr}
+                    diffAed={remittanceDiffAed}
+                    onStatusChange={(nextStatus) => {
+                      setSettings((p) => ({ ...p, remittanceStatus: nextStatus }));
+                      void persistMonthSettings({ remittanceStatus: nextStatus });
                     }}
-                  >
-                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      <select disabled={settings.isLocked || isOpeningPayment} value={status} onChange={(e) => void updateEntryStatus(item, e.target.value as Status)} style={{ ...inp, width: 110, padding: "6px 8px", fontSize: 12, opacity: settings.isLocked || isOpeningPayment ? 0.6 : 1, cursor: isOpeningPayment ? "wait" : undefined }}>
-                        <option value="pending">Pending</option>
-                        <option value="waived">Waived</option>
-                        {(status === "partial" || status === "paid") && <option value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>}
-                      </select>
-                      {isOpeningPayment && (
-                        <span
-                          aria-label="Opening payment form"
-                          style={{ width: 13, height: 13, marginTop: 8, border: `2px solid ${V.accent}`, borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }}
-                        />
-                      )}
-
-                      <div style={{ flex: 1, minWidth: 180 }}>
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 14, fontWeight: 700, textDecoration: strike ? "line-through" : "none", color: strike ? V.faint : V.text }}>{item.name}</span>
-                          {item.isFixed && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "rgba(99,102,241,0.1)", color: "#6366f1" }}>Fixed</span>}
-                          {item.isHidden && <span style={{ fontSize: 10, color: V.faint }}>(hidden)</span>}
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: tone.bg, color: tone.fg }}>{status}</span>
-                          {overdue && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: V.negSoft, color: V.neg }}>Overdue</span>}
-                          {!overdue && upcoming && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "rgba(59,130,246,0.1)", color: "#3b82f6" }}>Upcoming</span>}
-                        </div>
-                        <div style={{ fontSize: 11, color: V.muted, marginTop: 3, display: "flex", flexDirection: "column", gap: 2 }}>
-                          {!isSettled(status) && cycle?.statementDate ? <span style={{ fontWeight: 600, color: "#ef4444" }}>Statement: {fmtMonthDay(cycle.statementDate)}</span> : null}
-                          {!isSettled(status) && cycle?.dueDate ? <span style={{ fontWeight: 600, color: "#ef4444" }}>Due: {fmtMonthDay(cycle.dueDate)}</span> : null}
-                          {!isSettled(status) && cycle?.nextDate && cycle.nextLabel ? (
-                            <span style={{ color: cycle.nextLabel === "statement" ? "#ef4444" : "#ef4444" }}>
-                              {cycle.daysUntilNext === 0 ? "Today" : `${cycle.daysUntilNext} day${cycle.daysUntilNext === 1 ? "" : "s"}` } for the {cycle.nextLabel === "statement" ? "Statement" : "Due"}: {fmtMonthDay(cycle.nextDate)}
-                            </span>
-                          ) : null}
-                        </div>
-                        {isEditing ? (
-                          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                            <input defaultValue={entry?.note ?? ""} placeholder="Note for this month…" onBlur={(e) => void updateEntryField(item, "note", e.target.value)} style={{ ...inp, fontSize: 12, boxSizing: "border-box" }} />
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "8px 0 2px", borderTop: `1px dashed ${V.border}`, marginTop: 2 }}>
-                              <span style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.06em", width: "100%" }}>Item details</span>
-                              <input defaultValue={item.name} placeholder="Name" onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== item.name) void updateDueItemField(item, "name", v); }} style={{ ...inp, fontSize: 12, flex: "1 1 140px" }} />
-                              <select defaultValue={item.group} onChange={(e) => void updateDueItemField(item, "group_name", e.target.value)} style={{ ...inp, fontSize: 12, width: 100 }}>
-                                {settings.groups.map((g) => <option key={g} value={g}>{g}</option>)}
-                              </select>
-                              <select defaultValue={item.defaultCurrency} onChange={(e) => void updateDueItemField(item, "default_currency", e.target.value)} style={{ ...inp, fontSize: 12, width: 70 }}>
-                                <option>AED</option>
-                                <option>INR</option>
-                                <option>USD</option>
-                              </select>
-                              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600 }}>
-                                <input type="checkbox" defaultChecked={item.isFixed} onChange={(e) => void updateDueItemField(item, "is_fixed", e.target.checked)} />
-                                Fixed
-                              </label>
-                              <button
-                                onClick={() => void deleteDueItem(item)}
-                                style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.neg, marginLeft: "auto" }}
-                              >
-                                Delete item
-                              </button>
-                            </div>
-                          </div>
-                        ) : entry?.note ? (
-                          <div style={{ fontSize: 11, color: V.muted, fontStyle: "italic", marginTop: 3 }}>{entry.note}</div>
-                        ) : null}
-                        {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? V.pos : status === "partial" ? PARTIAL_REMAINING_COLOR : V.accent, marginTop: 3 }}>Paid so far: {currency} {entry.amountPaid.toFixed(2)} · Remaining: {currency} {getEntryRemaining(item, entry).toFixed(2)}{entry.lastPaidAt ? ` · Last payment: ${fmtDateTime(entry.lastPaidAt, timezone)}` : ""}</div>}
-                        {prev && diffAbs !== null && (
-                          <div style={{ fontSize: 11, color: diffAbs === 0 ? V.faint : diffAbs > 0 ? V.neg : V.pos, marginTop: 4 }}>
-                            vs last month: {diffAbs > 0 ? "+" : ""}{currency} {diffAbs.toFixed(0)}
-                            {diffPct !== null ? ` (${diffPct > 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : " (new)"}
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ display: "flex", gap: 6, alignItems: "center", width: isMobile ? "100%" : undefined, justifyContent: isMobile ? "space-between" : undefined }}>
-                        {isEditing ? (
-                          <>
-                            <input type="text" inputMode="decimal" defaultValue={getMonthlyAmount(item, entry) || ""} placeholder="This month amount" onBlur={(e) => void updateEntryField(item, "amount", e.target.value ? Number(e.target.value) : null)} style={{ ...inp, width: 130, textAlign: "right" }} />
-                            <select defaultValue={currency} onChange={(e) => void updateEntryField(item, "currency", e.target.value as Currency)} style={{ ...inp, width: 70 }}>
-                              <option>AED</option>
-                              <option>INR</option>
-                              <option>USD</option>
-                            </select>
-                          </>
-                        ) : (
-                          <div style={{ textAlign: isMobile ? "left" : "right", width: isMobile ? "100%" : undefined }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, textDecoration: status === "waived" ? "line-through" : "none", color: status === "paid" ? V.pos : status === "partial" ? V.accent : status === "waived" ? V.faint : V.text }}>
-                              {currency} {amount.toLocaleString()}
-                            </div>
-                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "paid" ? V.pos : status === "partial" ? PARTIAL_REMAINING_COLOR : V.accent }}>Paid {currency} {entry.amountPaid.toFixed(2)}</div>}
-                            {entry && entry.amountPaid > 0 && <div style={{ fontSize: 11, color: status === "partial" && getEntryRemaining(item, entry) > 0 ? PARTIAL_REMAINING_COLOR : V.faint, fontWeight: status === "partial" && getEntryRemaining(item, entry) > 0 ? 700 : 400 }}>{getEntryRemaining(item, entry) < 0 ? "Credit left" : "Left"} {currency} {getEntryRemaining(item, entry).toFixed(2)}</div>}
-                            {entry?.carryForwardAmount ? <div style={{ fontSize: 11, color: V.warn }}>{entry.carryForwardAmount < 0 ? "Credit carried" : "Carry forward"} {currency} {entry.carryForwardAmount.toFixed(2)}</div> : null}
-                            <div style={{ fontSize: 11, color: V.faint }}>This month {currency} {getMonthlyAmount(item, entry).toFixed(2)}</div>
-                            {currency !== "AED" && amount > 0 && <div style={{ fontSize: 11, color: V.faint }}>≈ AED {toAed(amount, currency, settings.fxRates).toFixed(0)}</div>}
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", width: isMobile ? "100%" : undefined }}>
-                        <button onClick={() => void openPaymentModal(item)} disabled={isOpeningPayment} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.pos, opacity: isOpeningPayment ? 0.6 : 1, cursor: isOpeningPayment ? "wait" : "pointer" }}>{isOpeningPayment ? "Opening…" : "Pay"}</button>
-                        <button onClick={() => router.push(`/dashboard/duetracker/${item.id}`)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.accent }}>Stats</button>
-                        <button onClick={() => setEditItemId(isEditing ? null : item.id)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: isEditing ? V.accent : V.muted }}>{isEditing ? "Done" : "Edit"}</button>
-                        <button onClick={() => void toggleHide(item)} style={{ ...btn, padding: "4px 9px", fontSize: 11, color: V.faint }}>{item.isHidden ? "Show" : "Hide"}</button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    onInrDraftChange={(value) => {
+                      setRemittanceInrDraft(value);
+                      setSettings((p) => ({ ...p, remittanceInr: value === "" ? null : Number(value) }));
+                    }}
+                    onRateDraftChange={(value) => {
+                      setRemittanceRateDraft(value);
+                      setSettings((p) => ({ ...p, remittanceRate: value === "" ? null : Number(value) }));
+                    }}
+                    onEditOrSave={() => {
+                      if (remittanceEditMode) {
+                        void saveRemittance();
+                        return;
+                      }
+                      setRemittanceInrDraft(settings.remittanceInr != null ? String(settings.remittanceInr) : "");
+                      setRemittanceRateDraft(settings.remittanceRate != null ? String(settings.remittanceRate) : "");
+                      setRemittanceEditMode(true);
+                    }}
+                    onViewHistory={() => router.push("/dashboard/duetracker/remittance")}
+                  />
+                ) : undefined
+              }
+            >
+              {rows.map(({ item, entry, amount, currency, diffAbs, diffPct, overdue, upcoming, cycle }) => (
+                <DueRow
+                  key={item.id}
+                  V={V}
+                  btn={btn}
+                  inp={inp}
+                  isDark={isDark}
+                  isMobile={isMobile}
+                  isLocked={settings.isLocked}
+                  groups={settings.groups}
+                  item={item}
+                  entry={entry}
+                  amount={amount}
+                  currency={currency}
+                  diffAbs={diffAbs}
+                  diffPct={diffPct}
+                  overdue={overdue}
+                  upcoming={upcoming}
+                  cycle={cycle}
+                  isEditing={editItemId === item.id}
+                  isOpeningPayment={openingPaymentFor === item.id}
+                  fxRates={settings.fxRates}
+                  onStatusChange={(status) => void updateEntryStatus(item, status)}
+                  onOpenPayment={() => void openPaymentModal(item)}
+                  onViewStats={() => router.push(`/dashboard/duetracker/${item.id}`)}
+                  onToggleEdit={() => setEditItemId(editItemId === item.id ? null : item.id)}
+                  onToggleHide={() => void toggleHide(item)}
+                  onUpdateEntryField={(field, value) => void updateEntryField(item, field, value)}
+                  onUpdateItemField={(field, value) => void updateDueItemField(item, field, value)}
+                  onDeleteItem={() => void deleteDueItem(item)}
+                />
+              ))}
+            </GroupCard>
           );
         })}
       </div>
 
       {showAddItem && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflow: "auto" }} onClick={() => setShowAddItem(false)}>
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto", margin: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>Add due item</div>
-              <button style={btn} onClick={() => setShowAddItem(false)} aria-label="Close">✕</button>
-            </div>
-            <div style={{ padding: 20, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 14 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em", gridColumn: "1/-1" }}>
-                Name <input style={{ ...inp, width: "100%", boxSizing: "border-box" }} value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. Rent" />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Group
-                <select style={inp} value={newItem.group} onChange={(e) => setNewItem((p) => ({ ...p, group: e.target.value }))}>
-                  {settings.groups.map((g) => <option key={g} value={g}>{g}</option>)}
-                </select>
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Currency
-                <select style={inp} value={newItem.defaultCurrency} onChange={(e) => setNewItem((p) => ({ ...p, defaultCurrency: e.target.value as Currency }))}>
-                  <option>AED</option>
-                  <option>INR</option>
-                  <option>USD</option>
-                </select>
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Statement day
-                <input style={inp} type="number" min="1" max="31" value={newItem.statementDay} onChange={(e) => setNewItem((p) => ({ ...p, statementDay: e.target.value }))} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Due day
-                <input style={inp} type="number" min="1" max="31" value={newItem.dueDay} onChange={(e) => setNewItem((p) => ({ ...p, dueDay: e.target.value }))} />
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Default amount
-                <input style={inp} type="text" inputMode="decimal" value={newItem.defaultAmount} onChange={(e) => setNewItem((p) => ({ ...p, defaultAmount: e.target.value }))} />
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, fontWeight: 600, color: V.text, cursor: "pointer" }}>
-                <input type="checkbox" checked={newItem.isFixed} onChange={(e) => setNewItem((p) => ({ ...p, isFixed: e.target.checked }))} />
-                Fixed (repeats each month)
-              </label>
-            </div>
-            <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button style={btn} onClick={() => setShowAddItem(false)}>Cancel</button>
-              <button style={btnP} onClick={() => void addDueItem()}>Add</button>
-            </div>
-          </div>
-        </div>
+        <AddDueModal V={V} btn={btn} btnP={btnP} inp={inp} isMobile={isMobile} groups={settings.groups} onClose={() => setShowAddItem(false)} onSubmit={(item) => void addDueItem(item)} />
       )}
 
       {showSettings && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowSettings(false)}>
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(560px,100%)", maxHeight: "90vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.1em" }}>{fmtMonth(month)}</div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Month settings</div>
-              </div>
-              <button style={btn} onClick={() => setShowSettings(false)} aria-label="Close">✕</button>
-            </div>
-            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Exchange rates</div>
-                {(["INR", "USD"] as const).map((cur) => (
-                  <div key={cur} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, width: 40 }}>{cur}:</span>
-                    <span style={{ fontSize: 13, color: V.faint }}>1 AED =</span>
-                    <input type="text" inputMode="decimal" style={{ ...inp, width: 90 }} value={fxRateDrafts[cur] ?? String(settings.fxRates[cur] ?? "")} onChange={(e) => {
-                      setFxRateDrafts((d) => ({ ...d, [cur]: e.target.value }));
-                      setSettings((p) => ({ ...p, fxRates: { ...p.fxRates, [cur]: Number(e.target.value) || 0 } }));
-                    }} />
-                    <span style={{ fontSize: 13, color: V.faint }}>{cur}</span>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Groups</div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                  {settings.groups.map((g) => <span key={g} style={{ padding: "4px 12px", borderRadius: 999, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)", fontSize: 12, fontWeight: 600 }}>{g}</span>)}
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input style={{ ...inp, flex: 1 }} placeholder="Add new group…" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} />
-                  <button style={btnP} onClick={() => {
-                    const v = newGroupName.trim();
-                    if (v && !settings.groups.includes(v)) {
-                      setSettings((p) => ({ ...p, groups: [...p.groups, v] }));
-                      setNewGroupName("");
-                    }
-                  }}>Add</button>
-                </div>
-              </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Remittance-tracked group
-                <select style={inp} value={settings.remittanceGroup} onChange={(e) => setSettings((p) => ({ ...p, remittanceGroup: e.target.value }))}>
-                  {settings.groups.map((g) => <option key={g} value={g}>{g}</option>)}
-                </select>
-                <span style={{ fontSize: 11, color: V.faint, textTransform: "none", fontWeight: 400 }}>Which group represents money sent via remittance (its total is compared against the amount remitted).</span>
-              </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Month note
-                <textarea style={{ ...inp, resize: "vertical", minHeight: 70 }} value={settings.note} onChange={(e) => setSettings((p) => ({ ...p, note: e.target.value }))} placeholder="Any notes for this month…" />
-              </label>
-            </div>
-            <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button style={btn} onClick={() => setShowSettings(false)}>Cancel</button>
-              <button style={btnP} onClick={() => void saveSettings()}>Save</button>
-            </div>
-          </div>
-        </div>
+        <MonthSettingsModal
+          V={V}
+          btn={btn}
+          btnP={btnP}
+          inp={inp}
+          isDark={isDark}
+          month={month}
+          settings={settings}
+          fxRateDrafts={fxRateDrafts}
+          newGroupName={newGroupName}
+          onClose={() => setShowSettings(false)}
+          onSave={() => void saveSettings()}
+          onFxDraftChange={(cur, value) => {
+            setFxRateDrafts((d) => ({ ...d, [cur]: value }));
+            setSettings((p) => ({ ...p, fxRates: { ...p.fxRates, [cur]: Number(value) || 0 } }));
+          }}
+          onNewGroupNameChange={setNewGroupName}
+          onAddGroup={() => {
+            const v = newGroupName.trim();
+            if (v && !settings.groups.includes(v)) {
+              setSettings((p) => ({ ...p, groups: [...p.groups, v] }));
+              setNewGroupName("");
+            }
+          }}
+          onRemittanceGroupChange={(g) => setSettings((p) => ({ ...p, remittanceGroup: g }))}
+          onNoteChange={(note) => setSettings((p) => ({ ...p, note }))}
+        />
       )}
 
       {paymentModal && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflow: "auto" }}
-          onClick={closePaymentModal}
-        >
-          <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 18, width: "min(520px,100%)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", margin: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: "18px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Record payment</div>
-                <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>{paymentModal.item.name} · {fmtMonth(month)}</div>
-              </div>
-              <button style={{ ...btn, padding: "6px 10px" }} onClick={closePaymentModal} disabled={savingPayment} aria-label="Close">✕</button>
-            </div>
-            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 }}>
-                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Total</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{paymentModal.entry.currency} {getTotalDue(paymentModal.item, paymentModal.entry).toFixed(2)}</div>
-                </div>
-                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Paid so far</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: paymentModal.entry.amountPaid > 0 ? V.pos : V.text }}>{paymentModal.entry.currency} {(paymentModal.entry.amountPaid ?? 0).toFixed(2)}</div>
-                </div>
-                <div style={{ background: V.input, border: `1px solid ${V.border}`, borderRadius: 12, padding: "10px 12px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em" }}>Remaining</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: V.accent }}>{paymentModal.entry.currency} {paymentModal.remaining.toFixed(2)}</div>
-                </div>
-              </div>
-
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Payment amount
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  style={inp}
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                  placeholder={paymentModal.remaining.toFixed(2)}
-                  disabled={savingPayment}
-                />
-              </label>
-
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="button" style={{ ...btn, color: V.accent }} onClick={() => setPaymentAmount(paymentModal.remaining.toFixed(2))} disabled={savingPayment || paymentModal.remaining <= 0}>Use remaining</button>
-                {paymentModal.remaining > 1 && (
-                  <button type="button" style={btn} onClick={() => setPaymentAmount((paymentModal.remaining / 2).toFixed(2))} disabled={savingPayment}>Half</button>
-                )}
-              </div>
-
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, fontWeight: 700, color: V.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Note
-                <textarea
-                  style={{ ...inp, minHeight: 92, resize: "vertical" as const }}
-                  value={paymentNote}
-                  onChange={(e) => setPaymentNote(e.target.value)}
-                  placeholder="Optional note, reference, transfer details, emotional damage, whatever helps later."
-                  disabled={savingPayment}
-                />
-              </label>
-            </div>
-            <div style={{ padding: "0 20px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 12, color: V.faint }}>
-                New remaining after this payment: {paymentModal.entry.currency} {(paymentModal.remaining - (Number(paymentAmount) || 0)).toFixed(2)}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button style={btn} onClick={closePaymentModal} disabled={savingPayment}>Cancel</button>
-                <button style={btnP} onClick={() => void submitPaymentModal()} disabled={savingPayment}>{savingPayment ? "Saving..." : "Save payment"}</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PaymentModal
+          V={V}
+          btn={btn}
+          btnP={btnP}
+          inp={inp}
+          itemName={paymentModal.item.name}
+          monthLabel={fmtMonth(month)}
+          currency={paymentModal.entry.currency}
+          totalDue={getTotalDue(paymentModal.item, paymentModal.entry)}
+          amountPaid={paymentModal.entry.amountPaid ?? 0}
+          remaining={paymentModal.remaining}
+          onClose={() => setPaymentModal(null)}
+          onSubmit={submitPayment}
+          onSaved={(msg) => {
+            showToast(msg);
+            setPaymentModal(null);
+          }}
+          onError={showToast}
+        />
       )}
 
-      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: V.pos, border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>{toast}</div>}
+      <Toast message={toast} isDark={isDark} pos={V.pos} />
     </div>
   );
 }

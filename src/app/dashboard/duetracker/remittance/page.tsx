@@ -1,12 +1,15 @@
- "use client";
+"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useIsMobile } from "@/hooks/useIsMobile";
-
-type Status = "pending" | "partial" | "paid" | "waived";
+import { type Status, fmtMonth, remittanceStatusFromRow, statusTone } from "@/lib/duetracker";
+import { getTheme, styleKit } from "../_components/theme";
+import { Toast } from "../_components/Toast";
+import { LoadingSpinner } from "../_components/LoadingSpinner";
+import { PageHeader } from "../_components/PageHeader";
+import { StatGrid } from "../_components/StatGrid";
 
 type MonthRecord = {
   month: string;
@@ -18,24 +21,6 @@ type MonthRecord = {
   indiaTotalInr: number;
   isLocked: boolean;
 };
-
-function fmtMonth(m: string) {
-  const [y, mo] = m.split("-");
-  return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString("en-AE", { month: "long", year: "numeric" });
-}
-
-function statusTone(status: Status) {
-  if (status === "paid") return { bg: "rgba(22,163,74,0.12)", fg: "var(--positive)" };
-  if (status === "partial") return { bg: "rgba(239,68,68,0.14)", fg: "var(--negative)" };
-  if (status === "waived") return { bg: "rgba(148,163,184,0.16)", fg: "#94a3b8" };
-  return { bg: "rgba(239,68,68,0.08)", fg: "var(--negative)" };
-}
-
-function statusFromSettingsRow(row: { remittance_paid?: boolean | null; cash_in?: Record<string, unknown> | null }): Status {
-  const raw = row.cash_in?.__remittance_status;
-  if (raw === "pending" || raw === "partial" || raw === "paid" || raw === "waived") return raw;
-  return row.remittance_paid ? "paid" : "pending";
-}
 
 export default function RemittancePage() {
   const supabase = useMemo(() => createClient(), []);
@@ -64,7 +49,9 @@ export default function RemittancePage() {
 
   useEffect(() => {
     async function load() {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         router.push("/login");
         return;
@@ -72,20 +59,9 @@ export default function RemittancePage() {
       setUserId(user.id);
 
       const [settingsRes, dueItemsRes, entriesRes] = await Promise.all([
-        supabase
-          .from("due_month_settings")
-          .select("month, remittance_inr, remittance_rate, remittance_paid, note, fx_rates, cash_in, is_locked")
-          .eq("user_id", user.id)
-          .order("month", { ascending: false }),
-        supabase
-          .from("due_items")
-          .select("id,group_name,default_amount,default_currency")
-          .eq("user_id", user.id)
-          .eq("group_name", "India"),
-        supabase
-          .from("due_entries")
-          .select("month,due_item_id,amount,currency,status")
-          .eq("user_id", user.id),
+        supabase.from("due_month_settings").select("month, remittance_inr, remittance_rate, remittance_paid, note, fx_rates, cash_in, is_locked").eq("user_id", user.id).order("month", { ascending: false }),
+        supabase.from("due_items").select("id,group_name,default_amount,default_currency").eq("user_id", user.id).eq("group_name", "India"),
+        supabase.from("due_entries").select("month,due_item_id,amount,currency,status").eq("user_id", user.id),
       ]);
 
       if (settingsRes.error || dueItemsRes.error || entriesRes.error) {
@@ -120,7 +96,7 @@ export default function RemittancePage() {
             remittanceInr: inr,
             fxRate: rate,
             remittanceAed: rate > 0 ? inr / rate : 0,
-            status: statusFromSettingsRow(s),
+            status: remittanceStatusFromRow(s),
             note: s.note ?? "",
             indiaTotalInr: indiaTotal,
             isLocked: s.is_locked ?? false,
@@ -156,23 +132,26 @@ export default function RemittancePage() {
       return;
     }
 
-    const { error } = await supabase.from("due_month_settings").upsert({
-      user_id: userId,
-      month: record.month,
-      remittance_inr: inr,
-      remittance_rate: rate,
-      note: editNote,
-      remittance_paid: editStatus === "paid",
-      cash_in: { __remittance_status: editStatus },
-      is_locked: record.isLocked,
-    }, { onConflict: "user_id,month" });
+    const { error } = await supabase.from("due_month_settings").upsert(
+      {
+        user_id: userId,
+        month: record.month,
+        remittance_inr: inr,
+        remittance_rate: rate,
+        note: editNote,
+        remittance_paid: editStatus === "paid",
+        cash_in: { __remittance_status: editStatus },
+        is_locked: record.isLocked,
+      },
+      { onConflict: "user_id,month" },
+    );
 
     if (error) {
       showToast(error.message);
       return;
     }
 
-    setRecords((p) => p.map((r) => r.month === record.month ? { ...r, remittanceInr: inr, fxRate: rate, remittanceAed: inr / rate, note: editNote, status: editStatus } : r));
+    setRecords((p) => p.map((r) => (r.month === record.month ? { ...r, remittanceInr: inr, fxRate: rate, remittanceAed: inr / rate, note: editNote, status: editStatus } : r)));
     setEditMonth(null);
     showToast("Saved");
   }
@@ -184,9 +163,8 @@ export default function RemittancePage() {
       return;
     }
 
-    // Optimistic update (immediate UI feedback)
     const previousRecords = records;
-    setRecords((p) => p.map((r) => r.month === record.month ? { ...r, status } : r));
+    setRecords((p) => p.map((r) => (r.month === record.month ? { ...r, status } : r)));
 
     try {
       const updateData = {
@@ -200,21 +178,17 @@ export default function RemittancePage() {
         is_locked: record.isLocked,
       };
 
-      const { error } = await supabase
-        .from("due_month_settings")
-        .upsert(updateData, { onConflict: "user_id,month" });
+      const { error } = await supabase.from("due_month_settings").upsert(updateData, { onConflict: "user_id,month" });
 
       if (error) {
         showToast(`Failed: ${error.message}`);
-        // Revert optimistic update
         setRecords(previousRecords);
         return;
       }
 
       showToast(`Status updated to ${status}`);
     } catch {
-      showToast('Failed to save status update');
-      // Revert optimistic update
+      showToast("Failed to save status update");
       setRecords(previousRecords);
     }
   }
@@ -227,64 +201,27 @@ export default function RemittancePage() {
   const partialCount = useMemo(() => records.filter((r) => r.status === "partial").length, [records]);
   const totalVariance = useMemo(() => records.reduce((sum, record) => sum + (record.remittanceInr - record.indiaTotalInr), 0), [records]);
 
-  const V = {
-    bg: "var(--main-bg)",
-    card: "var(--card-bg)",
-    border: "var(--card-border)",
-    text: "var(--text-primary)",
-    muted: "var(--text-secondary)",
-    faint: "var(--text-muted)",
-    input: "var(--main-bg2)",
-    accent: "#ef4444",
-    pos: "var(--positive)",
-    posSoft: "var(--positive-soft)",
-    neg: "var(--negative)",
-    negSoft: "var(--negative-soft)",
-    warn: "var(--warning)",
-    warnSoft: "var(--warning-soft)",
-    gold: "var(--gold)",
-    goldSoft: "var(--gold-soft)",
-  };
-  const accentSoft = isDark ? "rgba(239,68,68,0.16)" : "rgba(239,68,68,0.10)";
-  const shadow = isDark
-    ? "0 1px 3px rgba(0,0,0,0.45)"
-    : "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)";
-  const btn = { padding: isMobile ? "10px 16px" : "7px 13px", minHeight: isMobile ? 40 : undefined, borderRadius: 9, border: `1px solid ${V.border}`, background: V.card, color: V.text, cursor: "pointer", fontSize: 12, fontWeight: 600, boxShadow: shadow, transition: "all 150ms ease" } as const;
-  const btnP = { ...btn, background: V.accent, border: "none", color: "#fff", fontWeight: 700, boxShadow: "0 4px 14px rgba(239,68,68,0.30)" } as const;
-  const inp = { padding: isMobile ? "10px 12px" : "8px 12px", minHeight: isMobile ? 40 : undefined, borderRadius: 8, border: `1px solid ${V.border}`, background: V.input, color: V.text, fontSize: 13, outline: "none" } as const;
+  const V = getTheme(isDark);
+  const { shadow, btn, btnP, inp } = styleKit(V, isDark, isMobile);
 
-  if (loading) return (
-    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", background: V.bg }}>
-      <div style={{ width: 28, height: 28, border: `2.5px solid ${V.accent}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-    </div>
-  );
+  if (loading) return <LoadingSpinner bg={V.bg} accent={V.accent} />;
 
   return (
     <div style={{ minHeight: "100vh", background: V.bg, color: V.text, fontFamily: "system-ui,sans-serif" }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 20, background: isDark ? "rgba(13,15,20,0.9)" : "rgba(249,248,245,0.9)", backdropFilter: "blur(12px)", borderBottom: `1px solid ${V.border}`, padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <Link href="/dashboard/duetracker" style={{ display: "flex", alignItems: "center", gap: 8, color: V.muted, textDecoration: "none", fontWeight: 600, fontSize: 13 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-          Due Tracker
-        </Link>
-        <span style={{ fontSize: 16, fontWeight: 800 }}>Remittance History</span>
-        <div />
-      </div>
+      <PageHeader V={V} isDark={isDark} title="Remittance History" />
 
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "24px 20px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 20 }}>
-          {[
-            { label: "Total remitted", value: `AED ${totalSent.toFixed(0)}`, color: V.text },
-            { label: "Total paid", value: `AED ${totalPaid.toFixed(0)}`, color: V.pos, note: partialCount > 0 ? `+ ${partialCount} partially paid (amount not tracked)` : undefined },
-            { label: "Months tracked", value: records.length, color: V.muted },
-            { label: "Variance", value: `${totalVariance > 0 ? "+" : ""}${totalVariance.toFixed(0)} INR`, color: totalVariance === 0 ? V.faint : totalVariance > 0 ? V.neg : V.pos },
-          ].map((card) => (
-            <div key={card.label} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, padding: "14px 16px", boxShadow: shadow }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: V.faint, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>{card.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: card.color }}>{card.value}</div>
-              {card.note && <div style={{ fontSize: 10, color: V.faint, marginTop: 3 }}>{card.note}</div>}
-            </div>
-          ))}
+        <div style={{ marginBottom: 20 }}>
+          <StatGrid
+            V={V}
+            shadow={shadow}
+            cards={[
+              { label: "Total remitted", value: `AED ${totalSent.toFixed(0)}` },
+              { label: "Total paid", value: `AED ${totalPaid.toFixed(0)}`, color: V.pos, note: partialCount > 0 ? `+ ${partialCount} partially paid (amount not tracked)` : undefined },
+              { label: "Months tracked", value: records.length, color: V.muted },
+              { label: "Variance", value: `${totalVariance > 0 ? "+" : ""}${totalVariance.toFixed(0)} INR`, color: totalVariance === 0 ? V.faint : totalVariance > 0 ? V.neg : V.pos },
+            ]}
+          />
         </div>
 
         {records.length === 0 && (
@@ -341,12 +278,14 @@ export default function RemittancePage() {
                       <input style={inp} value={editNote} onChange={(e) => setEditNote(e.target.value)} placeholder="Leave blank to clear it" />
                     </label>
                     <div style={{ fontSize: 12, color: V.muted }}>India subtotal for that month: INR {record.indiaTotalInr.toFixed(0)}</div>
-                    {editInr && editRate && (
-                      <div style={{ fontSize: 12, color: V.accent, fontWeight: 700 }}>AED {(Number(editInr) / Number(editRate)).toFixed(0)}</div>
-                    )}
+                    {editInr && editRate && <div style={{ fontSize: 12, color: V.accent, fontWeight: 700 }}>AED {(Number(editInr) / Number(editRate)).toFixed(0)}</div>}
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button style={btnP} onClick={() => void saveEdit(record)}>Save</button>
-                      <button style={btn} onClick={() => setEditMonth(null)}>Cancel</button>
+                      <button style={btnP} onClick={() => void saveEdit(record)}>
+                        Save
+                      </button>
+                      <button style={btn} onClick={() => setEditMonth(null)}>
+                        Cancel
+                      </button>
                     </div>
                   </div>
                 ) : isMobile ? (
@@ -363,9 +302,24 @@ export default function RemittancePage() {
                       </div>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, fontSize: 11, color: V.muted }}>
-                      <div>INR<br /><strong style={{ color: V.text, fontSize: 12, textDecoration: record.status === "waived" ? "line-through" : "none" }}>₹{record.remittanceInr.toLocaleString()}</strong></div>
-                      <div>Rate<br /><strong style={{ color: V.text, fontSize: 12 }}>÷{record.fxRate}</strong></div>
-                      <div>Variance<br /><strong style={{ color: varianceInr === 0 ? V.faint : varianceInr > 0 ? V.neg : V.pos, fontSize: 12 }}>{varianceInr > 0 ? "+" : ""}{varianceInr.toFixed(0)} INR</strong></div>
+                      <div>
+                        INR
+                        <br />
+                        <strong style={{ color: V.text, fontSize: 12, textDecoration: record.status === "waived" ? "line-through" : "none" }}>₹{record.remittanceInr.toLocaleString()}</strong>
+                      </div>
+                      <div>
+                        Rate
+                        <br />
+                        <strong style={{ color: V.text, fontSize: 12 }}>÷{record.fxRate}</strong>
+                      </div>
+                      <div>
+                        Variance
+                        <br />
+                        <strong style={{ color: varianceInr === 0 ? V.faint : varianceInr > 0 ? V.neg : V.pos, fontSize: 12 }}>
+                          {varianceInr > 0 ? "+" : ""}
+                          {varianceInr.toFixed(0)} INR
+                        </strong>
+                      </div>
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
                       <select disabled={record.isLocked} value={record.status} onChange={(e) => void updateStatus(record, e.target.value as Status)} style={{ ...inp, padding: "6px 8px", fontSize: 12, borderColor: tone.fg, color: tone.fg, flex: 1 }}>
@@ -401,8 +355,12 @@ export default function RemittancePage() {
                     <div style={{ fontSize: 12, color: V.faint }}>÷{record.fxRate}</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: record.status === "paid" ? V.pos : V.accent, textDecoration: record.status === "waived" ? "line-through" : "none" }}>AED {record.remittanceAed.toFixed(0)}</div>
                     <div style={{ fontSize: 12, color: varianceInr === 0 ? V.faint : varianceInr > 0 ? V.neg : V.pos }}>
-                      {varianceInr > 0 ? "+" : ""}{varianceInr.toFixed(0)} INR<br />
-                      <span style={{ fontSize: 11, color: V.faint }}>{varianceAed > 0 ? "+" : ""}AED {varianceAed.toFixed(0)}</span>
+                      {varianceInr > 0 ? "+" : ""}
+                      {varianceInr.toFixed(0)} INR
+                      <br />
+                      <span style={{ fontSize: 11, color: V.faint }}>
+                        {varianceAed > 0 ? "+" : ""}AED {varianceAed.toFixed(0)}
+                      </span>
                     </div>
                     <select disabled={record.isLocked} value={record.status} onChange={(e) => void updateStatus(record, e.target.value as Status)} style={{ ...inp, padding: "6px 8px", fontSize: 12, borderColor: tone.fg, color: tone.fg }}>
                       <option value="pending">Pending</option>
@@ -431,7 +389,7 @@ export default function RemittancePage() {
         </div>
       </div>
 
-      {toast && <div style={{ position: "fixed", bottom: 20, right: 16, background: isDark ? "#1a3a2a" : "#f0fdf4", color: V.pos, border: "1px solid rgba(22,163,74,0.3)", padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>{toast}</div>}
+      <Toast message={toast} isDark={isDark} pos={V.pos} />
     </div>
   );
 }
