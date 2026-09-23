@@ -21,11 +21,6 @@ const nextConfig = {
     ],
   },
 
-  // ── Experimental ────────────────────────────────────────────
-  experimental: {
-    optimizePackageImports: ["lucide-react", "recharts"],
-  },
-
   // ── Headers (security) ──────────────────────────────────────
   async headers() {
     return [
