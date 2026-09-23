@@ -459,10 +459,12 @@ CREATE INDEX IF NOT EXISTS inventory_user_cat ON public.inventory_items(user_id,
 CREATE INDEX IF NOT EXISTS inventory_expiry ON public.inventory_items(user_id, expiry_date) WHERE expiry_date IS NOT NULL;
 
 -- ============================================================
--- EXPENSES / BUDGET — tables exist live but Expenses is still
--- status:"coming-soon" in src/lib/modules.ts; no client code reads or
--- writes any of these four tables yet. Kept here for accuracy since
--- they're already provisioned, not because anything depends on them.
+-- FINANCE LEDGER — the Expenses module (and its expenses/budgets/
+-- budget_categories tables) was removed entirely since it was never
+-- built (a "coming-soon" stub with zero rows and no client code).
+-- finance_ledger is kept: its `source` check constraint spans
+-- expense/budget/portfolio by design as a shared cross-module ledger,
+-- even though nothing currently reads or writes it.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.finance_ledger (
   id          uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -484,52 +486,6 @@ CREATE POLICY "Users can manage own ledger"
   ON public.finance_ledger FOR ALL USING (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS finance_ledger_user_id_source_idx ON public.finance_ledger(user_id, source);
 CREATE INDEX IF NOT EXISTS finance_ledger_user_id_date_idx ON public.finance_ledger(user_id, date DESC);
-
-CREATE TABLE IF NOT EXISTS public.expenses (
-  id          uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id     uuid REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
-  ledger_id   uuid REFERENCES public.finance_ledger(id),
-  amount      numeric NOT NULL,
-  currency    text DEFAULT 'AED',
-  category    text NOT NULL,
-  merchant    text,
-  note        text,
-  date        date NOT NULL,
-  created_at  timestamptz DEFAULT now()
-);
-
-ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can manage own expenses"
-  ON public.expenses FOR ALL USING (auth.uid() = user_id);
-CREATE INDEX IF NOT EXISTS expenses_user_id_date_idx ON public.expenses(user_id, date DESC);
-
-CREATE TABLE IF NOT EXISTS public.budgets (
-  id              uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id         uuid REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
-  month           text NOT NULL,
-  monthly_income  numeric DEFAULT 0,
-  currency        text DEFAULT 'AED',
-  created_at      timestamptz DEFAULT now(),
-  updated_at      timestamptz DEFAULT now(),
-  UNIQUE(user_id, month)
-);
-
-ALTER TABLE public.budgets ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can manage own budgets"
-  ON public.budgets FOR ALL USING (auth.uid() = user_id);
-
-CREATE TABLE IF NOT EXISTS public.budget_categories (
-  id            uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
-  budget_id     uuid REFERENCES public.budgets(id) ON DELETE CASCADE NOT NULL,
-  user_id       uuid REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
-  name          text NOT NULL,
-  limit_amount  numeric NOT NULL,
-  color         text DEFAULT '#F5A623'
-);
-
-ALTER TABLE public.budget_categories ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can manage own budget categories"
-  ON public.budget_categories FOR ALL USING (auth.uid() = user_id);
 
 -- ============================================================
 -- UNUSED SCAFFOLDING — live, RLS-enabled, zero rows, and no client
