@@ -19,11 +19,9 @@ type BackupMode = "export" | "restore";
 
 type ModuleCountMap = Record<string, number | null>;
 type BackupModuleKey =
-  | "aromatica"
   | "duetracker"
   | "portfolio"
-  | "calendar"
-  | "biomarkers";
+  | "calendar";
 
 type JsonBackup = {
   app: "MyLife";
@@ -496,18 +494,12 @@ function BackupModal({
         }
 
         const [
-          perfumesRes,
           budgetRes,
           portfolioItemsRes,
           portfolioPurchasesRes,
           portfolioAlertsRes,
           calendarRes,
-          biomarkersRes,
         ] = await Promise.all([
-          supabase
-            .from("perfumes")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id),
           supabase
             .from("due_items")
             .select("*", { count: "exact", head: true })
@@ -528,21 +520,15 @@ function BackupModal({
             .from("calendar_events")
             .select("*", { count: "exact", head: true })
             .eq("user_id", user.id),
-          supabase
-            .from("biomarker_results")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id),
         ]);
 
         setCounts({
-          aromatica: perfumesRes.count ?? 0,
           duetracker: budgetRes.count ?? 0,
           portfolio:
             (portfolioItemsRes.count ?? 0) +
             (portfolioPurchasesRes.count ?? 0) +
             (portfolioAlertsRes.count ?? 0),
           calendar: calendarRes.count ?? 0,
-          biomarkers: biomarkersRes.count ?? 0,
         });
       } catch {
         setError("Failed to load export counts.");
@@ -614,21 +600,6 @@ function BackupModal({
         modules: {},
       };
 
-      if (selected.includes("aromatica")) {
-        const [{ data: perfumes }, { data: purchases }, { data: bottles }] =
-          await Promise.all([
-            supabase.from("perfumes").select("*").eq("user_id", user.id),
-            supabase.from("perfume_purchases").select("*").eq("user_id", user.id),
-            supabase.from("perfume_bottles").select("*").eq("user_id", user.id),
-          ]);
-
-        backup.modules.aromatica = {
-          perfumes: perfumes ?? [],
-          perfume_purchases: purchases ?? [],
-          perfume_bottles: bottles ?? [],
-        };
-      }
-
       if (selected.includes("duetracker")) {
         const [{ data: items }, { data: entries }, { data: settings }] =
           await Promise.all([
@@ -676,24 +647,6 @@ function BackupModal({
         };
       }
 
-      if (selected.includes("biomarkers")) {
-        const [{ data: tests }, { data: results }, { data: metrics }] =
-          await Promise.all([
-            supabase.from("biomarker_tests").select("*").eq("user_id", user.id),
-            supabase
-              .from("biomarker_results")
-              .select("*")
-              .eq("user_id", user.id),
-            supabase.from("body_metrics").select("*").eq("user_id", user.id),
-          ]);
-
-        backup.modules.biomarkers = {
-          biomarker_tests: tests ?? [],
-          biomarker_results: results ?? [],
-          body_metrics: metrics ?? [],
-        };
-      }
-
       if (format === "json") {
         const blob = new Blob([JSON.stringify(backup, null, 2)], {
           type: "application/json",
@@ -710,45 +663,6 @@ function BackupModal({
       }
 
       const parts: string[] = [];
-
-      if (selected.includes("aromatica")) {
-        const perfumes = (backup.modules.aromatica?.perfumes as any[]) ?? [];
-        parts.push(`=== aromatica ===`);
-        parts.push(
-          [
-            "brand",
-            "model",
-            "status",
-            "rating_stars",
-            "notes_tags",
-            "weather_tags",
-            "longevity",
-            "sillage",
-            "value_rating",
-            "clone_similar",
-            "notes_text",
-          ].join(",")
-        );
-
-        perfumes.forEach((r) => {
-          parts.push(
-            [
-              csvCell(r.brand),
-              csvCell(r.model),
-              csvCell(r.status),
-              csvCell(r.rating_stars),
-              csvCell((r.notes_tags ?? []).join("|")),
-              csvCell((r.weather_tags ?? []).join("|")),
-              csvCell(r.longevity),
-              csvCell(r.sillage),
-              csvCell(r.value_rating),
-              csvCell(r.clone_similar),
-              csvCell(r.notes_text),
-            ].join(",")
-          );
-        });
-        parts.push("");
-      }
 
       if (selected.includes("duetracker")) {
         const items = (backup.modules.duetracker?.due_items as any[]) ?? [];
@@ -901,24 +815,6 @@ function BackupModal({
         parts.push("");
       }
 
-      if (selected.includes("biomarkers")) {
-        const results =
-          (backup.modules.biomarkers?.biomarker_results as any[]) ?? [];
-        parts.push(`=== biomarker_results ===`);
-        parts.push(["test_date", "value_num", "value_text", "biomarker_test_id"].join(","));
-        results.forEach((r) => {
-          parts.push(
-            [
-              csvCell(r.test_date),
-              csvCell(r.value_num),
-              csvCell(r.value_text),
-              csvCell(r.biomarker_test_id),
-            ].join(",")
-          );
-        });
-        parts.push("");
-      }
-
       const blob = new Blob([parts.join("\n")], {
         type: "text/csv;charset=utf-8",
       });
@@ -969,31 +865,6 @@ function BackupModal({
           },
           { onConflict: "id" }
         );
-      }
-
-      if (restoreSelected.includes("aromatica")) {
-        const mod = restoreBackup.modules.aromatica;
-        if (mod) {
-          if (Array.isArray(mod.perfumes) && mod.perfumes.length) {
-            await supabase
-              .from("perfumes")
-              .upsert(sanitizeRows(mod.perfumes, user.id), { onConflict: "id" });
-          }
-          if (Array.isArray(mod.perfume_purchases) && mod.perfume_purchases.length) {
-            await supabase
-              .from("perfume_purchases")
-              .upsert(sanitizeRows(mod.perfume_purchases, user.id), {
-                onConflict: "id",
-              });
-          }
-          if (Array.isArray(mod.perfume_bottles) && mod.perfume_bottles.length) {
-            await supabase
-              .from("perfume_bottles")
-              .upsert(sanitizeRows(mod.perfume_bottles, user.id), {
-                onConflict: "id",
-              });
-          }
-        }
       }
 
       if (restoreSelected.includes("duetracker")) {
@@ -1062,36 +933,6 @@ function BackupModal({
             .upsert(sanitizeRows(mod.calendar_events, user.id), {
               onConflict: "id",
             });
-        }
-      }
-
-      if (restoreSelected.includes("biomarkers")) {
-        const mod = restoreBackup.modules.biomarkers;
-        if (mod) {
-          if (Array.isArray(mod.biomarker_tests) && mod.biomarker_tests.length) {
-            await supabase
-              .from("biomarker_tests")
-              .upsert(sanitizeRows(mod.biomarker_tests, user.id), {
-                onConflict: "id",
-              });
-          }
-          if (
-            Array.isArray(mod.biomarker_results) &&
-            mod.biomarker_results.length
-          ) {
-            await supabase
-              .from("biomarker_results")
-              .upsert(sanitizeRows(mod.biomarker_results, user.id), {
-                onConflict: "id",
-              });
-          }
-          if (Array.isArray(mod.body_metrics) && mod.body_metrics.length) {
-            await supabase
-              .from("body_metrics")
-              .upsert(sanitizeRows(mod.body_metrics, user.id), {
-                onConflict: "id",
-              });
-          }
         }
       }
 

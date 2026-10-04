@@ -153,3 +153,24 @@ body {
 .dark .module-card:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
+
+/* Loading skeletons */
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.skeleton-pulse {
+  animation: skeletonPulse 1.2s ease-in-out infinite;
+}
+
+/* Respect users who ask for less motion: kill the decorative loops/transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
+import { createClient, getClientUser } from "@/lib/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MODULES } from "@/lib/modules";
@@ -77,12 +77,9 @@ export default function SettingsPage() {
       setBanner(null);
 
       try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
+        const user = await getClientUser(supabase);
 
-        if (userError || !user) {
+        if (!user) {
           setBanner({
             type: "error",
             message: "Session expired. Please log in again.",

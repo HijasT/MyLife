@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, getClientUser } from "@/lib/supabase/client";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { type Status, fmtMonth, remittanceStatusFromRow, statusTone } from "@/lib/duetracker";
 import { getTheme, styleKit } from "../_components/theme";
@@ -49,9 +49,7 @@ export default function RemittancePage() {
 
   useEffect(() => {
     async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getClientUser(supabase);
       if (!user) {
         router.push("/login");
         return;

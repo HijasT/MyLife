@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, getClientUser } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -114,9 +114,7 @@ export default function DueTrackerPage() {
 
   useEffect(() => {
     async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getClientUser(supabase);
       if (!user) {
         setLoading(false);
         return;

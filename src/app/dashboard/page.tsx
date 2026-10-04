@@ -12,7 +12,7 @@ function ModuleCard({ module }: { module: (typeof MODULES)[0] }) {
     borderRadius: mylifeBorderRadius.xl,
     padding: `${mylifeSpacing[6]} ${mylifeSpacing[6]}`,
     border: "1px solid var(--card-border)",
-    transition: "all 200ms ease-in-out",
+    transition: "transform 180ms ease, box-shadow 180ms ease",
     backgroundColor: "var(--card-bg)",
     cursor: isComingSoon ? "default" : "pointer",
     opacity: isComingSoon ? 0.8 : 1,

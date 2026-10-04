@@ -67,7 +67,6 @@ export default function LoginPage() {
             {[
               { icon: "💳", text: "Due tracker & payments" },
               { icon: "📈", text: "Portfolio with live prices" },
-              { icon: "🌸", text: "Aromatica — perfume collection" },
               { icon: "🗓️", text: "Calendar & work hours" },
             ].map((item) => (
               <div key={item.text} className="flex items-center gap-3">

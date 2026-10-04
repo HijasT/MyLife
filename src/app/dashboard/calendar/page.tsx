@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, getClientUser } from "@/lib/supabase/client";
 import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -410,12 +410,9 @@ export default function CalendarPage() {
       setError("");
 
       try {
-        const {
-          data: { user },
-          error: authError,
-        } = await supabase.auth.getUser();
+        const user = await getClientUser(supabase);
 
-        if (authError || !user) {
+        if (!user) {
           setError("Failed to load session.");
           setLoading(false);
           return;

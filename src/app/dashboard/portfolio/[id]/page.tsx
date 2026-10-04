@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { nowDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, getClientUser } from "@/lib/supabase/client";
 import {
   type AlertType,
   type Currency,
@@ -83,9 +83,7 @@ export default function PortfolioItemPage() {
   useEffect(() => {
     async function load() {
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        const user = await getClientUser(supabase);
 
         if (!user) {
           router.push("/login");

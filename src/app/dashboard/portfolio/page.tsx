@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, getClientUser } from "@/lib/supabase/client";
 import { markSynced } from "@/hooks/useSyncStatus";
 import { getUserTimezone, APP_TZ } from "@/lib/timezone";
 import {
@@ -197,9 +197,7 @@ export default function PortfolioPage() {
 
   useEffect(() => {
     async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getClientUser(supabase);
 
       if (!user) {
         setLoading(false);

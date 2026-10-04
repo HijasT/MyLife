@@ -28,9 +28,7 @@ It currently covers 6 modules:
 | 🏠 **Dashboard** | Greeting · Dubai time & weather · Today's agenda |
 | 💳 **Due Tracker** | Monthly bills · Groups (UAE / India) · Remittance · AED/INR/USD |
 | 📈 **Portfolio** | Gold & silver (live via goldapi.io) · Stocks · P&L |
-| 🌸 **Aromatica** | Fragrance collection · Bottle tracking · Wear logs |
 | 🗓️ **Calendar** | Work shifts · Anniversaries · Events · Filter & search |
-| 🧬 **BioMarkers** | Lab results · Body metrics · Trend charts |
 
 ---
 
@@ -149,13 +147,7 @@ src/
 │   │   ├── portfolio/              # Portfolio
 │   │   │   ├── page.tsx
 │   │   │   └── [id]/page.tsx
-│   │   ├── perfumes/               # Aromatica
-│   │   │   ├── page.tsx
-│   │   │   └── [id]/page.tsx
 │   │   ├── calendar/page.tsx
-│   │   ├── biomarkers/
-│   │   │   ├── page.tsx
-│   │   │   └── [id]/page.tsx
 │   │   └── settings/page.tsx
 │   ├── login/page.tsx
 │   └── auth/reset/page.tsx
