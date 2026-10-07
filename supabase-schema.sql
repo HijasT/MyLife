@@ -368,6 +368,7 @@ CREATE TABLE IF NOT EXISTS public.credit_cards (
   annual_fee    numeric DEFAULT 0,
   fee_currency  text DEFAULT 'AED',
   fee_waiver    text,          -- waiver condition, e.g. "spend 24k/yr"
+  forex_fee     text,          -- foreign-transaction fee, e.g. "2.61% + scheme"
   benefits      text,          -- freeform: lounge, insurance, offers
   terms         text,          -- freeform: usage policy / terms
   source_url    text,          -- official KFS / product page, for cross-verifying

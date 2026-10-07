@@ -13,6 +13,7 @@ type Card = {
   annual_fee: number | null;
   fee_currency: string | null;
   fee_waiver: string | null;
+  forex_fee: string | null;
   benefits: string | null;
   terms: string | null;
   source_url: string | null;
@@ -27,6 +28,7 @@ type Draft = {
   annual_fee: string;
   fee_currency: string;
   fee_waiver: string;
+  forex_fee: string;
   benefits: string;
   terms: string;
   source_url: string;
@@ -36,12 +38,36 @@ type Draft = {
 
 const EMPTY: Draft = {
   name: "", issuer: "", network: "", annual_fee: "", fee_currency: "AED",
-  fee_waiver: "", benefits: "", terms: "", source_url: "", is_active: true, rewards: [],
+  fee_waiver: "", forex_fee: "", benefits: "", terms: "", source_url: "", is_active: true, rewards: [],
 };
 
 const ACCENT = "#8b5cf6";
 
-// For each category earned by any active card, the card with the top rate.
+type Region = "UAE" | "India" | "International";
+const REGIONS: { key: Region; label: string }[] = [
+  { key: "UAE", label: "🇦🇪 UAE" },
+  { key: "India", label: "🇮🇳 India" },
+  { key: "International", label: "🌍 International" },
+];
+
+// ponytail: region derived from billing currency (AED→UAE, INR→India, else International)
+function regionOf(c: Card): Region {
+  const cur = (c.fee_currency || "").trim().toUpperCase();
+  if (cur === "AED") return "UAE";
+  if (cur === "INR") return "India";
+  return "International";
+}
+
+// This card's highest-rate reward category.
+function topReward(c: Card): Reward | null {
+  let best: Reward | null = null;
+  for (const r of c.rewards ?? []) {
+    if (r.category.trim() && (!best || r.rate > best.rate)) best = r;
+  }
+  return best;
+}
+
+// For each category earned by any active card in the set, the card with the top rate.
 function bestByCategory(cards: Card[]) {
   const best = new Map<string, { card: Card; reward: Reward }>();
   for (const c of cards) {
@@ -107,6 +133,7 @@ export default function CardsPage() {
       annual_fee: d.annual_fee === "" ? 0 : Number(d.annual_fee),
       fee_currency: d.fee_currency.trim() || "AED",
       fee_waiver: d.fee_waiver.trim() || null,
+      forex_fee: d.forex_fee.trim() || null,
       benefits: d.benefits.trim() || null,
       terms: d.terms.trim() || null,
       source_url: d.source_url.trim() || null,
@@ -133,19 +160,31 @@ export default function CardsPage() {
     flash("Card deleted");
   }
 
+  async function toggleActive(c: Card) {
+    if (!userId) return;
+    const { error } = await supabase.from("credit_cards").update({ is_active: !c.is_active }).eq("id", c.id);
+    if (error) { flash(error.message); return; }
+    await load(userId);
+    flash(c.is_active ? "Card disabled — dropped from best-card picker" : "Card enabled");
+  }
+
   function openEdit(c?: Card) {
     setEditing(c
       ? { id: c.id, draft: {
           name: c.name, issuer: c.issuer ?? "", network: c.network ?? "",
           annual_fee: c.annual_fee == null ? "" : String(c.annual_fee),
-          fee_currency: c.fee_currency ?? "AED", fee_waiver: c.fee_waiver ?? "",
+          fee_currency: c.fee_currency ?? "AED", fee_waiver: c.fee_waiver ?? "", forex_fee: c.forex_fee ?? "",
           benefits: c.benefits ?? "", terms: c.terms ?? "", source_url: c.source_url ?? "", is_active: c.is_active,
           rewards: c.rewards.map((r) => ({ ...r })),
         } }
       : { id: null, draft: { ...EMPTY, rewards: [] } });
   }
 
-  const best = useMemo(() => bestByCategory(cards), [cards]);
+  const grouped = useMemo(() => {
+    return REGIONS
+      .map((r) => ({ ...r, cards: cards.filter((c) => regionOf(c) === r.key) }))
+      .filter((g) => g.cards.length > 0);
+  }, [cards]);
 
   if (loading) return <div style={{ padding: 40, color: V.muted }}>Loading…</div>;
 
@@ -155,93 +194,59 @@ export default function CardsPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
           <div>
             <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>💳 Cards</h1>
-            <p style={{ color: V.faint, fontSize: 13, margin: "4px 0 0" }}>Which card gives the best deal for each service.</p>
+            <p style={{ color: V.faint, fontSize: 13, margin: "4px 0 0" }}>Best card per service, grouped by region.</p>
           </div>
           <button style={btnP} onClick={() => openEdit()}>+ Add card</button>
         </div>
 
-        {/* Best card per category */}
-        <section style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, marginBottom: 24, overflow: "hidden" }}>
-          <div style={{ padding: "11px 16px", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: V.faint, borderBottom: `1px solid ${V.border}` }}>
-            Best card by category
-          </div>
-          {best.length === 0 ? (
-            <div style={{ padding: 16, fontSize: 13, color: V.faint }}>
-              Add cards with reward categories to see the best pick per service.
-            </div>
-          ) : (
-            <div>
-              {best.map(([cat, { card, reward }]) => (
-                <div key={cat} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${V.border}` }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{cat}</div>
-                    {reward.notes && <div style={{ fontSize: 12, color: V.faint }}>{reward.notes}</div>}
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 700, color: ACCENT }}>{reward.rate}%</div>
-                    <div style={{ fontSize: 12, color: V.muted }}>{card.name}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Card list */}
         {cards.length === 0 ? (
           <div style={{ color: V.faint, fontSize: 14, textAlign: "center", padding: 40 }}>No cards yet.</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {cards.map((c) => {
-              const open = expanded === c.id;
-              return (
-                <div key={c.id} style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden", opacity: c.is_active ? 1 : 0.55 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 16px", cursor: "pointer" }} onClick={() => setExpanded(open ? null : c.id)}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>
-                        {c.name} {!c.is_active && <span style={{ fontSize: 11, color: V.faint }}>(inactive)</span>}
-                      </div>
-                      <div style={{ fontSize: 12, color: V.faint }}>
-                        {[c.issuer, c.network].filter(Boolean).join(" · ") || "—"}
-                        {" · "}Fee {c.annual_fee ? `${c.fee_currency} ${c.annual_fee}` : "free"}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                      <button style={btn} onClick={() => openEdit(c)}>Edit</button>
-                      <button style={{ ...btn, color: "#ef4444" }} onClick={() => remove(c.id)}>Delete</button>
-                    </div>
-                  </div>
-                  {open && (
-                    <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-                      {c.rewards.length > 0 && (
-                        <div>
-                          <Label V={V}>Rewards</Label>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {c.rewards.map((r, i) => (
-                              <span key={i} style={{ fontSize: 12, padding: "3px 8px", borderRadius: 999, background: V.input, border: `1px solid ${V.border}` }}>
-                                {r.category} <b style={{ color: ACCENT }}>{r.rate}%</b>{r.notes ? ` · ${r.notes}` : ""}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {c.fee_waiver && <Field V={V} label="Fee waiver" value={c.fee_waiver} />}
-                      {c.benefits && <Field V={V} label="Benefits" value={c.benefits} />}
-                      {c.terms && <Field V={V} label="Terms, fees & usage policy" value={c.terms} />}
-                      {c.source_url && (
-                        <div>
-                          <Label V={V}>Source</Label>
-                          <a href={c.source_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: ACCENT, wordBreak: "break-all" }}>
-                            {c.source_url}
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  )}
+          grouped.map((g) => {
+            const best = bestByCategory(g.cards);
+            return (
+              <div key={g.key} style={{ marginBottom: 32 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <h2 style={{ fontSize: 15, fontWeight: 800, margin: 0 }}>{g.label}</h2>
+                  <span style={{ fontSize: 12, color: V.faint }}>{g.cards.length} card{g.cards.length > 1 ? "s" : ""}</span>
+                  <div style={{ flex: 1, height: 1, background: V.border }} />
                 </div>
-              );
-            })}
-          </div>
+
+                {/* Best card per category within this region */}
+                {best.length > 0 && (
+                  <section style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, marginBottom: 14, overflow: "hidden" }}>
+                    <div style={{ padding: "10px 16px", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", color: V.faint, borderBottom: `1px solid ${V.border}` }}>
+                      Best card by category
+                    </div>
+                    {best.map(([cat, { card, reward }]) => (
+                      <div key={cat} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "9px 16px", borderBottom: `1px solid ${V.border}` }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14 }}>{cat}</div>
+                          {reward.notes && <div style={{ fontSize: 12, color: V.faint }}>{reward.notes}</div>}
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontWeight: 700, color: ACCENT }}>{reward.rate}%</div>
+                          <div style={{ fontSize: 12, color: V.muted }}>{card.name}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+                )}
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {g.cards.map((c) => (
+                    <CardRow
+                      key={c.id} c={c} V={V} btn={btn}
+                      open={expanded === c.id}
+                      onToggle={() => setExpanded(expanded === c.id ? null : c.id)}
+                      onEdit={() => openEdit(c)} onDelete={() => remove(c.id)}
+                      onToggleActive={() => toggleActive(c)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -256,6 +261,82 @@ export default function CardsPage() {
       {toast && (
         <div style={{ position: "fixed", bottom: 20, right: 16, background: V.card, border: `1px solid ${V.border}`, color: V.text, padding: "12px 18px", borderRadius: 12, fontSize: 13, fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.2)", zIndex: 200 }}>
           {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CardRow({
+  c, V, btn, open, onToggle, onEdit, onDelete, onToggleActive,
+}: {
+  c: Card; V: Record<string, string>; btn: CSSProperties;
+  open: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void; onToggleActive: () => void;
+}) {
+  const top = topReward(c);
+  return (
+    <div style={{ background: V.card, border: `1px solid ${V.border}`, borderRadius: 14, overflow: "hidden", opacity: c.is_active ? 1 : 0.5 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 16px", cursor: "pointer" }} onClick={onToggle}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>
+            {c.name} {!c.is_active && <span style={{ fontSize: 11, color: V.faint }}>(disabled)</span>}
+          </div>
+          <div style={{ fontSize: 12, color: V.faint }}>
+            {[c.issuer, c.network].filter(Boolean).join(" · ") || "—"}
+            {" · "}Fee {c.annual_fee ? `${c.fee_currency} ${c.annual_fee}` : "free"}
+            {c.forex_fee ? ` · Forex ${c.forex_fee}` : ""}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+          <button style={{ ...btn, padding: "6px 10px" }} onClick={onToggleActive} title={c.is_active ? "Disable (drop from best-card picker)" : "Enable"}>
+            {c.is_active ? "Disable" : "Enable"}
+          </button>
+          <button style={{ ...btn, padding: "6px 10px" }} onClick={onEdit}>Edit</button>
+          <button style={{ ...btn, padding: "6px 10px", color: "#ef4444" }} onClick={onDelete}>Delete</button>
+        </div>
+      </div>
+
+      {/* Always-visible: best category + benefits */}
+      <div style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {top && (
+          <div>
+            <Label V={V}>Best category</Label>
+            <span style={{ display: "inline-block", fontSize: 13, fontWeight: 700, padding: "4px 10px", borderRadius: 999, background: ACCENT, color: "#fff" }}>
+              {top.category} {top.rate}%{top.notes ? ` · ${top.notes}` : ""}
+            </span>
+          </div>
+        )}
+        {c.benefits && <Field V={V} label="Benefits" value={c.benefits} />}
+      </div>
+
+      {open && (
+        <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 12, borderTop: `1px solid ${V.border}`, marginTop: 2, paddingTop: 12 }}>
+          {c.rewards.length > 0 && (
+            <div>
+              <Label V={V}>All rewards</Label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {c.rewards.map((r, i) => {
+                  const isTop = top != null && r.category === top.category && r.rate === top.rate;
+                  return (
+                    <span key={i} style={{ fontSize: 12, padding: "3px 8px", borderRadius: 999, background: isTop ? ACCENT : V.input, color: isTop ? "#fff" : V.text, border: `1px solid ${isTop ? ACCENT : V.border}` }}>
+                      {r.category} <b style={{ color: isTop ? "#fff" : ACCENT }}>{r.rate}%</b>{r.notes ? ` · ${r.notes}` : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {c.forex_fee && <Field V={V} label="Foreign transaction fee" value={c.forex_fee} />}
+          {c.fee_waiver && <Field V={V} label="Fee waiver" value={c.fee_waiver} />}
+          {c.terms && <Field V={V} label="Terms, fees & usage policy" value={c.terms} />}
+          {c.source_url && (
+            <div>
+              <Label V={V}>Source</Label>
+              <a href={c.source_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: ACCENT, wordBreak: "break-all" }}>
+                {c.source_url}
+              </a>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -306,7 +387,10 @@ function EditModal({
             <div style={{ flex: 1, minWidth: 120 }}><Label V={V}>Annual fee</Label><input style={inp} type="number" value={d.annual_fee} onChange={(e) => set({ annual_fee: e.target.value })} /></div>
             <div style={{ width: 90 }}><Label V={V}>Currency</Label><input style={inp} value={d.fee_currency} onChange={(e) => set({ fee_currency: e.target.value })} /></div>
           </div>
-          <div><Label V={V}>Fee waiver condition</Label><input style={inp} value={d.fee_waiver} onChange={(e) => set({ fee_waiver: e.target.value })} placeholder="e.g. waived if spend 24k/yr" /></div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 140 }}><Label V={V}>Fee waiver condition</Label><input style={inp} value={d.fee_waiver} onChange={(e) => set({ fee_waiver: e.target.value })} placeholder="e.g. waived if spend 24k/yr" /></div>
+            <div style={{ flex: 1, minWidth: 140 }}><Label V={V}>Foreign transaction fee</Label><input style={inp} value={d.forex_fee} onChange={(e) => set({ forex_fee: e.target.value })} placeholder="e.g. 2.61% + scheme" /></div>
+          </div>
 
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
