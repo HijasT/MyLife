@@ -351,3 +351,33 @@ ALTER TABLE public.expiry_items ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can manage own expiry items"
   ON public.expiry_items FOR ALL USING (auth.uid() = user_id);
 CREATE INDEX IF NOT EXISTS expiry_items_user_id_expiry_date_idx ON public.expiry_items(user_id, expiry_date);
+
+-- ============================================================
+-- CREDIT CARDS — benefits, fees, terms/usage policy, and
+-- per-category reward rates. Drives the "best card per category"
+-- picker. `rewards` is a jsonb array of {category, rate, notes};
+-- it's only ever read together with its card, so it lives inline
+-- rather than in a separate table.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.credit_cards (
+  id            uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id       uuid REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  name          text NOT NULL,
+  issuer        text,          -- bank
+  network       text,          -- Visa / Mastercard / Amex …
+  annual_fee    numeric DEFAULT 0,
+  fee_currency  text DEFAULT 'AED',
+  fee_waiver    text,          -- waiver condition, e.g. "spend 24k/yr"
+  benefits      text,          -- freeform: lounge, insurance, offers
+  terms         text,          -- freeform: usage policy / terms
+  source_url    text,          -- official KFS / product page, for cross-verifying
+  rewards       jsonb DEFAULT '[]',   -- [{category, rate, notes}]
+  is_active     boolean DEFAULT true,
+  sort_order    int DEFAULT 0,
+  created_at    timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.credit_cards ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own credit cards"
+  ON public.credit_cards FOR ALL USING (auth.uid() = user_id);
+CREATE INDEX IF NOT EXISTS credit_cards_user ON public.credit_cards(user_id);

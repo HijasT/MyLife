@@ -1,7 +1,7 @@
-// MyLife Service Worker - offline support (v2, redirect-safe)
+// MyLife Service Worker - offline support (v3, redirect-safe)
 
-const CACHE_NAME = 'mylife-v2';
-const RUNTIME_CACHE = 'mylife-runtime-v2';
+const CACHE_NAME = 'mylife-v3';
+const RUNTIME_CACHE = 'mylife-runtime-v3';
 
 // Only precache truly static, public, non-redirecting assets.
 // NOTE: never precache auth-gated HTML routes like /dashboard — they answer
