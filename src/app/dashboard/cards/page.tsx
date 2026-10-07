@@ -4,7 +4,17 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createClient, getClientUser } from "@/lib/supabase/client";
 
 // rewards is jsonb on credit_cards; one row per spending category the card earns on.
-type Reward = { category: string; rate: number; notes?: string };
+// cap = monthly reward/cashback cap in the card's fee_currency (omit = uncapped).
+type Reward = { category: string; rate: number; cap?: number; notes?: string };
+
+// Monthly spend that hits a capped reward's ceiling: cap / (rate/100).
+// e.g. 10% capped at AED 75 → spend AED 750/mo reaches the cap.
+function capSpend(r: Reward, currency: string | null): string | null {
+  if (!r.cap || r.cap <= 0 || !r.rate || r.rate <= 0) return null;
+  const spend = Math.round(r.cap / (r.rate / 100));
+  const cur = currency || "";
+  return `max spend ${cur} ${spend.toLocaleString()}/mo (${cur} ${r.cap} cap)`;
+}
 type Card = {
   id: string;
   name: string;
@@ -140,7 +150,12 @@ export default function CardsPage() {
       is_active: d.is_active,
       rewards: d.rewards
         .filter((r) => r.category.trim())
-        .map((r) => ({ category: r.category.trim(), rate: Number(r.rate) || 0, notes: r.notes?.trim() || undefined })),
+        .map((r) => ({
+          category: r.category.trim(),
+          rate: Number(r.rate) || 0,
+          cap: r.cap && Number(r.cap) > 0 ? Number(r.cap) : undefined,
+          notes: r.notes?.trim() || undefined,
+        })),
     };
     const q = editing.id
       ? supabase.from("credit_cards").update(row).eq("id", editing.id)
@@ -304,6 +319,9 @@ function CardRow({
             <span style={{ display: "inline-block", fontSize: 13, fontWeight: 700, padding: "4px 10px", borderRadius: 999, background: ACCENT, color: "#fff" }}>
               {top.category} {top.rate}%{top.notes ? ` · ${top.notes}` : ""}
             </span>
+            {capSpend(top, c.fee_currency) && (
+              <div style={{ fontSize: 12, color: V.muted, marginTop: 4 }}>💡 {capSpend(top, c.fee_currency)}</div>
+            )}
           </div>
         )}
         {c.benefits && <Field V={V} label="Benefits" value={c.benefits} />}
@@ -317,9 +335,10 @@ function CardRow({
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {c.rewards.map((r, i) => {
                   const isTop = top != null && r.category === top.category && r.rate === top.rate;
+                  const cap = capSpend(r, c.fee_currency);
                   return (
                     <span key={i} style={{ fontSize: 12, padding: "3px 8px", borderRadius: 999, background: isTop ? ACCENT : V.input, color: isTop ? "#fff" : V.text, border: `1px solid ${isTop ? ACCENT : V.border}` }}>
-                      {r.category} <b style={{ color: isTop ? "#fff" : ACCENT }}>{r.rate}%</b>{r.notes ? ` · ${r.notes}` : ""}
+                      {r.category} <b style={{ color: isTop ? "#fff" : ACCENT }}>{r.rate}%</b>{r.notes ? ` · ${r.notes}` : ""}{cap ? ` · ${cap}` : ""}
                     </span>
                   );
                 })}
@@ -401,8 +420,9 @@ function EditModal({
               {d.rewards.map((r, i) => (
                 <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <input style={{ ...inp, flex: 2, minWidth: 120 }} value={r.category} onChange={(e) => setReward(i, { category: e.target.value })} placeholder="Category (e.g. Dining)" />
-                  <input style={{ ...inp, width: 80 }} type="number" value={r.rate} onChange={(e) => setReward(i, { rate: Number(e.target.value) })} placeholder="%" />
-                  <input style={{ ...inp, flex: 2, minWidth: 120 }} value={r.notes ?? ""} onChange={(e) => setReward(i, { notes: e.target.value })} placeholder="Notes / cap" />
+                  <input style={{ ...inp, width: 70 }} type="number" value={r.rate} onChange={(e) => setReward(i, { rate: Number(e.target.value) })} placeholder="rate %" />
+                  <input style={{ ...inp, width: 90 }} type="number" value={r.cap ?? ""} onChange={(e) => setReward(i, { cap: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="cap/mo" title="Monthly cashback cap in card currency (blank = uncapped)" />
+                  <input style={{ ...inp, flex: 2, minWidth: 110 }} value={r.notes ?? ""} onChange={(e) => setReward(i, { notes: e.target.value })} placeholder="Notes" />
                   <button style={{ ...btn, padding: "6px 10px", color: "#ef4444" }} onClick={() => set({ rewards: d.rewards.filter((_, j) => j !== i) })}>✕</button>
                 </div>
               ))}
