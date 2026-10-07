@@ -116,6 +116,16 @@ body {
   }
 }
 
+/* Dashboard content offset: full width on mobile, shifted past the sidebar
+   on desktop. Done in CSS so the page renders once (see dashboard/layout.tsx). */
+@media (min-width: 1024px) {
+  .dashboard-main {
+    margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
+    transition: margin-left 0.3s ease, width 0.3s ease;
+  }
+}
+
 .page-enter {
   /* No `forwards`: a lingering `transform` after the animation ends creates a
      new containing block for `position: fixed` descendants (e.g. modals),

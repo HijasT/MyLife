@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient, getClientUser } from "@/lib/supabase/client";
-import { markSynced } from "@/hooks/useSyncStatus";
 import { todayDubai, getUserTimezone, APP_TZ } from "@/lib/timezone";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -192,7 +191,6 @@ export default function DueTrackerPage() {
             remittanceGroup: "India",
           },
     );
-    markSynced();
     return s?.is_locked ?? false;
   }
 

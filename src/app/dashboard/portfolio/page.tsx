@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient, getClientUser } from "@/lib/supabase/client";
-import { markSynced } from "@/hooks/useSyncStatus";
 import { getUserTimezone, APP_TZ } from "@/lib/timezone";
 import {
   type AssetType,
@@ -223,7 +222,6 @@ export default function PortfolioPage() {
 
       await loadStats(loadedItems);
       await loadAllAlerts(user.id);
-      markSynced();
 
       const envGoldKey = process.env.NEXT_PUBLIC_GOLDAPI_KEY ?? "";
       const dbGoldKey = profileRes.data?.goldapi_key ?? "";

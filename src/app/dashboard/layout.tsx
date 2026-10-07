@@ -37,18 +37,10 @@ export default async function DashboardLayout({
           background: "var(--main-bg)",
         }}
       >
-        <div
-          className="hidden lg:block"
-          style={{
-            marginLeft: "var(--sidebar-width)",
-            width: "calc(100% - var(--sidebar-width))",
-            transition: "margin-left 0.3s ease, width 0.3s ease",
-          }}
-        >
-          <div className="page-enter min-h-screen">{children}</div>
-        </div>
-
-        <div className="lg:hidden">
+        {/* Single render — the sidebar offset is applied via CSS at the lg
+            breakpoint (.dashboard-main), so the page mounts once instead of
+            twice (no duplicate data-fetch effects). */}
+        <div className="dashboard-main">
           <div className="page-enter min-h-screen">{children}</div>
         </div>
       </main>
