@@ -24,6 +24,7 @@ type Card = {
   fee_currency: string | null;
   fee_waiver: string | null;
   forex_fee: string | null;
+  movie_perk: string | null;
   benefits: string | null;
   terms: string | null;
   source_url: string | null;
@@ -39,6 +40,7 @@ type Draft = {
   fee_currency: string;
   fee_waiver: string;
   forex_fee: string;
+  movie_perk: string;
   benefits: string;
   terms: string;
   source_url: string;
@@ -48,7 +50,7 @@ type Draft = {
 
 const EMPTY: Draft = {
   name: "", issuer: "", network: "", annual_fee: "", fee_currency: "AED",
-  fee_waiver: "", forex_fee: "", benefits: "", terms: "", source_url: "", is_active: true, rewards: [],
+  fee_waiver: "", forex_fee: "", movie_perk: "", benefits: "", terms: "", source_url: "", is_active: true, rewards: [],
 };
 
 const ACCENT = "#8b5cf6";
@@ -144,6 +146,7 @@ export default function CardsPage() {
       fee_currency: d.fee_currency.trim() || "AED",
       fee_waiver: d.fee_waiver.trim() || null,
       forex_fee: d.forex_fee.trim() || null,
+      movie_perk: d.movie_perk.trim() || null,
       benefits: d.benefits.trim() || null,
       terms: d.terms.trim() || null,
       source_url: d.source_url.trim() || null,
@@ -188,7 +191,7 @@ export default function CardsPage() {
       ? { id: c.id, draft: {
           name: c.name, issuer: c.issuer ?? "", network: c.network ?? "",
           annual_fee: c.annual_fee == null ? "" : String(c.annual_fee),
-          fee_currency: c.fee_currency ?? "AED", fee_waiver: c.fee_waiver ?? "", forex_fee: c.forex_fee ?? "",
+          fee_currency: c.fee_currency ?? "AED", fee_waiver: c.fee_waiver ?? "", forex_fee: c.forex_fee ?? "", movie_perk: c.movie_perk ?? "",
           benefits: c.benefits ?? "", terms: c.terms ?? "", source_url: c.source_url ?? "", is_active: c.is_active,
           rewards: c.rewards.map((r) => ({ ...r })),
         } }
@@ -324,6 +327,11 @@ function CardRow({
             )}
           </div>
         )}
+        {c.movie_perk && (
+          <div style={{ fontSize: 13, fontWeight: 600, padding: "8px 12px", borderRadius: 10, background: V.input, border: `1px solid ${ACCENT}`, color: V.text }}>
+            🎬 {c.movie_perk}
+          </div>
+        )}
         {c.benefits && <Field V={V} label="Benefits" value={c.benefits} />}
       </div>
 
@@ -410,6 +418,7 @@ function EditModal({
             <div style={{ flex: 1, minWidth: 140 }}><Label V={V}>Fee waiver condition</Label><input style={inp} value={d.fee_waiver} onChange={(e) => set({ fee_waiver: e.target.value })} placeholder="e.g. waived if spend 24k/yr" /></div>
             <div style={{ flex: 1, minWidth: 140 }}><Label V={V}>Foreign transaction fee</Label><input style={inp} value={d.forex_fee} onChange={(e) => set({ forex_fee: e.target.value })} placeholder="e.g. 2.61% + scheme" /></div>
           </div>
+          <div><Label V={V}>Movie perk</Label><input style={inp} value={d.movie_perk} onChange={(e) => set({ movie_perk: e.target.value })} placeholder="e.g. BOGO VOX up to 3/mo · min AED 3,500/mo" /></div>
 
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
